@@ -146,7 +146,7 @@ class ConversationManager:
         )
         await self.events.broadcast("mode_changed", {"mode": self._mode})
 
-    async def stop_conversation(self, stop_tts: bool = False) -> None:
+    async def stop_conversation(self, stop_tts: bool = True) -> None:
         self._stop_event.set()
         task = self._conversation_task
         self._conversation_task = None
@@ -600,9 +600,13 @@ class ConversationManager:
         stream = getattr(self, "_active_tts_stream", None)
         if stream:
             await stream.cancel()
+            if self._active_tts_stream is stream:
+                self._active_tts_stream = None
         capture_cancel = getattr(self, "_barge_capture_cancel", None)
         if capture_cancel:
             capture_cancel.set()
+        # Also invalidates non-streamed script/greeting playback and sends
+        # a synchronous stop command to the isolated Audio Engine.
         self.tts.stop_current()
 
     async def _speak_reply(

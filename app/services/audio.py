@@ -33,6 +33,20 @@ def _linear_resample(samples: np.ndarray, source_rate: float, target_rate: float
     return output[:, 0] if np.asarray(samples).ndim == 1 else output
 
 
+def _candidate_sample_rates(primary: float, *fallbacks: float) -> list[float]:
+    """Return unique, positive sample rates in preferred order."""
+    result: list[float] = []
+    for value in (primary, *fallbacks):
+        try:
+            rate = float(value)
+        except (TypeError, ValueError):
+            continue
+        if rate <= 0 or any(abs(rate - existing) < 1.0 for existing in result):
+            continue
+        result.append(rate)
+    return result
+
+
 def decode_pcm_wav(payload: bytes, target_rate: int = 16000) -> np.ndarray:
     """Decode a browser-generated PCM WAV file to mono float32 speech samples."""
     import io
@@ -72,17 +86,42 @@ def decode_pcm_wav(payload: bytes, target_rate: int = 16000) -> np.ndarray:
 
 
 class _SileroDetector:
+    """Per-capture VAD state backed by one cached model per audio process."""
+
+    _model_lock = threading.RLock()
+    _model = None
+    _torch_module = None
+    _load_error: Exception | None = None
+
+    @classmethod
+    def _shared_runtime(cls):
+        with cls._model_lock:
+            if cls._model is not None and cls._torch_module is not None:
+                return cls._torch_module, cls._model
+            if cls._load_error is not None:
+                raise cls._load_error
+            try:
+                import torch
+                from silero_vad import load_silero_vad
+
+                torch.set_num_threads(1)
+                cls._model = load_silero_vad(onnx=True)
+                cls._torch_module = torch
+                LOGGER.info("Silero VAD model initialized in Audio Engine")
+                return cls._torch_module, cls._model
+            except Exception as exc:
+                cls._load_error = exc
+                raise
+
     def __init__(self, sample_rate: int, silence_ms: int):
         self.sample_rate = sample_rate
         self.silence_ms = silence_ms
         self._iterator = None
         self._torch = None
         try:
-            import torch
-            from silero_vad import VADIterator, load_silero_vad
+            from silero_vad import VADIterator
 
-            torch.set_num_threads(1)
-            model = load_silero_vad(onnx=True)
+            torch, model = self._shared_runtime()
             self._iterator = VADIterator(
                 model,
                 sampling_rate=sample_rate,
@@ -91,7 +130,6 @@ class _SileroDetector:
                 speech_pad_ms=80,
             )
             self._torch = torch
-            LOGGER.info("Silero VAD initialized")
         except Exception as exc:  # optional dependency/runtime model issue
             LOGGER.warning("Silero VAD unavailable; using energy fallback: %s", exc)
 
@@ -177,16 +215,52 @@ class HostAudioRecorder:
             return []
 
     @staticmethod
+    def refresh_portaudio(settle_seconds: float = 0.35) -> None:
+        """Force PortAudio to rebuild its Windows device snapshot after hot-plug.
+
+        sounddevice keeps one PortAudio instance for the life of the process. On
+        Windows, newly connected Bluetooth/USB endpoints may not become usable
+        until that instance is reinitialized. Streams must be closed before this
+        method is called. The private functions are the official sounddevice
+        module's thin wrappers around Pa_Terminate/Pa_Initialize; when a different
+        backend or test double does not expose them, querying still remains safe.
+        """
+        try:
+            import sounddevice as sd
+        except ImportError as exc:
+            raise AudioUnavailable("sounddevice is not installed") from exc
+
+        terminate = getattr(sd, "_terminate", None)
+        initialize = getattr(sd, "_initialize", None)
+        try:
+            if callable(terminate):
+                terminate()
+            time.sleep(0.10)
+            if callable(initialize):
+                initialize()
+            # Trigger one query while the Windows endpoint graph settles.
+            try:
+                sd.query_devices()
+            except Exception:
+                pass
+            time.sleep(max(0.0, float(settle_seconds)))
+        except Exception as exc:
+            raise AudioUnavailable(f"Could not refresh the Windows audio device list: {exc}") from exc
+
+    @staticmethod
     def device_info(device_id: int | None, direction: str | None = None) -> dict | None:
         try:
             import sounddevice as sd
 
             if device_id is None:
-                if direction in {"input", "output"}:
-                    device = sd.query_devices(kind=direction)
-                    resolved_id = int(sd.default.device[0 if direction == "input" else 1])
-                else:
+                if direction not in {"input", "output"}:
                     return None
+                device = sd.query_devices(kind=direction)
+                try:
+                    raw_default = sd.default.device[0 if direction == "input" else 1]
+                    resolved_id = int(raw_default) if raw_default is not None and int(raw_default) >= 0 else None
+                except Exception:
+                    resolved_id = None
             else:
                 resolved_id = int(device_id)
                 device = sd.query_devices(resolved_id)
@@ -195,9 +269,10 @@ class HostAudioRecorder:
                 hostapi_name = str(hostapi.get("name", "Unknown"))
             except Exception:
                 hostapi_name = "Unknown"
+            fallback_name = "System default" if resolved_id is None else f"Device {resolved_id}"
             return {
                 "id": resolved_id,
-                "name": str(device.get("name", f"Device {resolved_id}")),
+                "name": str(device.get("name", fallback_name)),
                 "hostapi": hostapi_name,
                 "max_input_channels": int(device.get("max_input_channels", 0)),
                 "max_output_channels": int(device.get("max_output_channels", 0)),
@@ -268,9 +343,14 @@ class HostAudioRecorder:
         return preferred if any(int(d.get("id", -1)) == preferred for d in available) else None
 
     def health(self) -> dict:
+        with self._stream_lock:
+            capture_active = self._capture_active
+            ptt_active = self._ptt_active
         return {
             "input_locked": self.input_locked,
             "input_device": self.locked_input_device,
+            "capture_active": capture_active,
+            "ptt_active": ptt_active,
             "dropped_input_chunks": self._dropped_input_chunks,
             "input_reopen_count": self._input_reopen_count,
             "input_queue_depth": self._input_queue.qsize(),
@@ -320,7 +400,7 @@ class HostAudioRecorder:
             self._dropped_input_chunks += 1
 
     def lock_input(self, input_device: int | None = None) -> dict:
-        """Open and start the selected input endpoint once, at its native rate."""
+        """Open and start the selected input endpoint once, at a supported rate."""
         normalized = int(input_device) if input_device is not None else None
         with self._stream_lock:
             if (
@@ -340,38 +420,60 @@ class HostAudioRecorder:
         info = self.device_info(normalized, "input")
         if normalized is not None and (not info or int(info.get("max_input_channels", 0)) <= 0):
             raise AudioUnavailable("The selected microphone is unavailable or has no input channels")
+
         native_rate = float((info or {}).get("default_samplerate") or self.sample_rate)
-        # Request a block that becomes approximately 512 frames after resampling
-        # to 16 kHz, which is the window size used by Silero in this project.
-        native_blocksize = max(64, int(round(native_rate * 512.0 / self.sample_rate)))
+        candidate_rates = _candidate_sample_rates(native_rate, 48000.0, 44100.0, self.sample_rate)
+        errors: list[str] = []
         stream = None
-        try:
-            LOGGER.info(
-                "Locking persistent host microphone%s at %.0f Hz",
-                f": {info['name']} ({info['hostapi']}, device {normalized})"
-                if info
-                else " on the Windows default input",
-                native_rate,
-            )
-            self._input_samplerate = native_rate
-            stream = sd.InputStream(
-                samplerate=native_rate,
-                channels=1,
-                dtype="float32",
-                blocksize=native_blocksize,
-                device=normalized,
-                latency="low",
-                callback=self._input_callback,
-            )
-            stream.start()
-        except Exception as exc:
-            if stream is not None:
+        opened_rate = native_rate
+        for rate in candidate_rates:
+            # Request a block that becomes approximately 512 frames after
+            # resampling to 16 kHz, which is the Silero window used here.
+            native_blocksize = max(64, int(round(rate * 512.0 / self.sample_rate)))
+            for latency in ("low", "high", None):
+                kwargs = {
+                    "samplerate": rate,
+                    "channels": 1,
+                    "dtype": "float32",
+                    "blocksize": native_blocksize,
+                    "device": normalized,
+                    "callback": self._input_callback,
+                }
+                if latency is not None:
+                    kwargs["latency"] = latency
                 try:
-                    stream.close()
-                except Exception:
-                    pass
-            raise AudioUnavailable(f"Could not lock the selected host microphone: {exc}") from exc
+                    LOGGER.info(
+                        "Locking persistent host microphone%s at %.0f Hz%s",
+                        f": {info['name']} ({info['hostapi']}, device {normalized})"
+                        if info
+                        else " on the Windows default input",
+                        rate,
+                        f" with {latency} latency" if latency else "",
+                    )
+                    stream = sd.InputStream(**kwargs)
+                    stream.start()
+                    opened_rate = rate
+                    break
+                except Exception as exc:
+                    errors.append(f"{rate:.0f} Hz/{latency or 'default'}: {exc}")
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except Exception:
+                            pass
+                    stream = None
+            if stream is not None:
+                break
+
+        if stream is None:
+            detail = errors[-1] if errors else "unknown Windows audio error"
+            raise AudioUnavailable(
+                "Could not lock the selected host microphone after trying its native "
+                f"and fallback formats: {detail}"
+            )
+
         with self._stream_lock:
+            self._input_samplerate = opened_rate
             self._input_stream = stream
             self._input_device = normalized
         LOGGER.info("Persistent host microphone lock active")
@@ -655,39 +757,70 @@ class HostAudioPlayer:
         info = HostAudioRecorder.device_info(selected, "output")
         if selected is not None and (not info or int(info.get("max_output_channels", 0)) <= 0):
             raise AudioUnavailable("The selected speaker is unavailable or has no output channels")
-        sample_rate = float((info or {}).get("default_samplerate") or 48000.0)
+
+        native_rate = float((info or {}).get("default_samplerate") or 48000.0)
         max_channels = int((info or {}).get("max_output_channels") or 2)
-        channels = 2 if max_channels >= 2 else 1
-        blocksize = max(128, int(round(sample_rate * 0.02)))
+        channel_candidates = [2, 1] if max_channels >= 2 else [1]
+        rate_candidates = _candidate_sample_rates(native_rate, 48000.0, 44100.0, 16000.0)
+        errors: list[str] = []
         stream = None
-        try:
-            LOGGER.info(
-                "Locking persistent host speaker%s at %.0f Hz",
-                f": {info['name']} ({info['hostapi']}, device {selected})"
-                if info
-                else " on the Windows default output",
-                sample_rate,
-            )
-            self._sample_rate = sample_rate
-            self._channels = channels
-            stream = sd.OutputStream(
-                samplerate=sample_rate,
-                channels=channels,
-                dtype="float32",
-                blocksize=blocksize,
-                device=selected,
-                latency="low",
-                callback=self._output_callback,
-            )
-            stream.start()
-        except Exception as exc:
+        opened_rate = native_rate
+        opened_channels = channel_candidates[0]
+
+        for channels in channel_candidates:
+            for rate in rate_candidates:
+                blocksize = max(128, int(round(rate * 0.02)))
+                for latency in ("low", "high", None):
+                    kwargs = {
+                        "samplerate": rate,
+                        "channels": channels,
+                        "dtype": "float32",
+                        "blocksize": blocksize,
+                        "device": selected,
+                        "callback": self._output_callback,
+                    }
+                    if latency is not None:
+                        kwargs["latency"] = latency
+                    try:
+                        LOGGER.info(
+                            "Locking persistent host speaker%s at %.0f Hz, %d ch%s",
+                            f": {info['name']} ({info['hostapi']}, device {selected})"
+                            if info
+                            else " on the Windows default output",
+                            rate,
+                            channels,
+                            f" with {latency} latency" if latency else "",
+                        )
+                        stream = sd.OutputStream(**kwargs)
+                        stream.start()
+                        opened_rate = rate
+                        opened_channels = channels
+                        break
+                    except Exception as exc:
+                        errors.append(
+                            f"{rate:.0f} Hz/{channels} ch/{latency or 'default'}: {exc}"
+                        )
+                        if stream is not None:
+                            try:
+                                stream.close()
+                            except Exception:
+                                pass
+                        stream = None
+                if stream is not None:
+                    break
             if stream is not None:
-                try:
-                    stream.close()
-                except Exception:
-                    pass
-            raise AudioUnavailable(f"Could not lock the selected Windows speaker: {exc}") from exc
+                break
+
+        if stream is None:
+            detail = errors[-1] if errors else "unknown Windows audio error"
+            raise AudioUnavailable(
+                "Could not lock the selected Windows speaker after trying its native "
+                f"and fallback formats: {detail}"
+            )
+
         with self._lock:
+            self._sample_rate = opened_rate
+            self._channels = opened_channels
             self._stream = stream
             self._opened_device = selected
             self._refresh_required = False

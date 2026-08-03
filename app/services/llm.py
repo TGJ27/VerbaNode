@@ -11,6 +11,7 @@ import httpx
 from app.config import Settings
 from app.services.prompts import PromptComposer
 from app.services.tools import ToolService
+from app.services.text import clean_assistant_text, strip_emoji
 
 LOGGER = logging.getLogger(__name__)
 TokenCallback = Callable[[str], Awaitable[None]]
@@ -148,8 +149,9 @@ class OllamaService:
                     continue
                 payload = json.loads(line)
                 message = payload.get("message") or {}
-                content = message.get("content") or ""
+                raw_content = message.get("content") or ""
                 thinking_chars += len(message.get("thinking") or "")
+                content = strip_emoji(raw_content)
                 if content:
                     text += content
                     await on_token(content)
@@ -245,7 +247,9 @@ class OllamaService:
                     if round_text:
                         await on_token("\n")
 
-            full_text = " ".join(part.strip() for part in visible_parts if part.strip()).strip()
+            full_text = clean_assistant_text(
+                " ".join(part.strip() for part in visible_parts if part.strip())
+            )
             if not full_text and last_executed:
                 fallback = " ".join(
                     self.tools.format_result(name, result)
@@ -293,9 +297,9 @@ class OllamaService:
                 content = (response.json().get("message") or {}).get("content") or "{}"
                 data = json.loads(content)
                 return {
-                    "role": str(data.get("role") or "Custom voice assistant"),
-                    "system_prompt": str(data.get("system_prompt") or description),
-                    "greeting": str(data.get("greeting") or "Hello. How can I help you?"),
+                    "role": clean_assistant_text(str(data.get("role") or "Custom voice assistant")),
+                    "system_prompt": clean_assistant_text(str(data.get("system_prompt") or description)),
+                    "greeting": clean_assistant_text(str(data.get("greeting") or "Hello. How can I help you?")),
                 }
         except Exception as exc:
             raise OllamaUnavailable(f"Role generation failed: {exc}") from exc
@@ -321,7 +325,9 @@ class OllamaService:
                     },
                 )
                 response.raise_for_status()
-                return str((response.json().get("message") or {}).get("content") or "").strip()
+                return clean_assistant_text(
+                    str((response.json().get("message") or {}).get("content") or "")
+                )
         except Exception as exc:
             LOGGER.warning("Memory summarization failed: %s", exc)
             return previous_summary

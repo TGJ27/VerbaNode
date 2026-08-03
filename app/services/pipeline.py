@@ -40,9 +40,9 @@ class TurnContext:
 class PipelineMonitor:
     """Thread-safe state machine and lightweight latency/health recorder.
 
-    This is deliberately process-local in Phase 1. It gives every UI and log
-    consumer one authoritative pipeline state before the Audio Engine is moved
-    into a supervised child process in Phase 2.
+    The conversation pipeline remains authoritative in the core process while
+    Phase 2 isolates native microphone and speaker ownership in a supervised
+    Audio Engine child process.
     """
 
     def __init__(self) -> None:

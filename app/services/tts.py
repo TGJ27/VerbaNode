@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import Settings
+from app.services.text import clean_assistant_text
 from app.services.audio import AudioUnavailable, HostAudioPlayer
 from app.services.kokoro_voices import voice_name
 
@@ -211,7 +212,7 @@ class TtsService:
 
     @staticmethod
     def _normalise_text(text: str) -> str:
-        return " ".join(text.split()).strip()
+        return " ".join(clean_assistant_text(text).split()).strip()
 
     def _cache_path(self, provider: str, text: str, agent: dict[str, Any], namespace: str) -> Path:
         payload: dict[str, Any] = {

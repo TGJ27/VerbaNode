@@ -12,7 +12,7 @@ const appState = {
   models: [],
   kokoroVoices: [],
   audioDevices: { inputs: [], outputs: [], recommended_input: null, recommended_output: null },
-  version: '0.3.3',
+  version: '0.4.2',
   activeAgent: null,
   conversation: null,
   conversations: [],
@@ -701,6 +701,7 @@ function renderRuntimeStatus(data) {
   const stt = data.stt || {};
   const hardware = data.hardware || {};
   const audio = data.audio || {};
+  const audioEngine = audio.engine || {};
   const pipeline = data.pipeline || appState.pipeline || {};
   const latency = pipeline.latency_ms || {};
   const counters = pipeline.counters || {};
@@ -727,6 +728,11 @@ function renderRuntimeStatus(data) {
     <dt>STT model</dt><dd>${escapeHtml(stt.model || '')}</dd>
     <dt>Edge TTS</dt><dd>${edgeHealth.circuit_open ? 'Fallback active' : (tts.edge_installed ? 'Ready' : 'Missing')}</dd>
     <dt>Kokoro</dt><dd>${kokoroHealth.circuit_open ? 'Recovering' : (tts.kokoro_model_ready ? 'Ready' : 'Not downloaded')}</dd>
+    <dt>Audio Engine</dt><dd>${audioEngine.mode === 'isolated_process' ? (audioEngine.alive ? `Process ${audioEngine.pid} active` : 'Process unavailable') : 'In-process compatibility mode'}</dd>
+    <dt>Audio state</dt><dd>${escapeHtml(String(audioEngine.remote?.coordinator_state || 'idle'))}</dd>
+    <dt>Audio restarts</dt><dd>${audioEngine.restart_count ?? 0}</dd>
+    <dt>Device refreshes</dt><dd>${audioEngine.device_refresh_count ?? 0}</dd>
+    <dt>Hot-plug recoveries</dt><dd>${audioEngine.device_recovery_count ?? 0}</dd>
     <dt>Microphone lock</dt><dd>${audio.input_locked ? 'Locked and active' : 'Released'}</dd>
     <dt>Speaker lock</dt><dd>${audio.output_locked ? 'Locked and active' : 'Not opened yet'}</dd>
     <dt>Completed turns</dt><dd>${counters.turns_completed ?? 0}</dd>
@@ -1164,9 +1170,14 @@ function bindEvents() {
     const status = $('#audioDeviceStatus');
     status.textContent = 'Refreshing Windows audio devices…';
     try {
-      appState.audioDevices = await api('/api/audio/devices');
+      const result = await api('/api/audio/refresh', { method: 'POST' });
+      appState.audioDevices = result;
+      if (appState.data?.runtime_settings && result.recovery) {
+        appState.data.runtime_settings.input_device = result.recovery.input_device;
+        appState.data.runtime_settings.output_device = result.recovery.output_device;
+      }
       renderAudioDevices();
-      status.textContent = `Found ${appState.audioDevices.inputs.length} input and ${appState.audioDevices.outputs.length} output entries.`;
+      status.textContent = `Windows audio refreshed. Found ${appState.audioDevices.inputs.length} input and ${appState.audioDevices.outputs.length} output entries.`;
     } catch (error) {
       status.textContent = error.message;
       toast(error.message, 'error');
@@ -1249,6 +1260,23 @@ function bindEvents() {
     catch (error) { toast(error.message, 'error'); }
   };
   $('#refreshStatusBtn').onclick = async () => { try { const status = await api('/api/status'); renderRuntimeStatus(status); toast('Status refreshed.'); } catch (error) { toast(error.message, 'error'); } };
+  $('#restartAudioEngineBtn').onclick = async () => {
+    if (!confirm('Restart the isolated Audio Engine? Active conversation and script playback will stop.')) return;
+    const button = $('#restartAudioEngineBtn');
+    button.disabled = true;
+    button.textContent = 'Restarting…';
+    try {
+      const health = await api('/api/audio/restart-engine', { method: 'POST' });
+      const status = await api('/api/status');
+      renderRuntimeStatus(status);
+      toast(`Audio Engine restarted in process ${health.pid}.`, 'success');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Restart Audio Engine';
+    }
+  };
   $('#backupDownloadBtn').onclick = event => { event.preventDefault(); downloadAuthenticated('/api/backup', 'verbanode-backup.zip'); };
   $('#restoreFileInput').onchange = async event => {
     const file = event.target.files[0]; if (!file) return;

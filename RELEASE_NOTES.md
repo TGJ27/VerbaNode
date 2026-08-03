@@ -1,22 +1,39 @@
-# VerbaNode v0.3.3 Release Notes
+# VerbaNode v0.4.2 Phase 2 Hot-Plug Recovery Test Release
 
+## Windows audio hot-plug recovery
 
-## Highlights
-- Fixes current time/date requests being answered by the LLM when users include greetings or natural filler.
-- “Hello, what time is it?”, “Hey Ropi, tell me the time right now”, and similar phrases now execute get_current_time directly.
-- Minor ASR/typing errors such as “what day its its?” are recognized as current date/time requests.
-- Greeting handling also applies to current location, live weather, and stop-conversation commands.
-- Conservative exclusions keep time complexity, response-time, travel-time, meeting-time, and timezone questions with the LLM.
-- Direct time output uses VERBANODE_DEFAULT_TIMEZONE (Asia/Jakarta by default).
+- Added a real PortAudio refresh path for USB and Bluetooth devices connected after VerbaNode has already started.
+- **Refresh Devices** now stops active audio safely, rebuilds the Windows/PortAudio device snapshot, remaps saved device fingerprints, and returns the updated input/output list.
+- Microphone lock, speaker lock, host PTT, microphone tests, and speaker playback automatically trigger hot-plug recovery after an initial device-open failure.
+- Recovery waits through the Windows Bluetooth profile registration period, retries device enumeration, remaps changed PortAudio IDs, and restores the requested microphone/speaker lock state.
+- If PortAudio reinitialization is insufficient, VerbaNode restarts only the isolated Audio Engine process once and retries the endpoints; FastAPI, the UI, database, LLM, tools, and memory stay online.
+- Default-device opening now uses the actual Windows profile sample rate when available and tries safe fallback sample rates, channel counts, and latency modes.
+- Added device refresh and hot-plug recovery counters to Runtime Status.
 
-## Expected log for a successful direct route
-Deterministic core tool route: intent=get_current_time text='hello what time is it?'
+## Preserved v0.4.1 hardening
+
+- Emoji remains blocked by hidden prompt policy and backend sanitization before display, storage, and TTS.
+- Stop Conversation immediately cancels playback and clears pending speech.
+- Silero VAD remains cached once per Audio Engine process.
 
 ## Upgrade
-Keep your existing .git, .env, data, models, and certs directories. Copy the new repository files over the existing checkout, then run setup_database.bat and run.bat. No database migration is required for this patch.
 
-## Repository cleanup
+Keep `.git`, `.env`, `data/`, `models/`, and `certs/`. Copy the new repository files over the existing checkout, then run:
 
-- Removed device-brand-specific guidance from the dashboard.
-- Historical release changes remain in `CHANGELOG.md`.
-- This file is replaced for each new release instead of creating another versioned release-note file.
+```bat
+setup_windows.bat
+setup_database.bat
+run.bat
+```
+
+## Hardware test checklist
+
+1. Start VerbaNode with no external microphone connected.
+2. Connect the microphone or Bluetooth headset while VerbaNode remains running.
+3. Wait until Windows shows the endpoint, then press **Refresh Devices** or start Conversation Mode directly.
+4. Confirm the terminal reports `Recovering Windows audio devices` followed by `Windows audio recovery completed`.
+5. Test microphone, speaker, duplex lock, conversation mode, PTT, unplug/reconnect, and Audio Engine restart.
+
+## Test status
+
+55 automated tests pass. This remains a Phase 2 hardware test build until hot-plug behavior has been confirmed on the target Windows PC and audio devices.

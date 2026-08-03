@@ -22,6 +22,7 @@ VOICE_OUTPUT_POLICY = """VOICE OUTPUT POLICY
 - Produce natural spoken output suitable for TTS.
 - Prefer short, clear sentences and give more detail when requested.
 - Avoid markdown tables, code fences, decorative formatting, and unnecessary headings unless the user specifically asks for them.
+- Do not use emoji, emoticons, pictographs, reaction icons, or decorative symbols.
 - Do not repeatedly introduce the agent, list capabilities, or end every response with a generic offer to help."""
 
 

@@ -77,3 +77,7 @@ Deterministic routing remains outside the model for unambiguous core requests. T
 
 The deterministic built-in router now normalizes greetings, wake words, and politeness wrappers before matching. It also uses a restricted token whitelist to tolerate small ASR/typing errors for current time/date requests without hijacking unrelated phrases such as time complexity or scheduled event times. Clear current time/date, location, weather, and stop requests continue to execute before the LLM.
 
+
+## Phase 2 completion
+
+The planned boundary above is implemented in v0.4.0. Native host microphone and speaker ownership now lives in one supervised Audio Engine child process. See `PHASE2_IMPLEMENTATION.md` for the current topology, IPC boundary, watchdog, restart behavior, and compatibility mode.

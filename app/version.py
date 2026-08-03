@@ -1,2 +1,2 @@
-APP_VERSION = "0.3.3"
-BUILD_LABEL = "phase1-natural-core-tool-routing"
+APP_VERSION = "0.4.2"
+BUILD_LABEL = "phase2-windows-hotplug-recovery"

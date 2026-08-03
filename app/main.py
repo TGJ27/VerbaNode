@@ -61,6 +61,14 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.on_event("startup")
 async def startup_event() -> None:
     install_asyncio_exception_filter()
+    try:
+        if state.audio_engine is not None:
+            await asyncio.to_thread(state.audio_engine.start)
+        await asyncio.to_thread(state.reconcile_audio_devices)
+    except AudioUnavailable as exc:
+        # Keep the management UI online so the user can inspect settings and
+        # retry device operations even when the child process cannot start.
+        LOGGER.error("Audio initialization failed: %s", exc)
 
 
 @app.middleware("http")
@@ -77,8 +85,11 @@ async def disable_ui_caching(request, call_next):
 async def shutdown_event() -> None:
     await state.conversation.stop_conversation(stop_tts=True)
     await state.script_queue.stop()
-    await asyncio.to_thread(state.recorder.close)
-    await asyncio.to_thread(state.player.close)
+    if state.audio_engine is not None:
+        await asyncio.to_thread(state.audio_engine.stop)
+    else:
+        await asyncio.to_thread(state.recorder.close)
+        await asyncio.to_thread(state.player.close)
 
 
 def require_token(
@@ -279,7 +290,8 @@ async def bootstrap(token: Token) -> dict[str, Any]:
             "output_device": state.db.get_runtime_settings().get("output_device"),
             "input_locked": state.recorder.input_locked,
             "output_locked": state.player.output_locked,
-            "mode": "persistent_duplex_lock",
+            "mode": "isolated_audio_engine" if state.audio_engine is not None else "persistent_duplex_lock",
+            "engine": state.audio_engine.health() if state.audio_engine is not None else None,
         },
         "mode": state.conversation.mode,
         "tts": state.tts.status(),
@@ -324,7 +336,8 @@ async def system_status(token: Token) -> dict[str, Any]:
             "output_device": runtime.get("output_device"),
             "input_locked": state.recorder.input_locked,
             "output_locked": state.player.output_locked,
-            "mode": "persistent_duplex_lock",
+            "mode": "isolated_audio_engine" if state.audio_engine is not None else "persistent_duplex_lock",
+            "engine": state.audio_engine.health() if state.audio_engine is not None else None,
         },
         "pipeline": state.monitor.snapshot(),
         "audio_health": {
@@ -341,6 +354,7 @@ async def pipeline_status(token: Token) -> dict[str, Any]:
         "audio": {
             "input": state.recorder.health(),
             "output": state.player.health(),
+            "engine": state.audio_engine.health() if state.audio_engine is not None else None,
         },
         "tts": state.tts.status(),
     }
@@ -564,7 +578,7 @@ async def start_conversation(token: Token) -> dict[str, bool]:
 
 @app.post("/api/conversation/stop")
 async def stop_conversation(token: Token) -> dict[str, bool]:
-    await state.conversation.stop_conversation(stop_tts=False)
+    await state.conversation.stop_conversation(stop_tts=True)
     return {"ok": True}
 
 
@@ -668,6 +682,44 @@ async def stop_current_tts(token: Token) -> dict[str, bool]:
 @app.get("/api/audio/devices")
 async def audio_devices(token: Token) -> dict[str, Any]:
     return audio_device_payload()
+
+
+@app.post("/api/audio/refresh")
+async def refresh_audio_devices(token: Token) -> dict[str, Any]:
+    """Perform a real Windows/PortAudio hot-plug refresh and remap saved devices."""
+    await state.conversation.stop_conversation(stop_tts=True)
+    await state.script_queue.stop()
+    try:
+        recovery = await asyncio.to_thread(
+            state.refresh_audio_devices, "dashboard hot-plug refresh"
+        )
+        devices = audio_device_payload()
+    except AudioUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    await state.events.broadcast(
+        "audio_devices_refreshed",
+        {"devices": devices, "recovery": recovery},
+    )
+    return {**devices, "recovery": recovery}
+
+
+@app.post("/api/audio/restart-engine")
+async def restart_audio_engine(token: Token) -> dict[str, Any]:
+    if state.audio_engine is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Audio Engine process isolation is disabled in .env",
+        )
+    await state.conversation.stop_conversation(stop_tts=True)
+    await state.script_queue.stop()
+    await asyncio.to_thread(state.audio_engine.restart, "manual dashboard request")
+    if not state.audio_engine.process_alive:
+        raise HTTPException(status_code=503, detail="Audio Engine could not be restarted")
+    await asyncio.to_thread(state.reconcile_audio_devices)
+    state.monitor.increment("audio_device_recoveries")
+    health = state.audio_engine.health()
+    await state.events.broadcast("audio_engine_restarted", health)
+    return health
 
 
 @app.post("/api/audio/test-input")
@@ -818,6 +870,8 @@ async def update_conversation_settings(
         state.db.set_setting(key, "" if value is None else str(value).lower() if isinstance(value, bool) else str(value))
     updated = state.db.get_runtime_settings()
     if device_changed:
+        if state.audio_engine is not None:
+            state.audio_engine.configure_input(updated.get("input_device"))
         state.player.set_output_device(updated.get("output_device"))
         state.monitor.increment("audio_device_recoveries")
     await state.events.broadcast("runtime_settings_changed", updated)

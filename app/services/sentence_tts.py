@@ -11,6 +11,7 @@ import numpy as np
 from app.services.audio import AudioUnavailable
 from app.services.events import EventHub
 from app.services.tts import GeneratedSpeech, TtsService, TtsUnavailable
+from app.services.text import clean_assistant_text, strip_emoji
 
 LOGGER = logging.getLogger(__name__)
 
@@ -179,6 +180,9 @@ class StreamingTtsSession:
     async def feed(self, fragment: str) -> None:
         if self.cancelled.is_set() or self._input_closed:
             return
+        fragment = strip_emoji(fragment)
+        if not fragment:
+            return
         for chunk in self.chunker.feed(fragment):
             await self._enqueue(chunk)
 
@@ -209,17 +213,38 @@ class StreamingTtsSession:
         self.tts.stop_current()
 
     async def cancel(self) -> None:
+        """Stop current playback and discard all queued speech immediately."""
         self.cancel_nowait()
         self._input_closed = True
         self.chunker.flush()
+
+        # Remove text that has not started synthesis. This prevents old
+        # sentences from being generated after Stop Conversation.
+        while True:
+            try:
+                self._text_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+        # Delete already-generated temporary audio that has not started
+        # playback. The currently playing file is stopped by stop_current().
+        while True:
+            try:
+                queued = self._audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if queued is not self._END:
+                _index, _chunk, generated = queued
+                self.tts.cleanup_generated(generated)
+
         if self._generator_task:
-            await self._text_queue.put(self._END)
+            self._text_queue.put_nowait(self._END)
         else:
             self.started.set()
             self.finished.set()
 
     async def _enqueue(self, chunk: str) -> None:
-        chunk = chunk.strip()
+        chunk = clean_assistant_text(chunk)
         if not chunk or self.cancelled.is_set():
             return
         self._chunk_index += 1

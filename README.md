@@ -2,7 +2,7 @@
 
 VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
 
-**Current release:** v0.3.3 natural core-tool routing.
+**Current test release:** v0.4.2 Phase 2 Windows hot-plug recovery.
 
 ## Main features
 
@@ -15,6 +15,24 @@ VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive bro
 - Selectable host input/output devices with persistent streams and device fingerprint recovery.
 - One active controller; a valid PIN transfers control immediately.
 
+
+
+## v0.4.2 Phase 2 isolated Audio Engine and hot-plug recovery
+
+- Moves persistent Windows microphone and speaker ownership into one supervised child process.
+- Keeps microphone and speaker coordinated together instead of splitting them into competing processes.
+- Adds spawn-safe IPC proxies for capture, PTT, playback, cancellation, device tests, and health.
+- Keeps PortAudio callbacks, VAD frame buffering, and speaker buffers inside the Audio Engine; only completed utterances and audio-file paths cross IPC.
+- Adds a watchdog heartbeat, forced restart for a dead or unresponsive audio process, and restoration of selected device/lock state.
+- Keeps FastAPI, the dashboard, database, LLM, tools, prompts, memory, ASR, and TTS synthesis online if native audio fails.
+- Adds Audio Engine PID, coordinator state, heartbeat age, and restart count to runtime status.
+- Adds a protected **Restart Audio Engine** action in Settings for recovery testing.
+- Rebuilds the PortAudio device snapshot when USB/Bluetooth devices are connected while VerbaNode is running.
+- Automatically retries microphone, speaker, PTT, capture, tests, and playback after remapping saved device fingerprints.
+- Uses an Audio Engine-only restart as the final fallback when Windows keeps stale native audio handles.
+- Provides `VERBANODE_AUDIO_ENGINE_PROCESS=false` as an in-process compatibility fallback.
+
+This build requires physical Windows audio testing before it should be marked as a stable GitHub release.
 
 ## v0.3.3 natural core-tool routing
 
@@ -117,7 +135,7 @@ HTTPS is required for phone/browser microphone permission. Use `run_http.bat` on
 ## Upgrade from v0.2.6
 
 1. Back up the current installation and use the dashboard backup function for the database.
-2. Replace repository files with v0.3.3, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
+2. Replace repository files with v0.4.2, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
 3. Run:
 
 ```bat
@@ -155,15 +173,16 @@ The script requires typing `RESET` before deletion.
 
 ## Audio architecture
 
-Phase 1 keeps the persistent microphone and speaker workers coordinated inside the main application process. It adds device fingerprints, bounded queues, state tracking, and recovery metrics before the larger Phase 2 change.
+Phase 2 uses one supervised **Audio Engine child process** to own both the persistent microphone and persistent speaker endpoints. The FastAPI/LLM core communicates with it through bounded multiprocessing queues. PortAudio callbacks and frame-level buffers stay inside the child process; only completed host-microphone utterances, small status messages, and generated audio-file paths cross IPC.
 
-Phase 2 is planned to move microphone input, speaker output, VAD, device recovery, and audio coordination into one supervised Audio Engine process. Microphone and speaker should remain coordinated by that process rather than becoming fully independent processes.
+A watchdog checks the child process and restarts it when it exits or becomes unresponsive. Selected device and requested lock state are restored after restart. Microphone and speaker intentionally remain together in one process so Windows audio state is coordinated rather than contested by two independent processes. See `docs/PHASE2_IMPLEMENTATION.md`.
 
 ## Project structure
 
 ```text
 app/                         FastAPI application, services, database, and web UI
 app/services/pipeline.py     Pipeline state, identifiers, metrics, and health
+app/services/audio_engine.py Supervised child process, IPC proxies, watchdog, and restart
 scripts/                     Model, certificate, audio-test, and database utilities
 tests/                       Automated regression tests
 data/.gitkeep                Empty runtime data directory placeholder
@@ -196,6 +215,8 @@ download_kokoro.bat          Kokoro model downloader
 | `VERBANODE_TTS_CIRCUIT_OPEN_SECONDS` | Provider cooldown after repeated failure |
 | `VERBANODE_KOKORO_DIR` | Local Kokoro model folder |
 | `VERBANODE_TTS_CACHE_PATH` | Persistent script/greeting cache |
+| `VERBANODE_AUDIO_ENGINE_PROCESS` | Enable the Phase 2 isolated audio process |
+| `VERBANODE_AUDIO_ENGINE_WATCHDOG_SECONDS` | Audio process heartbeat interval |
 
 Do not commit `.env`, databases, models, certificates, backups, or TTS cache files.
 
@@ -215,12 +236,12 @@ From the existing Git repository:
 ```bat
 git status
 git add .
-git commit -m "fix: release VerbaNode v0.3.3 natural tool routing"
+git commit -m "fix: add VerbaNode v0.4.2 Windows audio hot-plug recovery"
 git push origin main
 ```
 
-Create a GitHub release tagged `v0.3.3` and use `RELEASE_NOTES.md` as the release description.
+Test this build on the target Windows audio hardware first. After validation, create a GitHub release tagged `v0.4.2` and use `RELEASE_NOTES.md` as the release description.
 
 ## Reference architecture
 
-The project was architecturally informed by the MIT-licensed `xiaozhi-esp32-server` project. VerbaNode uses a Windows-hosted topology rather than its remote ESP32 audio-device topology. See `THIRD_PARTY_NOTICES.md`, `docs/PIPELINE_COMPARISON.md`, and `docs/PHASE1_IMPLEMENTATION.md`.
+The project was architecturally informed by the MIT-licensed `xiaozhi-esp32-server` project. VerbaNode uses a Windows-hosted topology rather than its remote ESP32 audio-device topology. See `THIRD_PARTY_NOTICES.md`, `docs/PIPELINE_COMPARISON.md`, `docs/PHASE1_IMPLEMENTATION.md`, and `docs/PHASE2_IMPLEMENTATION.md`.

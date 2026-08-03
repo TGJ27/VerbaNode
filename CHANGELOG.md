@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.4.2
+
+- Added a real Windows/PortAudio hot-plug refresh operation inside the isolated Audio Engine.
+- Changed the dashboard Refresh Devices action from passive enumeration to safe audio shutdown, PortAudio reinitialization, fingerprint remapping, and updated device enumeration.
+- Added automatic recovery and retry for microphone locking, speaker locking, host PTT, microphone tests, utterance capture, and speaker playback.
+- Added an 8–10 second staged retry window for Bluetooth/USB endpoint registration after connection.
+- Added a final Audio Engine process restart fallback when a PortAudio refresh cannot reopen the requested endpoints.
+- Improved default-device inspection so the active Windows profile sample rate is used even when the default numeric ID is temporarily unavailable.
+- Added fallback sample-rate, channel, and latency negotiation for Windows input/output streams.
+- Added device refresh count, hot-plug recovery count, and last recovery reason to runtime health.
+- Added regression tests for PortAudio reinitialization, default-device profile inspection, and proxy-level hot-plug retries.
+
+## 0.4.1
+
+- Added a hidden no-emoji output policy and backend Unicode sanitization for streamed chat, stored assistant messages, generated roles/greetings, summaries, and TTS input.
+- Discarded emoji-only TTS chunks so reaction icons cannot create empty or delayed speech requests.
+- Changed Stop Conversation to stop current playback and clear pending sentence/audio queues immediately by default.
+- Kept Stop Current TTS effective for both streamed assistant speech and non-streamed scripts/greetings through the isolated Audio Engine.
+- Cached the Silero VAD model once per Audio Engine process instead of initializing it for every conversation turn.
+- Added Phase 2 regression tests for output sanitization, multilingual text preservation, emoji-free TTS, and default stop behavior.
+
+## 0.4.0
+
+- Moved native host microphone and speaker ownership into one supervised Audio Engine child process.
+- Added spawn-safe command/response IPC proxies for device enumeration, persistent locks, host PTT, utterance capture, playback, cancellation, tests, and health.
+- Kept VAD, PortAudio callbacks, input frame queues, and speaker buffers inside the child process so per-frame audio does not cross IPC.
+- Added an Audio Engine watchdog, automatic process restart, in-flight call failure handling, and restoration of requested device/lock state.
+- Added Audio Engine PID, coordinator state, heartbeat age, and restart count to API and dashboard runtime status.
+- Added an authenticated dashboard action to stop active audio work and manually restart the Audio Engine.
+- Added `VERBANODE_AUDIO_ENGINE_PROCESS=false` compatibility mode for troubleshooting.
+- Added process lifecycle, proxy-health, restart, and error-translation tests.
+- Preserved the v0.3.3 database, UI, layered prompt architecture, natural tool routing, Edge/Kokoro fallback, and browser-device PTT behavior.
+
 ## 0.3.3
 
 - Expanded deterministic core-tool routing to ignore natural greetings, wake words, and polite wrappers such as “hello Ropi” and “please”.
