@@ -1,0 +1,1222 @@
+'use strict';
+
+const appState = {
+  token: sessionStorage.getItem('verbanode_token') || '',
+  ws: null,
+  reconnectTimer: null,
+  data: null,
+  agents: [],
+  information: [],
+  scripts: [],
+  queue: [],
+  models: [],
+  kokoroVoices: [],
+  audioDevices: { inputs: [], outputs: [], recommended_input: null, recommended_output: null },
+  version: '0.2.6',
+  activeAgent: null,
+  conversation: null,
+  conversations: [],
+  messages: [],
+  mode: 'idle',
+  queueState: 'paused',
+  streaming: new Map(),
+  pttToggleActive: false,
+  holdPttActive: false,
+  browserPttHeld: false,
+  browserPttStarting: false,
+  browserPttActive: false,
+  browserPttStream: null,
+  browserPttContext: null,
+  browserPttSource: null,
+  browserPttProcessor: null,
+  browserPttGain: null,
+  browserPttChunks: [],
+  browserPttSampleRate: 0,
+};
+
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+function escapeHtml(value = '') {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function formatTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function bytesLabel(bytes = 0) {
+  if (!bytes) return 'Unknown size';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) { value /= 1024; index += 1; }
+  return `${value.toFixed(index > 1 ? 1 : 0)} ${units[index]}`;
+}
+
+function toast(message, type = '') {
+  const node = document.createElement('div');
+  node.className = `toast ${type}`;
+  node.textContent = message;
+  $('#toastRoot').appendChild(node);
+  setTimeout(() => node.remove(), 4300);
+}
+
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (appState.token) headers.set('X-Session-Token', appState.token);
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  const response = await fetch(path, { ...options, headers });
+  if (response.status === 401) {
+    resetToLogin('Your controller session ended.');
+    throw new Error('Controller session ended');
+  }
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || payload.message || detail;
+    } catch (_) {}
+    throw new Error(detail);
+  }
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) return response.json();
+  return response;
+}
+
+function resetToLogin(message = '') {
+  sessionStorage.removeItem('verbanode_token');
+  appState.token = '';
+  if (appState.ws) { try { appState.ws.close(); } catch (_) {} }
+  try { appState.browserPttStream?.getTracks().forEach(track => track.stop()); } catch (_) {}
+  appState.browserPttStream = null;
+  appState.ws = null;
+  $('#appShell').classList.add('hidden');
+  $('#loginView').classList.remove('hidden');
+  if (message) {
+    $('#loginStatus').textContent = message;
+    $('#loginStatus').classList.remove('hidden');
+  }
+}
+
+async function login(pin, clientName, forceTakeover = false) {
+  const response = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin, client_name: clientName, force_takeover: forceTakeover }),
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch (_) {}
+  if (response.status === 401) throw new Error('Incorrect PIN');
+  if (!response.ok) throw new Error(payload.detail || 'Login failed');
+
+  if (payload.takeover_required) {
+    const activeClient = payload.active_client || 'another device';
+    const approved = window.confirm(
+      `${activeClient} is currently controlling the application. Take over control now?`
+    );
+    if (!approved) {
+      $('#loginStatus').textContent = 'Takeover cancelled.';
+      $('#loginStatus').classList.remove('hidden');
+      return;
+    }
+    return login(pin, clientName, true);
+  }
+
+  if (!payload.token) throw new Error('Login failed');
+  await completeLogin(payload.token);
+  if (payload.takeover) toast(`Control transferred from ${payload.previous_client || 'the previous device'}.`);
+}
+
+async function waitForTakeover(requestId, activeClient) {
+  const status = $('#loginStatus');
+  status.classList.remove('hidden');
+  status.textContent = `Waiting for ${activeClient || 'the active controller'} to approve takeover…`;
+  const started = Date.now();
+  while (Date.now() - started < 35000) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const response = await fetch(`/api/auth/takeover/${requestId}`);
+    const payload = await response.json();
+    if (payload.status === 'approved' && payload.token) {
+      await completeLogin(payload.token);
+      return;
+    }
+    if (payload.status === 'rejected' || payload.status === 'not_found') {
+      throw new Error('Takeover was rejected or timed out');
+    }
+  }
+  throw new Error('Takeover request timed out');
+}
+
+async function validateStoredSession() {
+  if (!appState.token) return false;
+  try {
+    const response = await fetch('/api/heartbeat', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'X-Session-Token': appState.token },
+    });
+    if (response.status === 401) {
+      resetToLogin('Your previous session expired. Enter the PIN again.');
+      return false;
+    }
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return true;
+  } catch (error) {
+    resetToLogin('Could not validate the saved session. Enter the PIN again.');
+    return false;
+  }
+}
+
+async function completeLogin(token, validateFirst = false) {
+  appState.token = token;
+  sessionStorage.setItem('verbanode_token', token);
+  if (validateFirst && !(await validateStoredSession())) return;
+  $('#loginView').classList.add('hidden');
+  $('#appShell').classList.remove('hidden');
+  $('#loginStatus').classList.add('hidden');
+  connectWebSocket();
+  try {
+    await loadBootstrap();
+  } catch (error) {
+    toast(error.message, 'error');
+    resetToLogin('Could not load application data.');
+  }
+}
+
+async function reconnectWebSocketAfterValidation() {
+  if (!appState.token) return;
+  if (!(await validateStoredSession())) return;
+  connectWebSocket();
+}
+
+function connectWebSocket() {
+  if (!appState.token) return;
+  if (appState.ws) { try { appState.ws.close(); } catch (_) {} }
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${protocol}//${location.host}/ws?token=${encodeURIComponent(appState.token)}`);
+  appState.ws = ws;
+  ws.onopen = () => {
+    $('#connectionDot').classList.add('online');
+    $('#connectionLabel').textContent = 'Connected';
+  };
+  ws.onclose = event => {
+    $('#connectionDot').classList.remove('online');
+    if (!appState.token) {
+      $('#connectionLabel').textContent = 'Disconnected';
+      return;
+    }
+    if (event.code === 4401) {
+      resetToLogin('Your controller session expired. Enter the PIN again.');
+      return;
+    }
+    $('#connectionLabel').textContent = 'Reconnecting…';
+    clearTimeout(appState.reconnectTimer);
+    // A WebSocket rejected before acceptance is reported by browsers as code
+    // 1006, even when the server rejected an expired token with HTTP 403.
+    // Validate the HTTP session before attempting another WebSocket so an old
+    // token cannot create an endless 403 reconnect loop.
+    appState.reconnectTimer = setTimeout(reconnectWebSocketAfterValidation, 1500);
+  };
+  ws.onerror = () => ws.close();
+  ws.onmessage = event => {
+    try { handleEvent(JSON.parse(event.data)); } catch (error) { console.error(error); }
+  };
+}
+
+function wsCommand(command, data = {}) {
+  if (!appState.ws || appState.ws.readyState !== WebSocket.OPEN) {
+    toast('Live connection is not ready.', 'error');
+    return false;
+  }
+  appState.ws.send(JSON.stringify({ command, ...data }));
+  return true;
+}
+
+
+function browserMicrophoneSupported() {
+  return Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext));
+}
+
+function updateBrowserMicSupport() {
+  const button = $('#browserPttBtn');
+  const hint = $('#browserMicHint');
+  if (!button || !hint) return;
+  const supported = browserMicrophoneSupported();
+  button.disabled = !supported;
+  if (supported) {
+    hint.textContent = 'The recording is uploaded after you release. TTS still plays through the Windows host.';
+  } else if (!window.isSecureContext) {
+    hint.textContent = 'Device microphone requires HTTPS. Restart VerbaNode with run.bat, open the HTTPS address, trust the local certificate, then reload.';
+  } else {
+    hint.textContent = 'This browser does not provide microphone capture support.';
+  }
+}
+
+function mergeFloat32Chunks(chunks) {
+  const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Float32Array(length);
+  let offset = 0;
+  chunks.forEach(chunk => { merged.set(chunk, offset); offset += chunk.length; });
+  return merged;
+}
+
+function downsampleMono(input, sourceRate, targetRate = 16000) {
+  if (!input.length || sourceRate <= targetRate) return input;
+  const ratio = sourceRate / targetRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Float32Array(outputLength);
+  let inputOffset = 0;
+  for (let index = 0; index < outputLength; index += 1) {
+    const nextOffset = Math.min(input.length, Math.round((index + 1) * ratio));
+    let sum = 0;
+    let count = 0;
+    for (; inputOffset < nextOffset; inputOffset += 1) { sum += input[inputOffset]; count += 1; }
+    output[index] = count ? sum / count : 0;
+  }
+  return output;
+}
+
+function encodePcm16Wav(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const writeText = (offset, text) => { for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index)); };
+  writeText(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true); writeText(8, 'WAVE');
+  writeText(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  writeText(36, 'data'); view.setUint32(40, samples.length * 2, true);
+  let offset = 44;
+  samples.forEach(sample => {
+    const clipped = Math.max(-1, Math.min(1, sample));
+    view.setInt16(offset, clipped < 0 ? clipped * 32768 : clipped * 32767, true);
+    offset += 2;
+  });
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function cleanupBrowserPttCapture() {
+  const processor = appState.browserPttProcessor;
+  const source = appState.browserPttSource;
+  const gain = appState.browserPttGain;
+  const context = appState.browserPttContext;
+  const stream = appState.browserPttStream;
+  appState.browserPttProcessor = null;
+  appState.browserPttSource = null;
+  appState.browserPttGain = null;
+  appState.browserPttContext = null;
+  appState.browserPttStream = null;
+  try { if (processor) { processor.onaudioprocess = null; processor.disconnect(); } } catch (_) {}
+  try { source?.disconnect(); } catch (_) {}
+  try { gain?.disconnect(); } catch (_) {}
+  try { stream?.getTracks().forEach(track => track.stop()); } catch (_) {}
+  try { if (context && context.state !== 'closed') await context.close(); } catch (_) {}
+}
+
+async function cancelBrowserPttCapture(showMessage = false) {
+  appState.browserPttHeld = false;
+  appState.browserPttStarting = false;
+  appState.browserPttActive = false;
+  $('#browserPttBtn')?.classList.remove('active');
+  await cleanupBrowserPttCapture();
+  try { await api('/api/browser-ptt/cancel', { method: 'POST' }); } catch (_) {}
+  if (showMessage) toast('Dashboard microphone recording was cancelled.');
+}
+
+async function startBrowserPttCapture(event) {
+  event?.preventDefault();
+  if (appState.browserPttHeld || appState.browserPttStarting || appState.browserPttActive) return;
+  if (!browserMicrophoneSupported()) {
+    updateBrowserMicSupport();
+    toast(window.isSecureContext ? 'This browser cannot capture its microphone.' : 'Phone microphone access requires HTTPS. Restart with run.bat and open the HTTPS address.', 'error');
+    return;
+  }
+  appState.browserPttHeld = true;
+  appState.browserPttStarting = true;
+  const button = $('#browserPttBtn');
+  button?.classList.add('active');
+  try {
+    await api('/api/browser-ptt/start', { method: 'POST' });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: false,
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    if (!appState.browserPttHeld) {
+      stream.getTracks().forEach(track => track.stop());
+      await cancelBrowserPttCapture(false);
+      return;
+    }
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const context = new AudioContextClass();
+    await context.resume();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const gain = context.createGain();
+    gain.gain.value = 0;
+    appState.browserPttChunks = [];
+    appState.browserPttSampleRate = context.sampleRate;
+    processor.onaudioprocess = audioEvent => {
+      if (!appState.browserPttActive) return;
+      appState.browserPttChunks.push(new Float32Array(audioEvent.inputBuffer.getChannelData(0)));
+    };
+    source.connect(processor);
+    processor.connect(gain);
+    gain.connect(context.destination);
+    appState.browserPttStream = stream;
+    appState.browserPttContext = context;
+    appState.browserPttSource = source;
+    appState.browserPttProcessor = processor;
+    appState.browserPttGain = gain;
+    appState.browserPttActive = true;
+    setLiveStatus('recording', 'Dashboard device PTT', 'Recording this phone or browser microphone');
+  } catch (error) {
+    await cancelBrowserPttCapture(false);
+    const permissionHint = error?.name === 'NotAllowedError' ? ' Microphone permission was denied.' : '';
+    toast(`${error.message || 'Could not start dashboard microphone.'}${permissionHint}`, 'error');
+  } finally {
+    appState.browserPttStarting = false;
+  }
+}
+
+async function stopBrowserPttCapture(event) {
+  event?.preventDefault();
+  if (!appState.browserPttHeld && !appState.browserPttActive) return;
+  appState.browserPttHeld = false;
+  const button = $('#browserPttBtn');
+  button?.classList.remove('active');
+  if (appState.browserPttStarting && !appState.browserPttActive) return;
+  if (!appState.browserPttActive) return;
+  appState.browserPttActive = false;
+  const chunks = appState.browserPttChunks;
+  const sourceRate = appState.browserPttSampleRate || 48000;
+  appState.browserPttChunks = [];
+  await cleanupBrowserPttCapture();
+  const merged = mergeFloat32Chunks(chunks);
+  const samples = downsampleMono(merged, sourceRate, 16000);
+  if (samples.length < 1600) {
+    await cancelBrowserPttCapture(false);
+    toast('Hold the dashboard microphone button a little longer.', 'error');
+    return;
+  }
+  setLiveStatus('thinking', 'Uploading speech', 'Sending dashboard microphone audio to the Windows host');
+  const form = new FormData();
+  form.append('file', encodePcm16Wav(samples, 16000), 'dashboard-ptt.wav');
+  try {
+    await api('/api/browser-ptt/audio', { method: 'POST', body: form });
+  } catch (error) {
+    try { await api('/api/browser-ptt/cancel', { method: 'POST' }); } catch (_) {}
+    toast(error.message, 'error');
+    setLiveStatus('idle', 'Ready', 'Waiting for input');
+  }
+}
+
+async function loadBootstrap() {
+  const data = await api('/api/bootstrap');
+  appState.data = data;
+  appState.agents = data.agents || [];
+  appState.information = data.information || [];
+  appState.scripts = data.scripts || [];
+  appState.queue = data.queue || [];
+  appState.models = data.models || [];
+  appState.kokoroVoices = data.kokoro_voices || [];
+  appState.audioDevices = data.audio_devices || appState.audioDevices;
+  appState.version = data.version || appState.version;
+  appState.activeAgent = data.active_agent;
+  appState.conversation = data.conversation;
+  appState.conversations = data.conversations || [];
+  appState.messages = data.messages || [];
+  appState.mode = data.mode || 'idle';
+  appState.queueState = data.queue_state || 'paused';
+  renderAll();
+  if (data.ollama_error) toast(data.ollama_error, 'error');
+}
+
+function renderAll() {
+  if ($('#appVersion')) $('#appVersion').textContent = `v${appState.version}`;
+  renderActiveAgent();
+  renderMessages();
+  renderConversations();
+  renderAgents();
+  renderInformation();
+  renderScripts();
+  renderQueue();
+  renderSettings();
+  renderModels();
+  renderRuntimeStatus(appState.data || {});
+  setMode(appState.mode);
+  updateBrowserMicSupport();
+}
+
+function renderActiveAgent() {
+  const agent = appState.activeAgent;
+  if (!agent) return;
+  $('#activeAgentMini').innerHTML = `
+    <div class="agent-mini-row">
+      <div class="agent-avatar" style="background:${escapeHtml(agent.color)}">${escapeHtml(agent.avatar || 'VA')}</div>
+      <div><strong>${escapeHtml(agent.name)}</strong><small>${escapeHtml(agent.llm_model)}</small></div>
+    </div>`;
+  $('#chatAgentIdentity').innerHTML = `
+    <div class="agent-avatar" style="background:${escapeHtml(agent.color)}">${escapeHtml(agent.avatar || 'VA')}</div>
+    <div><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.role)} · ${escapeHtml(agent.llm_model)}</p></div>`;
+  document.documentElement.style.setProperty('--active-agent', agent.color || '#6c63ff');
+}
+
+
+function messageListNearBottom(list = $('#messageList'), threshold = 96) {
+  return list.scrollHeight - list.scrollTop - list.clientHeight <= threshold;
+}
+
+function scrollMessagesToBottom(force = false) {
+  const list = $('#messageList');
+  if (force || messageListNearBottom(list)) {
+    requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
+  }
+}
+
+function renderMessages() {
+  const list = $('#messageList');
+  appState.streaming.clear();
+  if (!appState.messages.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">◉</div><h3>Start a conversation</h3><p>Use continuous mode, push to talk, or type below. Replies will be spoken by the Windows host.</p></div>`;
+    return;
+  }
+  list.innerHTML = appState.messages.map(messageHtml).join('');
+  scrollMessagesToBottom(true);
+}
+
+function messageHtml(message) {
+  const role = message.role === 'user' ? 'user' : 'assistant';
+  const hasConfidence = message.stt_confidence !== null && message.stt_confidence !== undefined && message.stt_confidence !== '';
+  const confidence = Number(message.stt_confidence);
+  const confidenceLabel = role === 'user' && hasConfidence && Number.isFinite(confidence)
+    ? ` · estimated STT ${Math.round(confidence * 100)}%`
+    : '';
+  const sourceLabel = role === 'user' && message.source === 'browser_ptt' ? ' · dashboard mic' : '';
+  return `<article class="message ${role}" data-message-id="${message.id || ''}">
+    <div class="message-bubble">${escapeHtml(message.content)}</div>
+    <div class="message-meta">${role === 'user' ? 'You' : escapeHtml(appState.activeAgent?.name || 'Assistant')} · ${formatTime(message.created_at)}${sourceLabel}${confidenceLabel}</div>
+  </article>`;
+}
+
+function appendRejectedTranscript(data) {
+  const list = $('#messageList');
+  const stickToBottom = messageListNearBottom(list);
+  $('.empty-state', list)?.remove();
+  const confidence = Number(data.confidence_percent ?? Math.round(Number(data.confidence || 0) * 100));
+  const threshold = Number(data.threshold_percent ?? Math.round(Number(data.threshold || 0) * 100));
+  const node = document.createElement('article');
+  node.className = 'message user rejected-transcript';
+  node.innerHTML = `<div class="message-bubble">${escapeHtml(data.text || '')}</div>
+    <div class="message-meta">Not sent to agent · estimated STT ${confidence}% · threshold ${threshold}%</div>`;
+  list.appendChild(node);
+  if (stickToBottom) scrollMessagesToBottom(true);
+  setLiveStatus('idle', 'Ready', 'Low-confidence transcript was not sent');
+}
+
+function appendMessage(message) {
+  const list = $('#messageList');
+  const stickToBottom = messageListNearBottom(list);
+  $('.empty-state', list)?.remove();
+  if ($(`[data-message-id="${message.id}"]`, list)) return;
+  list.insertAdjacentHTML('beforeend', messageHtml(message));
+  if (stickToBottom) scrollMessagesToBottom(true);
+  appState.messages.push(message);
+}
+
+function beginAssistantStream(data) {
+  const list = $('#messageList');
+  $('.empty-state', list)?.remove();
+  const node = document.createElement('article');
+  node.className = 'message assistant';
+  node.dataset.generationId = data.generation_id;
+  node.innerHTML = `<div class="message-bubble typing-cursor"></div><div class="message-meta">${escapeHtml(appState.activeAgent?.name || 'Assistant')} · generating</div>`;
+  list.appendChild(node);
+  appState.streaming.set(data.generation_id, { node, text: '' });
+  scrollMessagesToBottom(true);
+  setLiveStatus('thinking', 'Generating reply', 'Ollama is producing a response');
+}
+
+function appendAssistantToken(data) {
+  const stream = appState.streaming.get(data.generation_id);
+  if (!stream) return;
+  const list = $('#messageList');
+  const stickToBottom = messageListNearBottom(list);
+  stream.text += data.token || '';
+  $('.message-bubble', stream.node).textContent = stream.text;
+  if (stickToBottom) scrollMessagesToBottom(true);
+}
+
+function completeAssistantStream(data) {
+  const stream = appState.streaming.get(data.generation_id);
+  if (stream) {
+    stream.node.dataset.messageId = data.message.id;
+    $('.message-bubble', stream.node).textContent = data.message.content;
+    $('.message-bubble', stream.node).classList.remove('typing-cursor');
+    $('.message-meta', stream.node).textContent = `${appState.activeAgent?.name || 'Assistant'} · ${formatTime(data.message.created_at)}`;
+    appState.streaming.delete(data.generation_id);
+    appState.messages.push(data.message);
+  } else {
+    appendMessage(data.message);
+  }
+  setLiveStatus('idle', 'Ready', 'Waiting for input');
+}
+
+function renderConversations() {
+  const select = $('#conversationSelect');
+  select.innerHTML = appState.conversations.map(conversation => `<option value="${conversation.id}" ${conversation.id === appState.conversation?.id ? 'selected' : ''}>${escapeHtml(conversation.title)} (${conversation.message_count ?? 0})</option>`).join('');
+}
+
+function renderAgents() {
+  const grid = $('#agentGrid');
+  grid.innerHTML = appState.agents.map(agent => {
+    const active = agent.id === appState.activeAgent?.id;
+    return `<article class="card agent-card ${active ? 'active' : ''}" style="--agent-color:${escapeHtml(agent.color)}">
+      <div class="agent-card-head"><div class="agent-avatar" style="background:${escapeHtml(agent.color)}">${escapeHtml(agent.avatar || 'VA')}</div><div><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.role)}</p></div></div>
+      <div class="agent-card-body">${escapeHtml(agent.greeting)}</div>
+      <div class="agent-card-meta"><span class="chip">${escapeHtml(agent.llm_model)}</span><span class="chip">${escapeHtml(agent.tts_mode)}</span><span class="chip">${escapeHtml(agent.kokoro_voice_name || 'Kokoro voice')}</span><span class="chip">${agent.info_ids?.length || 0} info</span></div>
+      <div class="agent-card-actions">
+        ${active ? '<button class="btn success compact" disabled>Active</button>' : `<button class="btn secondary compact" data-activate-agent="${agent.id}">Use agent</button>`}
+        <button class="btn ghost compact" data-edit-agent="${agent.id}">Edit</button>
+        <button class="btn danger-outline compact" data-delete-agent="${agent.id}">Delete</button>
+      </div>
+    </article>`;
+  }).join('');
+}
+
+function renderInformation() {
+  const list = $('#informationList');
+  if (!appState.information.length) {
+    list.innerHTML = `<div class="card queue-empty">No information entries yet.</div>`;
+    return;
+  }
+  list.innerHTML = appState.information.map(item => `<article class="card info-item">
+    <div><div class="enabled-pill ${item.enabled ? '' : 'off'}">● ${item.enabled ? 'Enabled' : 'Disabled'}</div><h3>${escapeHtml(item.title)}</h3><div class="info-preview">${escapeHtml(item.content)}</div></div>
+    <div class="item-actions"><button class="btn ghost compact" data-edit-info="${item.id}">Edit</button><button class="btn danger-outline compact" data-delete-info="${item.id}">Delete</button></div>
+  </article>`).join('');
+}
+
+function renderScripts() {
+  const grid = $('#scriptGrid');
+  if (!appState.scripts.length) grid.innerHTML = `<div class="card queue-empty">No scripts yet.</div>`;
+  else grid.innerHTML = appState.scripts.map(script => `<article class="card script-card">
+    <div class="card-title-row"><h3>${escapeHtml(script.title)}</h3><span class="enabled-pill ${script.enabled ? '' : 'off'}">● ${script.enabled ? 'Ready' : 'Disabled'}</span></div>
+    <p>${escapeHtml(script.text)}</p>
+    <div class="script-actions"><button class="btn success compact" data-run-script="${script.id}" ${script.enabled ? '' : 'disabled'}>▶ Run now</button><button class="btn secondary compact" data-queue-script="${script.id}" ${script.enabled ? '' : 'disabled'}>＋ Queue</button><button class="icon-btn" data-edit-script="${script.id}" title="Edit">✎</button></div>
+  </article>`).join('');
+  $('#quickScripts').innerHTML = appState.scripts.filter(script => script.enabled).slice(0, 4).map(script => `<div class="quick-script"><span>${escapeHtml(script.title)}</span><button class="btn secondary compact" data-run-script="${script.id}">▶</button></div>`).join('') || '<p class="tiny muted">No enabled scripts.</p>';
+}
+
+function renderQueue() {
+  const count = appState.queue.length;
+  $('#queueBadge').textContent = count;
+  $('#queueBadge').classList.toggle('hidden', count === 0);
+  $('#queueStateChip').textContent = appState.queueState === 'playing' ? 'Playing' : 'Paused';
+  const html = count ? appState.queue.map((item, index) => `<div class="queue-item">
+    <span class="queue-number">${index + 1}</span><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status)}</small></div><button class="icon-btn" data-remove-queue="${item.id}" title="Remove">×</button>
+  </div>`).join('') : `<div class="queue-empty">Queue is empty.<br>Add scripts or use Run now.</div>`;
+  $('#queueList').innerHTML = html;
+  $('#drawerQueueList').innerHTML = html;
+}
+
+function renderSettings() {
+  const settings = appState.data?.runtime_settings || {};
+  $('#interruptionToggle').checked = Boolean(settings.interruption_enabled);
+  $('#silenceInput').value = settings.silence_ms || 900;
+  $('#maxRecordInput').value = settings.max_record_seconds || 30;
+  $('#sttConfidenceFilterToggle').checked = settings.stt_confidence_filter_enabled !== false;
+  $('#sttConfidenceThresholdInput').value = Math.round(Number(settings.stt_confidence_threshold ?? 0.88) * 100);
+  renderAudioDevices();
+}
+
+function audioDeviceLabel(device, direction) {
+  const channels = direction === 'input' ? device.max_input_channels : device.max_output_channels;
+  const flags = [];
+  if ((direction === 'input' && device.recommended_input) || (direction === 'output' && device.recommended_output)) flags.push('recommended');
+  if ((direction === 'input' && device.is_default_input) || (direction === 'output' && device.is_default_output)) flags.push('Windows default');
+  const suffix = flags.length ? ` · ${flags.join(', ')}` : '';
+  return `${device.name} · ${device.hostapi} · ${channels} ch${suffix}`;
+}
+
+function renderAudioDevices() {
+  const inputs = appState.audioDevices?.inputs || [];
+  const outputs = appState.audioDevices?.outputs || [];
+  const settings = appState.data?.runtime_settings || {};
+  const savedInput = settings.input_device;
+  const savedOutput = settings.output_device;
+  const selectedInput = savedInput ?? appState.audioDevices?.recommended_input ?? '';
+  const selectedOutput = savedOutput ?? appState.audioDevices?.recommended_output ?? '';
+
+  const inputSelect = $('#inputDeviceSelect');
+  const outputSelect = $('#outputDeviceSelect');
+  if (!inputSelect || !outputSelect) return;
+
+  inputSelect.innerHTML = `<option value="">Use Windows default input</option>${inputs.map(device => `<option value="${device.id}">${escapeHtml(audioDeviceLabel(device, 'input'))}</option>`).join('')}`;
+  outputSelect.innerHTML = `<option value="">Use Windows default output</option>${outputs.map(device => `<option value="${device.id}">${escapeHtml(audioDeviceLabel(device, 'output'))}</option>`).join('')}`;
+  inputSelect.value = selectedInput === null || selectedInput === undefined ? '' : String(selectedInput);
+  outputSelect.value = selectedOutput === null || selectedOutput === undefined ? '' : String(selectedOutput);
+
+  updateAudioDeviceHints();
+}
+
+function updateAudioDeviceHints() {
+  const inputs = appState.audioDevices?.inputs || [];
+  const outputs = appState.audioDevices?.outputs || [];
+  const inputSelect = $('#inputDeviceSelect');
+  const outputSelect = $('#outputDeviceSelect');
+  if (!inputSelect || !outputSelect) return;
+  const input = inputs.find(device => String(device.id) === inputSelect.value);
+  const output = outputs.find(device => String(device.id) === outputSelect.value);
+  $('#inputDeviceHint').textContent = input
+    ? `Selected: ${input.name} through ${input.hostapi}. ${input.recommended_input ? 'DJI Mic detected.' : ''}`
+    : 'Using the Windows default input. Select the DJI Mic explicitly to prevent Bluetooth profile switching.';
+  $('#outputDeviceHint').textContent = output
+    ? `Selected: ${output.name} through ${output.hostapi}. ${output.recommended_output ? 'JYX output detected.' : ''}`
+    : 'Using the Windows default output. Select Headphones (JYX-N882) explicitly.';
+}
+
+function selectedAudioDeviceId(selector) {
+  const value = $(selector)?.value ?? '';
+  return value === '' ? null : Number(value);
+}
+
+function renderModels() {
+  const box = $('#ollamaStatusBox');
+  if (appState.data?.ollama_error) box.innerHTML = `<strong>Ollama unavailable</strong><br>${escapeHtml(appState.data.ollama_error)}`;
+  else box.innerHTML = `<strong>Ollama connected</strong><br>${appState.models.length} local model${appState.models.length === 1 ? '' : 's'} available.`;
+  $('#modelList').innerHTML = appState.models.map(model => `<div class="model-item"><div><strong>${escapeHtml(model.name || model.model)}</strong><small>${escapeHtml(model.details?.parameter_size || '')} ${escapeHtml(model.details?.quantization_level || '')}</small></div><span class="chip">${bytesLabel(model.size)}</span></div>`).join('') || '<div class="queue-empty">No local models reported.</div>';
+}
+
+function renderRuntimeStatus(data) {
+  const tts = data.tts || {};
+  const stt = data.stt || {};
+  const hardware = data.hardware || {};
+  const audio = data.audio || {};
+  $('#runtimeStatusList').innerHTML = `
+    <dt>CPU threads</dt><dd>${hardware.cpu_count ?? 'Unknown'}</dd>
+    <dt>Total RAM</dt><dd>${hardware.ram_total_gb ?? 'Unknown'} GB</dd>
+    <dt>Available RAM</dt><dd>${hardware.ram_available_gb ?? 'Unknown'} GB</dd>
+    <dt>FunASR</dt><dd>${stt.installed ? 'Installed' : 'Missing'}</dd>
+    <dt>STT model</dt><dd>${escapeHtml(stt.model || '')}</dd>
+    <dt>Edge TTS</dt><dd>${tts.edge_installed ? 'Installed' : 'Missing'}</dd>
+    <dt>Kokoro runtime</dt><dd>${tts.kokoro_installed ? 'Installed' : 'Missing'}</dd>
+    <dt>Kokoro model</dt><dd>${tts.kokoro_model_ready ? 'Ready' : 'Not downloaded'}</dd>
+    <dt>Microphone lock</dt><dd>${audio.input_locked ? 'Locked and active' : 'Released'}</dd>
+    <dt>Speaker lock</dt><dd>${audio.output_locked ? 'Locked and active' : 'Not opened yet'}</dd>
+    <dt>Audio mode</dt><dd>Persistent duplex streams</dd>`;
+  $('#ttsProviderStatus').textContent = appState.activeAgent?.kokoro_voice_name || appState.activeAgent?.tts_mode || 'TTS';
+}
+
+function setMode(mode) {
+  appState.mode = mode || 'idle';
+  const active = mode !== 'idle';
+  $('#modeBadge').textContent = mode.toUpperCase();
+  $('#modeBadge').classList.toggle('active', active);
+  $('#togglePttBtn').textContent = appState.pttToggleActive ? 'Stop host push to talk' : 'Start host push to talk';
+  if (mode === 'conversation') setLiveStatus('listening', 'Conversation mode', 'Listening on the Windows host');
+  else if (mode === 'ptt') setLiveStatus('recording', 'Host push to talk', 'Recording the Windows host microphone');
+  else if (mode === 'browser_ptt') setLiveStatus('recording', 'Dashboard device PTT', 'Recording this phone or browser microphone');
+  else if (mode === 'processing') setLiveStatus('thinking', 'Processing speech', 'The Windows host is transcribing the dashboard recording');
+  else setLiveStatus('idle', 'Ready', 'Waiting for input');
+}
+
+function setLiveStatus(kind, title, detail) {
+  const box = $('#liveStatus');
+  box.className = `live-status ${kind}`;
+  $('#liveStatusTitle').textContent = title;
+  $('#liveStatusDetail').textContent = detail;
+}
+
+function setSpeaking(active, text = '', meta = {}) {
+  $('.audio-bars').classList.toggle('active', active);
+  $('#nowSpeakingText').textContent = active ? (text || 'Preparing speech…') : 'Nothing is playing.';
+  if (active) {
+    const provider = meta.provider || (meta.phase === 'preparing' ? 'preparing' : appState.activeAgent?.tts_mode || 'TTS');
+    const suffix = meta.cached ? ' · cached' : '';
+    $('#ttsProviderStatus').textContent = `${provider}${suffix}`;
+    const detail = meta.phase === 'generating' ? 'Generating the next sentence on the Windows host' : 'Audio is playing through the Windows host';
+    setLiveStatus('speaking', meta.phase === 'generating' ? 'Preparing speech' : 'Speaking', detail);
+  } else {
+    $('#ttsProviderStatus').textContent = appState.activeAgent?.kokoro_voice_name || appState.activeAgent?.tts_mode || 'TTS';
+    if (appState.mode === 'conversation') setLiveStatus('listening', 'Conversation mode', 'Listening on the Windows host');
+    else setLiveStatus('idle', 'Ready', 'Waiting for input');
+  }
+}
+
+function handleEvent(message) {
+  const { event, data } = message;
+  switch (event) {
+    case 'connected': setMode(data?.mode || 'idle'); break;
+    case 'mode_changed':
+      if (data?.recording === false) {
+        appState.pttToggleActive = false; appState.holdPttActive = false; $('#holdPttBtn').classList.remove('active');
+        if (data?.input_source === 'browser') { appState.browserPttHeld = false; appState.browserPttActive = false; $('#browserPttBtn')?.classList.remove('active'); }
+      }
+      setMode(data?.mode || 'idle');
+      break;
+    case 'listening':
+      if (data?.active) setLiveStatus('listening', 'Listening', 'Waiting for speech on the Windows host');
+      break;
+    case 'stt_started': setLiveStatus('thinking', 'Transcribing', 'FunASR is processing speech'); break;
+    case 'assistant_start': beginAssistantStream(data); break;
+    case 'assistant_token': appendAssistantToken(data); break;
+    case 'assistant_complete': completeAssistantStream(data); break;
+    case 'message_added': appendMessage(data); break;
+    case 'tts_started': setSpeaking(true, data?.text, { phase: data?.phase || 'preparing' }); break;
+    case 'tts_chunk_generating': setSpeaking(true, data?.text, { phase: 'generating' }); break;
+    case 'tts_chunk': setSpeaking(true, data?.text, { phase: 'playing', provider: data?.provider, cached: data?.cached }); break;
+    case 'tts_stopped': setSpeaking(false); break;
+    case 'transcript':
+      if (data?.accepted === false) appendRejectedTranscript(data);
+      else toast(`Heard (${data?.confidence_percent ?? '?'}% estimated): ${data.text}`);
+      break;
+    case 'queue_state': appState.queueState = data.state; appState.queue = data.items || []; renderQueue(); break;
+    case 'agents_changed': appState.agents = data || []; renderAgents(); break;
+    case 'information_changed': appState.information = data || []; renderInformation(); break;
+    case 'scripts_changed': appState.scripts = data || []; renderScripts(); break;
+    case 'agent_changed':
+      appState.activeAgent = data.agent; appState.conversation = data.conversation;
+      refreshAgentWorkspace();
+      break;
+    case 'conversation_changed':
+      appState.conversation = data;
+      refreshConversationsAndMessages();
+      break;
+    case 'conversation_cleared':
+      if (data.conversation_id === appState.conversation?.id) { appState.messages = []; renderMessages(); }
+      break;
+    case 'models_changed': appState.models = data || []; appState.data.ollama_error = null; renderModels(); break;
+    case 'model_pull': toast(`${data.model}: ${data.status}`); break;
+    case 'runtime_settings_changed': appState.data.runtime_settings = data; renderSettings(); break;
+    case 'audio_lock_changed':
+      appState.data.audio = { ...(appState.data.audio || {}), ...(data || {}) };
+      $('#audioDeviceStatus').textContent = data?.input_locked
+        ? 'Persistent audio lock active: JYX output and DJI microphone are both open.'
+        : (data?.output_locked ? 'Microphone released; JYX output remains locked for scripts and TTS.' : 'Audio locks released.');
+      renderRuntimeStatus(appState.data);
+      break;
+    case 'control_revoked': resetToLogin('Control was transferred to another device.'); break;
+    case 'reload_required': location.reload(); break;
+    case 'error': toast(data?.message || 'Runtime error', 'error'); setLiveStatus('idle', 'Ready', 'Waiting for input'); break;
+    default: break;
+  }
+}
+
+async function refreshAgentWorkspace() {
+  try {
+    const data = await api('/api/bootstrap');
+    appState.data = data;
+    appState.agents = data.agents;
+    appState.activeAgent = data.active_agent;
+    appState.conversation = data.conversation;
+    appState.conversations = data.conversations;
+    appState.messages = data.messages;
+    appState.information = data.information;
+    appState.scripts = data.scripts;
+    appState.queue = data.queue;
+    appState.models = data.models;
+    appState.kokoroVoices = data.kokoro_voices || appState.kokoroVoices;
+    appState.version = data.version || appState.version;
+    renderAll();
+    navigate('chat');
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function refreshConversationsAndMessages() {
+  try {
+    const conversations = await api(`/api/agents/${appState.activeAgent.id}/conversations`);
+    appState.conversations = conversations;
+    const result = await api(`/api/conversations/${appState.conversation.id}`);
+    appState.messages = result.messages;
+    renderConversations(); renderMessages();
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+function navigate(page) {
+  $$('.page').forEach(node => node.classList.toggle('active', node.id === `page-${page}`));
+  $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.classList.toggle('active', node.dataset.page === page));
+  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Information'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], settings: ['SYSTEM', 'Settings'] };
+  $('#pageEyebrow').textContent = titles[page]?.[0] || '';
+  $('#pageTitle').textContent = titles[page]?.[1] || page;
+  closeMobileNav();
+}
+
+function openMobileNav() {
+  $('#sidebar').classList.add('open');
+  $('#sidebarBackdrop').classList.remove('hidden');
+}
+function closeMobileNav() {
+  $('#sidebar').classList.remove('open');
+  $('#sidebarBackdrop').classList.add('hidden');
+}
+
+function closeModal() { $('#modalRoot').innerHTML = ''; }
+
+function agentDefaults() {
+  return {
+    name: 'New Agent', color: '#6c63ff', avatar: 'NA', role: 'General voice assistant',
+    system_prompt: 'You are a concise English-speaking voice assistant. Always answer in English.',
+    greeting: 'Hello. How can I help you?', llm_model: appState.models.find(model => model.name === 'qwen3.5:0.8b')?.name || appState.models[0]?.name || 'qwen3.5:0.8b',
+    temperature: 0.2, top_p: 0.8, max_tokens: 224, context_size: 4096, tts_mode: 'edge_fallback',
+    edge_voice: 'en-US-AriaNeural', kokoro_voice_id: 0, tts_rate: 1.0, tts_volume: 1.0,
+    stt_model: 'iic/SenseVoiceSmall', tools_enabled: ['get_current_time','get_location','get_weather','handle_exit_intent'], info_ids: [],
+  };
+}
+
+function openAgentModal(agentId = null) {
+  const agent = agentId ? appState.agents.find(item => item.id === Number(agentId)) : agentDefaults();
+  if (!agent) return;
+  const fragment = $('#agentModalTemplate').content.cloneNode(true);
+  $('#modalRoot').replaceChildren(fragment);
+  $('#agentModalTitle').textContent = agentId ? `Edit ${agent.name}` : 'Create agent';
+  const form = $('#agentForm');
+  for (const [key, value] of Object.entries(agent)) {
+    const field = form.elements.namedItem(key);
+    if (field && !['tools_enabled','info_ids'].includes(key)) field.value = value ?? '';
+  }
+  const modelSelect = form.elements.namedItem('llm_model');
+  const modelNames = [...new Set([agent.llm_model, ...appState.models.map(model => model.name || model.model)].filter(Boolean))];
+  modelSelect.innerHTML = modelNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  modelSelect.value = agent.llm_model;
+  const voiceSelect = form.elements.namedItem('kokoro_voice_id');
+  const voices = appState.kokoroVoices.length ? appState.kokoroVoices : [
+    { id: 0, name: 'af_maple', category: 'American female' },
+    { id: 1, name: 'af_sol', category: 'American female' },
+    { id: 2, name: 'bf_vale', category: 'British female' },
+  ];
+  voiceSelect.innerHTML = voices.map(voice => `<option value="${voice.id}">${escapeHtml(voice.name)} — ${escapeHtml(voice.category)}</option>`).join('');
+  voiceSelect.value = String(agent.kokoro_voice_id ?? 0);
+  const tools = [
+    ['get_current_time','Current time'], ['get_location','Configured location'], ['get_weather','Weather'], ['handle_exit_intent','Stop conversation intent'],
+  ];
+  $('#toolCheckboxes').innerHTML = tools.map(([value,label]) => `<label class="check-item"><input type="checkbox" name="tool" value="${value}" ${(agent.tools_enabled || []).includes(value) ? 'checked' : ''}><span><strong>${label}</strong><small>${value}</small></span></label>`).join('');
+  $('#agentInfoCheckboxes').innerHTML = appState.information.map(item => `<label class="check-item"><input type="checkbox" name="info" value="${item.id}" ${(agent.info_ids || []).includes(item.id) ? 'checked' : ''}><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.content.slice(0,130))}</small></span></label>`).join('') || '<div class="queue-empty">Create global information entries first.</div>';
+  const conversations = agentId ? appState.conversations.filter(() => agent.id === appState.activeAgent?.id) : [];
+  $('#agentMemoryStats').innerHTML = agentId ? `<strong>${conversations.length || 'Saved'} conversation workspace</strong><br>Memory contains complete chat history plus automatic summaries.` : 'Save the agent before managing memory.';
+  $('#backupAgentBtn').disabled = !agentId;
+  $('#clearAgentMemoryBtn').disabled = !agentId;
+  wireModalBasics();
+  $$('#agentTabs button').forEach(button => button.onclick = () => {
+    $$('#agentTabs button').forEach(item => item.classList.toggle('active', item === button));
+    $$('.tab-panel', form).forEach(panel => panel.classList.toggle('active', panel.dataset.panel === button.dataset.tab));
+  });
+  $('#generateRoleBtn').onclick = async () => {
+    const description = $('#roleDescription').value.trim();
+    if (!description) return toast('Describe the agent first.', 'error');
+    const button = $('#generateRoleBtn'); button.disabled = true; button.textContent = 'Generating…';
+    try {
+      const result = await api('/api/agents/generate-role', { method: 'POST', body: JSON.stringify({ description, model: modelSelect.value }) });
+      form.elements.namedItem('role').value = result.role;
+      form.elements.namedItem('system_prompt').value = result.system_prompt;
+      form.elements.namedItem('greeting').value = result.greeting;
+      toast('Role configuration generated.', 'success');
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; button.textContent = 'Generate role, prompt, and greeting'; }
+  };
+  $('#backupAgentBtn').onclick = () => downloadAuthenticated(`/api/agents/${agent.id}/backup`, `agent-${agent.id}-backup.json`);
+  $('#clearAgentMemoryBtn').onclick = async () => {
+    if (!confirm(`Clear all conversations and summaries for ${agent.name}?`)) return;
+    try { await api(`/api/agents/${agent.id}/memory`, { method: 'DELETE' }); toast('Agent memory cleared.', 'success'); closeModal(); await refreshAgentWorkspace(); }
+    catch (error) { toast(error.message, 'error'); }
+  };
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const values = Object.fromEntries(new FormData(form).entries());
+    const payload = {
+      name: values.name, color: values.color, avatar: values.avatar, role: values.role,
+      system_prompt: values.system_prompt, greeting: values.greeting, llm_model: values.llm_model,
+      temperature: Number(values.temperature), top_p: Number(values.top_p), max_tokens: Number(values.max_tokens), context_size: Number(values.context_size),
+      tts_mode: values.tts_mode, edge_voice: values.edge_voice, kokoro_voice_id: Number(values.kokoro_voice_id),
+      tts_rate: Number(values.tts_rate), tts_volume: Number(values.tts_volume), stt_model: values.stt_model,
+      tools_enabled: $$('input[name="tool"]:checked', form).map(input => input.value),
+      info_ids: $$('input[name="info"]:checked', form).map(input => Number(input.value)),
+    };
+    try {
+      if (agentId) await api(`/api/agents/${agentId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      else await api('/api/agents', { method: 'POST', body: JSON.stringify(payload) });
+      closeModal();
+      appState.agents = await api('/api/agents');
+      renderAgents();
+      toast(`Agent ${agentId ? 'updated' : 'created'}.`, 'success');
+    } catch (error) { toast(error.message, 'error'); }
+  };
+}
+
+function wireModalBasics() { $$('[data-close-modal]').forEach(node => node.onclick = closeModal); }
+
+function openSimpleModal(kind, item = null) {
+  const fragment = $('#simpleModalTemplate').content.cloneNode(true);
+  $('#modalRoot').replaceChildren(fragment);
+  const form = $('#simpleModalForm');
+  const title = kind === 'info' ? `${item ? 'Edit' : 'Add'} information` : `${item ? 'Edit' : 'Create'} script`;
+  $('#simpleModalTitle').textContent = title;
+  if (kind === 'info') {
+    $('#simpleModalFields').innerHTML = `<label>Title<input name="title" required value="${escapeHtml(item?.title || '')}"></label><label>Full text<textarea name="content" rows="10" required>${escapeHtml(item?.content || '')}</textarea></label><label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>`;
+  } else {
+    $('#simpleModalFields').innerHTML = `<label>Button title<input name="title" required value="${escapeHtml(item?.title || '')}"></label><label>Spoken text<textarea name="text" rows="8" required>${escapeHtml(item?.text || '')}</textarea></label><label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>${item ? '<button type="button" id="deleteSimpleItem" class="btn danger-outline">Delete</button>' : ''}`;
+  }
+  wireModalBasics();
+  if (item && $('#deleteSimpleItem')) $('#deleteSimpleItem').onclick = async () => {
+    if (!confirm(`Delete ${item.title}?`)) return;
+    try {
+      await api(`/api/${kind === 'info' ? 'information' : 'scripts'}/${item.id}`, { method: 'DELETE' });
+      closeModal();
+      if (kind === 'info') { appState.information = await api('/api/information'); renderInformation(); }
+      else { appState.scripts = await api('/api/scripts'); renderScripts(); }
+    } catch (error) { toast(error.message, 'error'); }
+  };
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const fd = new FormData(form);
+    const payload = kind === 'info'
+      ? { title: fd.get('title'), content: fd.get('content'), enabled: Boolean(form.elements.namedItem('enabled').checked) }
+      : { title: fd.get('title'), text: fd.get('text'), enabled: Boolean(form.elements.namedItem('enabled').checked) };
+    const base = kind === 'info' ? '/api/information' : '/api/scripts';
+    try {
+      await api(item ? `${base}/${item.id}` : base, { method: item ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      closeModal();
+      if (kind === 'info') { appState.information = await api('/api/information'); renderInformation(); }
+      else { appState.scripts = await api('/api/scripts'); renderScripts(); }
+      toast(`${kind === 'info' ? 'Information' : 'Script'} saved.`, 'success');
+    } catch (error) { toast(error.message, 'error'); }
+  };
+}
+
+async function runScript(id) {
+  try { await api(`/api/scripts/${id}/run-now`, { method: 'POST' }); toast('Running script now. Queue cleared.', 'success'); }
+  catch (error) { toast(error.message, 'error'); }
+}
+async function queueScript(id) {
+  try { await api(`/api/scripts/${id}/queue`, { method: 'POST' }); toast('Script added to queue.', 'success'); }
+  catch (error) { toast(error.message, 'error'); }
+}
+async function queueAction(action) {
+  const method = action === 'clear' ? 'DELETE' : 'POST';
+  const path = action === 'clear' ? '/api/queue' : `/api/queue/${action}`;
+  try { await api(path, { method }); }
+  catch (error) { toast(error.message, 'error'); }
+}
+
+async function downloadAuthenticated(url, filename) {
+  try {
+    const response = await api(url);
+    const blob = await response.blob();
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = href; link.download = filename; link.click();
+    setTimeout(() => URL.revokeObjectURL(href), 2000);
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+function openQueueDrawer() { $('#queueDrawer').classList.remove('hidden'); }
+function closeQueueDrawer() { $('#queueDrawer').classList.add('hidden'); }
+
+function bindEvents() {
+  $('#loginForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = $('button[type="submit"]', event.currentTarget);
+    button.disabled = true; button.textContent = 'Connecting…';
+    try { await login($('#pinInput').value, $('#clientName').value || 'Browser'); }
+    catch (error) { $('#loginStatus').textContent = error.message; $('#loginStatus').classList.remove('hidden'); }
+    finally { button.disabled = false; button.textContent = 'Connect'; }
+  });
+  $('#logoutBtn').onclick = async () => { try { await api('/api/auth/logout', { method: 'POST' }); } catch (_) {} resetToLogin(); };
+  $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.onclick = () => navigate(node.dataset.page));
+  $$('[data-nav]').forEach(node => node.onclick = () => navigate(node.dataset.nav));
+  $('#mobileMenuBtn').onclick = openMobileNav; $('#mobileCloseNav').onclick = closeMobileNav; $('#sidebarBackdrop').onclick = closeMobileNav;
+  $('#queueQuickBtn').onclick = openQueueDrawer; $$('[data-close-drawer]').forEach(node => node.onclick = closeQueueDrawer);
+  $('#drawerPlayQueue').onclick = () => queueAction('play'); $('#drawerClearQueue').onclick = () => queueAction('clear');
+
+  const stopTts = async () => { try { await api('/api/tts/stop', { method: 'POST' }); } catch (error) { toast(error.message, 'error'); } };
+  $('#stopTtsTopBtn').onclick = stopTts; $('#stopTtsBtn').onclick = stopTts;
+  $('#startConversationBtn').onclick = async () => { try { await api('/api/conversation/start', { method: 'POST' }); } catch (error) { toast(error.message, 'error'); } };
+  $('#stopConversationBtn').onclick = async () => { try { await api('/api/conversation/stop', { method: 'POST' }); } catch (error) { toast(error.message, 'error'); } };
+
+  const hold = $('#holdPttBtn');
+  const startHold = event => { event.preventDefault(); if (appState.holdPttActive) return; appState.holdPttActive = true; hold.classList.add('active'); wsCommand('ptt_start'); };
+  const stopHold = event => { event?.preventDefault(); if (!appState.holdPttActive) return; appState.holdPttActive = false; hold.classList.remove('active'); wsCommand('ptt_stop'); };
+  hold.addEventListener('pointerdown', startHold); hold.addEventListener('pointerup', stopHold); hold.addEventListener('pointercancel', stopHold); hold.addEventListener('pointerleave', event => { if (event.buttons === 0) stopHold(event); });
+  $('#togglePttBtn').onclick = () => {
+    appState.pttToggleActive = !appState.pttToggleActive;
+    wsCommand(appState.pttToggleActive ? 'ptt_start' : 'ptt_stop');
+    $('#togglePttBtn').textContent = appState.pttToggleActive ? 'Stop host push to talk' : 'Start host push to talk';
+  };
+
+  const browserPtt = $('#browserPttBtn');
+  browserPtt.addEventListener('pointerdown', startBrowserPttCapture);
+  browserPtt.addEventListener('pointerup', stopBrowserPttCapture);
+  browserPtt.addEventListener('pointercancel', () => cancelBrowserPttCapture(false));
+  browserPtt.addEventListener('contextmenu', event => event.preventDefault());
+
+  $('#chatForm').onsubmit = async event => {
+    event.preventDefault();
+    const text = $('#chatInput').value.trim();
+    if (!text) return;
+    $('#chatInput').value = ''; autoResizeChatInput();
+    try { await api('/api/chat/send', { method: 'POST', body: JSON.stringify({ text, conversation_id: appState.conversation?.id }) }); }
+    catch (error) { toast(error.message, 'error'); }
+  };
+  $('#chatInput').addEventListener('input', autoResizeChatInput);
+  $('#chatInput').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#chatForm').requestSubmit(); } });
+  $('#newChatBtn').onclick = async () => { try { appState.conversation = await api('/api/conversations', { method: 'POST', body: JSON.stringify({ title: null }) }); appState.messages = []; await refreshConversationsAndMessages(); } catch (error) { toast(error.message, 'error'); } };
+  $('#conversationSelect').onchange = async event => {
+    try { const result = await api(`/api/conversations/${event.target.value}`); appState.conversation = result.conversation; appState.messages = result.messages; renderMessages(); renderConversations(); }
+    catch (error) { toast(error.message, 'error'); }
+  };
+
+  $('#addAgentBtn').onclick = () => openAgentModal(); $('#quickAddAgent').onclick = () => openAgentModal();
+  $('#addInfoBtn').onclick = () => openSimpleModal('info'); $('#addScriptBtn').onclick = () => openSimpleModal('script');
+
+  document.addEventListener('click', async event => {
+    const target = event.target.closest('[data-edit-agent],[data-activate-agent],[data-delete-agent],[data-edit-info],[data-delete-info],[data-edit-script],[data-run-script],[data-queue-script],[data-remove-queue]');
+    if (!target) return;
+    if (target.dataset.editAgent) openAgentModal(Number(target.dataset.editAgent));
+    else if (target.dataset.activateAgent) {
+      try { await api(`/api/agents/${target.dataset.activateAgent}/activate`, { method: 'POST' }); }
+      catch (error) { toast(error.message, 'error'); }
+    } else if (target.dataset.deleteAgent) {
+      const agent = appState.agents.find(item => item.id === Number(target.dataset.deleteAgent));
+      if (!confirm(`Delete ${agent?.name || 'this agent'} and all of its memory?`)) return;
+      try { await api(`/api/agents/${target.dataset.deleteAgent}`, { method: 'DELETE' }); appState.agents = await api('/api/agents'); renderAgents(); }
+      catch (error) { toast(error.message, 'error'); }
+    } else if (target.dataset.editInfo) openSimpleModal('info', appState.information.find(item => item.id === Number(target.dataset.editInfo)));
+    else if (target.dataset.deleteInfo) {
+      const item = appState.information.find(value => value.id === Number(target.dataset.deleteInfo)); if (!confirm(`Delete ${item?.title || 'this information'}?`)) return;
+      try { await api(`/api/information/${target.dataset.deleteInfo}`, { method: 'DELETE' }); appState.information = await api('/api/information'); renderInformation(); }
+      catch (error) { toast(error.message, 'error'); }
+    } else if (target.dataset.editScript) openSimpleModal('script', appState.scripts.find(item => item.id === Number(target.dataset.editScript)));
+    else if (target.dataset.runScript) runScript(Number(target.dataset.runScript));
+    else if (target.dataset.queueScript) queueScript(Number(target.dataset.queueScript));
+    else if (target.dataset.removeQueue) { try { await api(`/api/queue/${target.dataset.removeQueue}`, { method: 'DELETE' }); } catch (error) { toast(error.message, 'error'); } }
+  });
+
+  $('#playQueueBtn').onclick = () => queueAction('play'); $('#pauseQueueBtn').onclick = () => queueAction('pause'); $('#stopQueueBtn').onclick = () => queueAction('stop'); $('#clearQueueBtn').onclick = () => queueAction('clear');
+  $('#inputDeviceSelect').onchange = updateAudioDeviceHints;
+  $('#outputDeviceSelect').onchange = updateAudioDeviceHints;
+  $('#refreshAudioDevicesBtn').onclick = async () => {
+    const status = $('#audioDeviceStatus');
+    status.textContent = 'Refreshing Windows audio devices…';
+    try {
+      appState.audioDevices = await api('/api/audio/devices');
+      renderAudioDevices();
+      status.textContent = `Found ${appState.audioDevices.inputs.length} input and ${appState.audioDevices.outputs.length} output entries.`;
+    } catch (error) {
+      status.textContent = error.message;
+      toast(error.message, 'error');
+    }
+  };
+  $('#testInputDeviceBtn').onclick = async () => {
+    const status = $('#audioDeviceStatus');
+    status.textContent = 'Recording the selected microphone for 1.5 seconds… Speak now.';
+    try {
+      const result = await api('/api/audio/test-input', {
+        method: 'POST',
+        body: JSON.stringify({ input_device: selectedAudioDeviceId('#inputDeviceSelect'), output_device: null }),
+      });
+      status.textContent = `Microphone OK: ${result.device_name} (${result.hostapi}). Peak ${result.peak_percent}%, RMS ${result.rms_percent}%.`;
+      toast('Microphone test completed.', 'success');
+    } catch (error) {
+      status.textContent = error.message;
+      toast(error.message, 'error');
+    }
+  };
+  $('#testOutputDeviceBtn').onclick = async () => {
+    const status = $('#audioDeviceStatus');
+    status.textContent = 'Playing a short tone through the selected speaker…';
+    try {
+      const result = await api('/api/audio/test-output', {
+        method: 'POST',
+        body: JSON.stringify({ input_device: null, output_device: selectedAudioDeviceId('#outputDeviceSelect') }),
+      });
+      status.textContent = `Speaker OK: ${result.device_name} (${result.hostapi}).`;
+      toast('Speaker test completed.', 'success');
+    } catch (error) {
+      status.textContent = error.message;
+      toast(error.message, 'error');
+    }
+  };
+  $('#testDuplexLockBtn').onclick = async () => {
+    const status = $('#audioDeviceStatus');
+    status.textContent = 'Opening JYX first, then DJI, and playing a tone while both streams stay active…';
+    try {
+      const result = await api('/api/audio/test-duplex-lock', {
+        method: 'POST',
+        body: JSON.stringify({
+          input_device: selectedAudioDeviceId('#inputDeviceSelect'),
+          output_device: selectedAudioDeviceId('#outputDeviceSelect'),
+        }),
+      });
+      status.textContent = `Duplex lock OK: ${result.output.name} stayed active while ${result.input.name} was open.`;
+      toast('Both audio devices stayed locked.', 'success');
+    } catch (error) {
+      status.textContent = error.message;
+      toast(error.message, 'error');
+    }
+  };
+  const saveRuntimeSettings = async () => {
+    const thresholdPercent = Math.max(0, Math.min(100, Number($('#sttConfidenceThresholdInput').value)));
+    const payload = {
+      interruption_enabled: $('#interruptionToggle').checked,
+      silence_ms: Number($('#silenceInput').value),
+      max_record_seconds: Number($('#maxRecordInput').value),
+      stt_confidence_filter_enabled: $('#sttConfidenceFilterToggle').checked,
+      stt_confidence_threshold: thresholdPercent / 100,
+      input_device: selectedAudioDeviceId('#inputDeviceSelect'),
+      output_device: selectedAudioDeviceId('#outputDeviceSelect'),
+    };
+    try {
+      appState.data.runtime_settings = await api('/api/conversation/settings', { method: 'PUT', body: JSON.stringify(payload) });
+      renderSettings();
+      $('#audioDeviceStatus').textContent = 'Audio devices saved. Conversation mode will lock JYX first, then keep JYX and DJI open together.';
+      toast('Conversation and audio settings saved.', 'success');
+    } catch (error) {
+      $('#audioDeviceStatus').textContent = error.message;
+      toast(error.message, 'error');
+    }
+  };
+  $('#saveRuntimeSettingsBtn').onclick = saveRuntimeSettings;
+  $('#saveAudioDevicesBtn').onclick = saveRuntimeSettings;
+  $('#pullModelForm').onsubmit = async event => {
+    event.preventDefault(); const model = $('#pullModelInput').value.trim(); if (!model) return;
+    try { await api(`/api/models/pull/${encodeURIComponent(model)}`, { method: 'POST' }); toast(`Started pulling ${model}.`); }
+    catch (error) { toast(error.message, 'error'); }
+  };
+  $('#refreshStatusBtn').onclick = async () => { try { const status = await api('/api/status'); renderRuntimeStatus(status); toast('Status refreshed.'); } catch (error) { toast(error.message, 'error'); } };
+  $('#backupDownloadBtn').onclick = event => { event.preventDefault(); downloadAuthenticated('/api/backup', 'verbanode-backup.zip'); };
+  $('#restoreFileInput').onchange = async event => {
+    const file = event.target.files[0]; if (!file) return;
+    if (!confirm('Restore this backup and replace the current database?')) { event.target.value = ''; return; }
+    const body = new FormData(); body.append('file', file);
+    try { await api('/api/restore', { method: 'POST', body }); toast('Backup restored. Reloading…', 'success'); setTimeout(() => location.reload(), 1000); }
+    catch (error) { toast(error.message, 'error'); }
+  };
+
+  setInterval(() => {
+    if (appState.ws?.readyState === WebSocket.OPEN) wsCommand('heartbeat');
+    if (appState.token) api('/api/heartbeat', { method: 'POST' }).catch(() => {});
+  }, 15000);
+}
+
+function autoResizeChatInput() {
+  const input = $('#chatInput'); input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 130)}px`;
+}
+
+window.addEventListener('beforeunload', () => {
+  try { appState.browserPttStream?.getTracks().forEach(track => track.stop()); } catch (_) {}
+});
+
+bindEvents();
+updateBrowserMicSupport();
+if (appState.token) {
+  const status = $('#loginStatus');
+  status.textContent = 'Checking saved controller session…';
+  status.classList.remove('hidden');
+  completeLogin(appState.token, true);
+}

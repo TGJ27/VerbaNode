@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#11131a">
+  <title>VerbaNode</title>
+  <link rel="stylesheet" href="/static/styles.css?v=0.2.6">
+</head>
+<body>
+  <div id="toastRoot" class="toast-root" aria-live="polite"></div>
+
+  <section id="loginView" class="login-view">
+    <div class="login-card">
+      <div class="brand-mark large">VN</div>
+      <p class="eyebrow">LOCAL VOICE SYSTEM</p>
+      <h1>VerbaNode</h1>
+      <p class="muted">Windows voice assistant · browser control panel</p>
+      <form id="loginForm" class="stack gap-12">
+        <label>Controller name
+          <input id="clientName" value="My browser" maxlength="80" autocomplete="nickname">
+        </label>
+        <label>Access PIN
+          <input id="pinInput" type="password" inputmode="numeric" placeholder="Enter PIN" required autocomplete="current-password">
+        </label>
+        <button class="btn primary full" type="submit">Connect</button>
+      </form>
+      <div id="loginStatus" class="login-status hidden"></div>
+      <p class="tiny muted center">TTS always plays through the Windows host. Voice input can use the host microphone or this browser device.</p>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell hidden">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">VN</div>
+        <div>
+          <strong>VerbaNode</strong>
+          <span>VerbaNode · <b id="appVersion">v0.2.6</b></span>
+        </div>
+        <button id="mobileCloseNav" class="icon-btn mobile-only" aria-label="Close menu">×</button>
+      </div>
+
+      <nav class="nav-list" id="navList">
+        <button class="nav-item active" data-page="chat"><span>◉</span>Conversation</button>
+        <button class="nav-item" data-page="agents"><span>◇</span>Agents</button>
+        <button class="nav-item" data-page="information"><span>▤</span>Information</button>
+        <button class="nav-item" data-page="scripts"><span>▶</span>Scripts & Queue</button>
+        <button class="nav-item" data-page="settings"><span>⚙</span>Settings</button>
+      </nav>
+
+      <div class="sidebar-section">
+        <div class="section-heading">
+          <span>ACTIVE AGENT</span>
+          <button id="quickAddAgent" class="mini-btn">＋</button>
+        </div>
+        <div id="activeAgentMini" class="active-agent-mini"></div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="status-line"><span id="connectionDot" class="dot online"></span><span id="connectionLabel">Connected</span></div>
+        <button id="logoutBtn" class="btn ghost full small">Disconnect</button>
+      </div>
+    </aside>
+
+    <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="mobileMenuBtn" class="icon-btn mobile-only" aria-label="Open menu">☰</button>
+          <div>
+            <p id="pageEyebrow" class="eyebrow">VOICE WORKSPACE</p>
+            <h2 id="pageTitle">Conversation</h2>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <div class="host-audio-chip" title="TTS plays on the Windows host; voice input can use host or dashboard device">
+            <span class="pulse-dot"></span> Host speaker
+          </div>
+          <button id="stopTtsTopBtn" class="btn danger-outline compact">■ Stop Current TTS</button>
+          <button id="queueQuickBtn" class="icon-btn badge-wrap" title="Open script queue">≡<span id="queueBadge" class="badge hidden">0</span></button>
+        </div>
+      </header>
+
+      <section id="page-chat" class="page active">
+        <div class="conversation-layout">
+          <section class="chat-panel card">
+            <div class="chat-header">
+              <div id="chatAgentIdentity" class="agent-identity"></div>
+              <div class="chat-header-actions">
+                <select id="conversationSelect" title="Conversation history"></select>
+                <button id="newChatBtn" class="btn ghost compact">＋ New Chat</button>
+              </div>
+            </div>
+
+            <div id="liveStatus" class="live-status idle">
+              <span class="status-orb"></span>
+              <div><strong id="liveStatusTitle">Ready</strong><span id="liveStatusDetail">Waiting for input</span></div>
+            </div>
+
+            <div id="messageList" class="message-list"></div>
+
+            <form id="chatForm" class="chat-compose">
+              <textarea id="chatInput" rows="1" placeholder="Type a message. The response will appear here and play through the Windows speaker."></textarea>
+              <button class="btn primary send-btn" type="submit" aria-label="Send message">Send</button>
+            </form>
+          </section>
+
+          <aside class="control-panel">
+            <section class="card control-card">
+              <div class="card-title-row"><div><p class="eyebrow">GLOBAL AUDIO CONTROL</p><h3>Conversation modes</h3></div><span id="modeBadge" class="mode-badge">IDLE</span></div>
+              <div class="button-grid two">
+                <button id="startConversationBtn" class="btn success">▶ Start conversation</button>
+                <button id="stopConversationBtn" class="btn ghost">■ Turn off mode</button>
+              </div>
+              <div class="separator"></div>
+              <p class="field-label">Host PC microphone</p>
+              <button id="holdPttBtn" class="ptt-button"><span class="mic-icon">●</span><strong>Hold host mic</strong><small>Press and hold</small></button>
+              <button id="togglePttBtn" class="btn secondary full">Start host push to talk</button>
+              <div class="separator"></div>
+              <p class="field-label">This dashboard device</p>
+              <button id="browserPttBtn" class="ptt-button device-ptt"><span class="mic-icon">●</span><strong>Hold device mic</strong><small>Phone, tablet, or browser microphone</small></button>
+              <p id="browserMicHint" class="tiny muted">The recording is uploaded after you release. TTS still plays through the Windows host.</p>
+              <button id="stopTtsBtn" class="btn danger full">■ Stop Current TTS</button>
+            </section>
+
+            <section class="card now-playing-card">
+              <div class="card-title-row"><h3>Now speaking</h3><span id="ttsProviderStatus" class="chip">TTS</span></div>
+              <p id="nowSpeakingText" class="now-speaking-text">Nothing is playing.</p>
+              <div class="audio-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </section>
+
+            <section class="card quick-scripts-card">
+              <div class="card-title-row"><h3>Quick scripts</h3><button class="link-btn" data-nav="scripts">Manage</button></div>
+              <div id="quickScripts" class="quick-script-list"></div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section id="page-agents" class="page">
+        <div class="page-actions"><div><p class="muted">Each agent keeps its own prompt, models, voice, information, chats, and memory.</p></div><button id="addAgentBtn" class="btn primary">＋ Create agent</button></div>
+        <div id="agentGrid" class="card-grid agents-grid"></div>
+      </section>
+
+      <section id="page-information" class="page">
+        <div class="page-actions"><div><p class="muted">Global text entries can be selectively enabled inside each agent.</p></div><button id="addInfoBtn" class="btn primary">＋ Add information</button></div>
+        <div id="informationList" class="list-stack"></div>
+      </section>
+
+      <section id="page-scripts" class="page">
+        <div class="scripts-layout">
+          <div>
+            <div class="page-actions"><div><p class="muted">Scripts bypass STT, LLM, tools, and memory. They use the active agent's TTS. Generated audio is cached and replayed when the text and voice settings are unchanged.</p></div><button id="addScriptBtn" class="btn primary">＋ Create script</button></div>
+            <div id="scriptGrid" class="card-grid scripts-grid"></div>
+          </div>
+          <aside class="card queue-card">
+            <div class="card-title-row"><div><p class="eyebrow">SCRIPT PLAYBACK</p><h3>Queue</h3></div><span id="queueStateChip" class="chip">Paused</span></div>
+            <div class="button-grid three queue-controls">
+              <button id="playQueueBtn" class="btn success compact">▶ Play</button>
+              <button id="pauseQueueBtn" class="btn ghost compact">Ⅱ Pause</button>
+              <button id="stopQueueBtn" class="btn ghost compact">■ Stop</button>
+            </div>
+            <button id="clearQueueBtn" class="btn danger-outline full compact">Clear queue</button>
+            <div id="queueList" class="queue-list"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="page-settings" class="page">
+        <div class="settings-grid">
+          <section class="card settings-card">
+            <p class="eyebrow">GLOBAL</p><h3>Conversation behavior</h3>
+            <label class="toggle-row"><span><strong>Voice interruption (experimental)</strong><small>Off is recommended with PC speakers. Enable only with a headset or echo-cancelled microphone.</small></span><input id="interruptionToggle" type="checkbox"><i></i></label>
+            <label>End-of-speech silence (ms)<input id="silenceInput" type="number" min="300" max="5000" step="50"></label>
+            <label>Maximum recording time (seconds)<input id="maxRecordInput" type="number" min="3" max="180"></label>
+            <label class="toggle-row"><span><strong>Filter low-confidence STT</strong><small>Show uncertain transcripts in chat, but do not send them to the agent.</small></span><input id="sttConfidenceFilterToggle" type="checkbox"><i></i></label>
+            <label>Minimum estimated STT confidence (%)<input id="sttConfidenceThresholdInput" type="number" min="0" max="100" step="1"></label>
+            <p class="tiny muted">SenseVoice does not always return a calibrated confidence value, so VerbaNode labels this as an estimate. No apology audio is played when a transcript is rejected.</p>
+            <button id="saveRuntimeSettingsBtn" class="btn primary">Save conversation settings</button>
+          </section>
+
+          <section class="card settings-card">
+            <p class="eyebrow">HOST AUDIO</p><h3>Microphone and speaker</h3>
+            <p class="muted">Audio always uses devices connected to this Windows PC. Conversation mode locks the JYX output first, then keeps both JYX and DJI streams open until conversation mode stops.</p>
+            <label>Microphone input
+              <select id="inputDeviceSelect"></select>
+              <small id="inputDeviceHint" class="field-help">Prefer the DJI Mic entry using Windows WASAPI when available.</small>
+            </label>
+            <label>Speaker output
+              <select id="outputDeviceSelect"></select>
+              <small id="outputDeviceHint" class="field-help">Choose Headphones (JYX-N882). The selection is pinned instead of following the changing Windows default.</small>
+            </label>
+            <div class="button-grid three audio-device-actions">
+              <button id="refreshAudioDevicesBtn" type="button" class="btn ghost compact">↻ Refresh</button>
+              <button id="testInputDeviceBtn" type="button" class="btn secondary compact">Test mic</button>
+              <button id="testOutputDeviceBtn" type="button" class="btn secondary compact">Test speaker</button>
+            </div>
+            <button id="testDuplexLockBtn" type="button" class="btn secondary">Test both locked</button>
+            <button id="saveAudioDevicesBtn" type="button" class="btn primary">Save audio devices</button>
+            <div id="audioDeviceStatus" class="status-box">Select and save both devices. When conversation mode starts, both endpoints remain locked instead of reconnecting every turn.</div>
+          </section>
+
+          <section class="card settings-card">
+            <p class="eyebrow">LOCAL MODELS</p><h3>Ollama model manager</h3>
+            <div id="ollamaStatusBox" class="status-box"></div>
+            <div id="modelList" class="model-list"></div>
+            <form id="pullModelForm" class="inline-form"><input id="pullModelInput" placeholder="Example: qwen3.5:0.8b"><button class="btn secondary" type="submit">Pull</button></form>
+          </section>
+
+          <section class="card settings-card">
+            <p class="eyebrow">AUDIO & TTS</p><h3>Runtime status</h3>
+            <div id="runtimeStatusList" class="definition-list"></div>
+            <button id="refreshStatusBtn" class="btn ghost">Refresh status</button>
+          </section>
+
+          <section class="card settings-card">
+            <p class="eyebrow">DATA</p><h3>Backup and restore</h3>
+            <p class="muted">Back up agents, information, scripts, conversations, summaries, and queue state.</p>
+            <a id="backupDownloadBtn" class="btn secondary full" href="#">Download full backup</a>
+            <label class="file-drop">Restore a backup ZIP<input id="restoreFileInput" type="file" accept=".zip"></label>
+            <p class="tiny muted">Restore replaces the current database and reloads all connected browsers.</p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <nav class="mobile-bottom-nav">
+      <button class="active" data-page="chat">◉<span>Chat</span></button>
+      <button data-page="agents">◇<span>Agents</span></button>
+      <button data-page="scripts">▶<span>Scripts</span></button>
+      <button data-page="settings">⚙<span>Settings</span></button>
+    </nav>
+  </div>
+
+  <div id="queueDrawer" class="drawer hidden">
+    <div class="drawer-backdrop" data-close-drawer></div>
+    <section class="drawer-panel">
+      <div class="card-title-row"><h3>Script queue</h3><button class="icon-btn" data-close-drawer>×</button></div>
+      <div id="drawerQueueList" class="queue-list"></div>
+      <div class="button-grid two"><button id="drawerPlayQueue" class="btn success">▶ Play</button><button id="drawerClearQueue" class="btn danger-outline">Clear</button></div>
+    </section>
+  </div>
+
+  <div id="modalRoot"></div>
+
+  <template id="agentModalTemplate">
+    <div class="modal-shell">
+      <div class="modal-backdrop" data-close-modal></div>
+      <form class="modal-card large-modal" id="agentForm">
+        <div class="modal-header"><div><p class="eyebrow">AGENT CONFIGURATION</p><h3 id="agentModalTitle">Create agent</h3></div><button type="button" class="icon-btn" data-close-modal>×</button></div>
+        <div class="tabs" id="agentTabs"><button type="button" class="active" data-tab="identity">Identity</button><button type="button" data-tab="models">Models</button><button type="button" data-tab="knowledge">Information</button><button type="button" data-tab="memory">Memory</button></div>
+        <div class="tab-panel active" data-panel="identity">
+          <div class="form-grid two">
+            <label>Name<input name="name" required maxlength="80"></label>
+            <label>Avatar initials<input name="avatar" maxlength="4"></label>
+            <label>UI color<input name="color" type="color"></label>
+            <label>Greeting<input name="greeting" maxlength="500"></label>
+          </div>
+          <label>Role<input name="role" maxlength="500"></label>
+          <label>System prompt<textarea name="system_prompt" rows="8"></textarea></label>
+          <div class="ai-role-box">
+            <label>Describe the agent you want<textarea id="roleDescription" rows="3" placeholder="Example: A professional receptionist for a robotics company..."></textarea></label>
+            <button id="generateRoleBtn" type="button" class="btn secondary">Generate role, prompt, and greeting</button>
+          </div>
+        </div>
+        <div class="tab-panel" data-panel="models">
+          <div class="form-grid two">
+            <label>Ollama model<select name="llm_model"></select></label>
+            <label>STT model<input name="stt_model"></label>
+            <label>Temperature<input name="temperature" type="number" min="0" max="2" step="0.1"></label>
+            <label>Top P<input name="top_p" type="number" min="0" max="1" step="0.05"></label>
+            <label>Max response tokens<input name="max_tokens" type="number" min="32" max="8192" step="16"><small class="field-help">224 is recommended for concise spoken answers.</small></label>
+            <label>Context size<input name="context_size" type="number" min="512" step="512"></label>
+            <label>TTS mode<select name="tts_mode"><option value="edge">Edge only</option><option value="kokoro">Kokoro local only</option><option value="edge_fallback">Edge → Kokoro fallback</option><option value="kokoro_fallback">Kokoro → Edge fallback</option></select></label>
+            <label>Edge voice<input name="edge_voice"></label>
+            <label>Kokoro voice<select name="kokoro_voice_id" id="kokoroVoiceSelect"></select><small class="field-help">Voice names are shown; the numeric speaker ID is handled internally.</small></label>
+            <label>Speech rate<input name="tts_rate" type="number" min="0.5" max="2" step="0.05"></label>
+            <label>Volume<input name="tts_volume" type="number" min="0" max="1" step="0.05"></label>
+          </div>
+          <fieldset><legend>Tools</legend><div id="toolCheckboxes" class="check-grid"></div></fieldset>
+        </div>
+        <div class="tab-panel" data-panel="knowledge"><p class="muted">Select the global information this agent should know.</p><div id="agentInfoCheckboxes" class="check-list"></div></div>
+        <div class="tab-panel" data-panel="memory">
+          <div id="agentMemoryStats" class="status-box"></div>
+          <div class="button-grid two"><button id="backupAgentBtn" type="button" class="btn secondary">Download agent backup</button><button id="clearAgentMemoryBtn" type="button" class="btn danger-outline">Clear agent memory</button></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save agent</button></div>
+      </form>
+    </div>
+  </template>
+
+  <template id="simpleModalTemplate">
+    <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
+  </template>
+
+  <script src="/static/app.js?v=0.2.6" defer></script>
+</body>
+</html>

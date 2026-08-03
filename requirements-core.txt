@@ -1,0 +1,10 @@
+# Lightweight installation for UI/database/Ollama/text chat.
+# Install requirements.txt when voice features are needed.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.34,<1.0
+pydantic>=2.10,<3.0
+pydantic-settings>=2.7,<3.0
+httpx>=0.28,<1.0
+python-multipart>=0.0.20,<1.0
+ollama>=0.6,<1.0
+psutil>=6.1,<8.0
