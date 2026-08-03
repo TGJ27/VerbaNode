@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import threading
@@ -136,6 +137,8 @@ class HostAudioRecorder:
         self._ptt_active = False
         self._ptt_chunks: list[np.ndarray] = []
         self._ptt_started_at = 0.0
+        self._dropped_input_chunks = 0
+        self._input_reopen_count = 0
 
     @staticmethod
     def list_devices() -> list[dict]:
@@ -203,6 +206,77 @@ class HostAudioRecorder:
         except Exception:
             return None
 
+    @staticmethod
+    def device_fingerprint(device: dict | None, direction: str) -> str | None:
+        if not device:
+            return None
+        payload = {
+            "name": str(device.get("name") or "").strip(),
+            "hostapi": str(device.get("hostapi") or "").strip(),
+            "direction": direction,
+            "channels": int(device.get("max_input_channels", 0) if direction == "input" else device.get("max_output_channels", 0)),
+        }
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    @classmethod
+    def resolve_device_id(
+        cls,
+        preferred_id: int | None,
+        fingerprint: str | dict | None,
+        direction: str,
+    ) -> int | None:
+        """Resolve a saved device after Windows reorders PortAudio IDs."""
+        devices = cls.list_devices()
+        channel_key = "max_input_channels" if direction == "input" else "max_output_channels"
+        available = [d for d in devices if int(d.get(channel_key, 0)) > 0]
+        try:
+            preferred = int(preferred_id) if preferred_id is not None else None
+        except (TypeError, ValueError):
+            preferred = None
+        # If PortAudio enumeration is temporarily unavailable during startup,
+        # preserve the saved ID rather than erasing a valid device selection.
+        if not devices:
+            return preferred
+        try:
+            expected = json.loads(fingerprint) if isinstance(fingerprint, str) and fingerprint else (fingerprint or {})
+        except json.JSONDecodeError:
+            expected = {}
+
+        if preferred is not None:
+            current = next((d for d in available if int(d.get("id", -1)) == preferred), None)
+            if current:
+                if not expected:
+                    return preferred
+                same_name = str(current.get("name", "")).casefold() == str(expected.get("name", "")).casefold()
+                same_api = str(current.get("hostapi", "")).casefold() == str(expected.get("hostapi", "")).casefold()
+                if same_name and same_api:
+                    return preferred
+
+        expected_name = str(expected.get("name") or "").strip().casefold()
+        expected_api = str(expected.get("hostapi") or "").strip().casefold()
+        if expected_name:
+            exact = [d for d in available if str(d.get("name", "")).strip().casefold() == expected_name]
+            if expected_api:
+                exact_api = [d for d in exact if str(d.get("hostapi", "")).strip().casefold() == expected_api]
+                if exact_api:
+                    return int(exact_api[0]["id"])
+            if exact:
+                return int(exact[0]["id"])
+            partial = [d for d in available if expected_name in str(d.get("name", "")).casefold()]
+            if partial:
+                return int(partial[0]["id"])
+        return preferred if any(int(d.get("id", -1)) == preferred for d in available) else None
+
+    def health(self) -> dict:
+        return {
+            "input_locked": self.input_locked,
+            "input_device": self.locked_input_device,
+            "dropped_input_chunks": self._dropped_input_chunks,
+            "input_reopen_count": self._input_reopen_count,
+            "input_queue_depth": self._input_queue.qsize(),
+            "input_queue_capacity": self._input_queue.maxsize,
+        }
+
     @property
     def input_locked(self) -> bool:
         with self._stream_lock:
@@ -243,6 +317,7 @@ class HostAudioRecorder:
                 self._input_queue.put_nowait(chunk)
             except queue.Full:
                 pass
+            self._dropped_input_chunks += 1
 
     def lock_input(self, input_device: int | None = None) -> dict:
         """Open and start the selected input endpoint once, at its native rate."""
@@ -256,6 +331,7 @@ class HostAudioRecorder:
                 info = self.device_info(normalized, "input")
                 return info or {"id": normalized, "name": "System default input"}
         self.unlock_input()
+        self._input_reopen_count += 1
         try:
             import sounddevice as sd
         except ImportError as exc:
@@ -493,6 +569,8 @@ class HostAudioPlayer:
         self._stop_event = threading.Event()
         self._playing = False
         self._refresh_required = True
+        self._output_reopen_count = 0
+        self._playback_recovery_count = 0
 
     @property
     def configured_output_device(self) -> int | None:
@@ -508,6 +586,17 @@ class HostAudioPlayer:
     def is_playing(self) -> bool:
         with self._lock:
             return self._playing
+
+    def health(self) -> dict:
+        with self._lock:
+            return {
+                "output_locked": self.output_locked,
+                "output_device": self._opened_device,
+                "configured_output_device": self._configured_device,
+                "playing": self._playing,
+                "output_reopen_count": self._output_reopen_count,
+                "playback_recovery_count": self._playback_recovery_count,
+            }
 
     def set_output_device(self, output_device: int | None) -> None:
         normalized = int(output_device) if output_device is not None else None
@@ -558,6 +647,7 @@ class HostAudioPlayer:
                 info = HostAudioRecorder.device_info(selected, "output")
                 return info or {"id": selected, "name": "System default output"}
         self.close()
+        self._output_reopen_count += 1
         try:
             import sounddevice as sd
         except ImportError as exc:
@@ -679,12 +769,14 @@ class HostAudioPlayer:
                     if attempt:
                         raise
                     LOGGER.warning("Persistent speaker stream failed; reopening once")
+                    self._playback_recovery_count += 1
                     self.request_refresh()
                 except Exception as exc:
                     self.stop()
                     if attempt:
                         raise AudioUnavailable(f"Windows speaker playback failed: {exc}") from exc
                     LOGGER.warning("Speaker playback failed; reopening once: %s", exc)
+                    self._playback_recovery_count += 1
                     self.request_refresh()
             return False
 

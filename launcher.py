@@ -40,14 +40,12 @@ def main() -> None:
     desktop_url = f"{scheme}://127.0.0.1:{settings.port}"
     network_url = f"{scheme}://{local_ip()}:{settings.port}"
     print("=" * 68)
-    print(f"VerbaNode v{APP_VERSION}")
+    print(f"VerbaNode Standalone v{APP_VERSION}")
     print(f"Desktop:      {desktop_url}")
     print(f"Local network:{network_url}")
     print("TTS playback happens on this PC. Voice input can use the host mic or the dashboard device mic.")
     if ssl_enabled:
         print("HTTPS is enabled for browser-device microphone access.")
-    if settings.pin in {"1234", "CHANGE_ME", ""}:
-        print("WARNING: The controller PIN is not secure. Run setup_windows.bat or edit .env.")
     print("=" * 68)
 
     if settings.open_browser and os.environ.get("PYTEST_CURRENT_TEST") is None:

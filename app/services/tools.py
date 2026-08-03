@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -14,7 +15,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "function",
         "function": {
             "name": "get_current_time",
-            "description": "Get the current local date and time in Jakarta.",
+            "description": "Get the exact current local date and time in the configured timezone. This tool MUST be used for every current time or date question; never estimate the answer.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -22,7 +23,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "function",
         "function": {
             "name": "get_location",
-            "description": "Get the configured physical location of this assistant.",
+            "description": "Get the configured physical location of this assistant. This tool MUST be used when the user asks where the robot or 'we' are.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -30,7 +31,7 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
         "type": "function",
         "function": {
             "name": "get_weather",
-            "description": "Get current weather for a city. Use the configured location when no city is provided.",
+            "description": "Get live current weather for a city. This tool MUST be used for current weather questions. Use the configured location when no city is provided.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -83,6 +84,160 @@ class ToolService:
     def schemas(self, enabled: list[str]) -> list[dict[str, Any]]:
         return [TOOL_SCHEMAS[name] for name in enabled if name in TOOL_SCHEMAS]
 
+    @staticmethod
+    def _normalized_text(text: str) -> str:
+        text = text.casefold().replace("’", "'")
+        text = re.sub(r"[^\w\s'?-]", " ", text, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", text).strip(" ?-")
+
+    @staticmethod
+    def _strip_conversational_wrappers(text: str) -> str:
+        """Remove harmless greetings, wake words, and politeness wrappers.
+
+        Voice input commonly reaches the router as phrases such as
+        "hello Ropi, what time is it?".  These wrappers must not force a
+        live-data request back through the LLM, but they also must not alter
+        the meaningful middle of a sentence.
+        """
+        value = text.strip()
+        leading_patterns = (
+            r"^(?:hello|hi|hey|yo|halo|hai)\b\s*",
+            r"^good (?:morning|afternoon|evening)\b\s*",
+            r"^(?:excuse me|permisi)\b\s*",
+            r"^(?:ropi|assistant)\b\s*",
+            r"^(?:please|pls|tolong)\b\s*",
+        )
+        # Repeat because users often combine several wrappers, for example
+        # "hello Ropi please ...".
+        changed = True
+        while changed and value:
+            changed = False
+            for pattern in leading_patterns:
+                updated = re.sub(pattern, "", value, count=1).strip()
+                if updated != value:
+                    value = updated
+                    changed = True
+                    break
+
+        trailing_patterns = (
+            r"\s+(?:please|pls|tolong)$",
+            r"\s+(?:thanks|thank you|makasih|terima kasih)$",
+            r"\s+(?:for me|right now|now please)$",
+        )
+        changed = True
+        while changed and value:
+            changed = False
+            for pattern in trailing_patterns:
+                updated = re.sub(pattern, "", value, count=1).strip()
+                if updated != value:
+                    value = updated
+                    changed = True
+                    break
+        return value
+
+    @staticmethod
+    def _tokens_fit(text: str, *, required: set[str], allowed: set[str]) -> bool:
+        tokens = [token.replace("'", "") for token in text.split() if token]
+        token_set = set(tokens)
+        return bool(tokens) and required.issubset(token_set) and token_set.issubset(allowed)
+
+    def match_core_intent(
+        self, text: str, enabled: list[str]
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Route unambiguous built-in requests without relying on a small LLM.
+
+        The matcher is intentionally conservative so normal questions such as
+        "What is time complexity?" continue to reach the language model.
+        """
+        normalized = self._normalized_text(text)
+        core = self._strip_conversational_wrappers(normalized)
+        enabled_set = set(enabled or [])
+
+        time_exclusions = (
+            "time complexity",
+            "runtime complexity",
+            "response time",
+            "processing time",
+            "travel time",
+            "arrival time",
+            "departure time",
+            "meeting time",
+            "time zone",
+            "timezone",
+        )
+        time_patterns = (
+            r"^what time is it(?: now| right now)?$",
+            r"^do you know what time it is(?: now| right now)?$",
+            r"^(?:what(?:'s| is) )?(?:the )?(?:current |local |exact )?time(?: now)?$",
+            r"^(?:can you |could you |would you )?(?:please )?(?:tell|give) me (?:the )?(?:current |local |exact )?time(?: now)?$",
+            r"^(?:what(?:'s| is) )?(?:today'?s |the current )?date(?: today)?$",
+            r"^(?:what day is it|what date is it|what day is today|what date is today|today'?s date)$",
+            r"^(?:sekarang )?jam berapa(?: sekarang)?$",
+            r"^(?:sekarang )?pukul berapa(?: sekarang)?$",
+            r"^(?:hari ini )?(?:hari apa|tanggal berapa)$",
+        )
+        fuzzy_time_allowed = {
+            "what", "whats", "is", "it", "its", "the", "current", "local",
+            "exact", "time", "now", "right", "can", "could", "would", "you",
+            "please", "tell", "give", "me", "do", "know", "today",
+        }
+        fuzzy_date_allowed = {
+            "what", "whats", "is", "it", "its", "the", "current", "day",
+            "date", "today", "todays", "can", "could", "would", "you", "please",
+            "tell", "give", "me", "do", "know",
+        }
+        is_time_or_date = any(re.fullmatch(pattern, core) for pattern in time_patterns)
+        if not is_time_or_date and not any(phrase in core for phrase in time_exclusions):
+            is_time_or_date = (
+                self._tokens_fit(core, required={"time"}, allowed=fuzzy_time_allowed)
+                or self._tokens_fit(core, required={"day"}, allowed=fuzzy_date_allowed)
+                or self._tokens_fit(core, required={"date"}, allowed=fuzzy_date_allowed)
+            )
+        if "get_current_time" in enabled_set and is_time_or_date:
+            return "get_current_time", {}
+
+        location_patterns = (
+            r"^(?:where are we|where am i|what(?:'s| is) (?:our|the current) location)$",
+            r"^(?:where is this robot|where are you located)$",
+            r"^(?:sekarang )?kita di ?mana$",
+            r"^(?:sekarang )?saya di ?mana$",
+            r"^(?:apa|dimana) lokasi(?: kita| saat ini)?$",
+        )
+        if "get_location" in enabled_set and any(
+            re.fullmatch(pattern, core) for pattern in location_patterns
+        ):
+            return "get_location", {}
+
+        if "get_weather" in enabled_set:
+            weather_patterns = (
+                r"^(?:what(?:'s| is) |how(?:'s| is) )?(?:the )?(?:current )?weather(?: today)?$",
+                r"^(?:what(?:'s| is) )?(?:the )?weather like(?: today)?$",
+                r"^(?:current )?weather forecast$",
+                r"^(?:bagaimana )?cuaca(?: hari ini| sekarang)?$",
+                r"^cuaca(?: hari ini| sekarang)? bagaimana$",
+            )
+            if any(re.fullmatch(pattern, core) for pattern in weather_patterns):
+                return "get_weather", {}
+
+            city_match = re.fullmatch(
+                r"(?:what(?:'s| is) |how(?:'s| is) )?(?:the )?(?:current )?weather(?: like)? in (.+)",
+                core,
+            )
+            if city_match:
+                return "get_weather", {"location": city_match.group(1).strip()}
+
+        exit_patterns = (
+            r"^(?:stop|end|exit|leave) (?:the )?(?:conversation|conversation mode|listening)$",
+            r"^(?:stop talking|that'?s all|goodbye|bye ropi)$",
+            r"^(?:hentikan|akhiri) (?:percakapan|mode percakapan)$",
+            r"^(?:sudah cukup|selesai ropi)$",
+        )
+        if "handle_exit_intent" in enabled_set and any(
+            re.fullmatch(pattern, core) for pattern in exit_patterns
+        ):
+            return "handle_exit_intent", {}
+        return None
+
     def format_result(self, name: str, result: dict[str, Any]) -> str:
         """Return a concise spoken fallback when a model emits no tool follow-up text."""
         if result.get("error"):
@@ -125,9 +280,13 @@ class ToolService:
     async def execute(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
         arguments = arguments or {}
         if name == "get_current_time":
-            now = datetime.now(ZoneInfo("Asia/Jakarta"))
+            try:
+                timezone = ZoneInfo(self.settings.default_timezone)
+            except Exception:
+                timezone = ZoneInfo("Asia/Jakarta")
+            now = datetime.now(timezone)
             return {
-                "timezone": "Asia/Jakarta",
+                "timezone": getattr(timezone, "key", self.settings.default_timezone),
                 "iso": now.isoformat(timespec="seconds"),
                 "spoken": now.strftime("%A, %B %d, %Y at %I:%M %p"),
             }

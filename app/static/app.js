@@ -12,12 +12,13 @@ const appState = {
   models: [],
   kokoroVoices: [],
   audioDevices: { inputs: [], outputs: [], recommended_input: null, recommended_output: null },
-  version: '0.2.6',
+  version: '0.3.3',
   activeAgent: null,
   conversation: null,
   conversations: [],
   messages: [],
   mode: 'idle',
+  pipeline: { state: 'idle', latency_ms: {}, counters: {} },
   queueState: 'paused',
   streaming: new Map(),
   pttToggleActive: false,
@@ -121,15 +122,8 @@ async function login(pin, clientName, forceTakeover = false) {
   if (!response.ok) throw new Error(payload.detail || 'Login failed');
 
   if (payload.takeover_required) {
-    const activeClient = payload.active_client || 'another device';
-    const approved = window.confirm(
-      `${activeClient} is currently controlling the application. Take over control now?`
-    );
-    if (!approved) {
-      $('#loginStatus').textContent = 'Takeover cancelled.';
-      $('#loginStatus').classList.remove('hidden');
-      return;
-    }
+    // Compatibility with older backends: a valid PIN transfers control
+    // immediately without asking the current or incoming controller again.
     return login(pin, clientName, true);
   }
 
@@ -244,16 +238,24 @@ function wsCommand(command, data = {}) {
 }
 
 
+function browserPttButtons() {
+  return [$('#browserPttBtn'), $('#mobileBrowserPttBtn')].filter(Boolean);
+}
+
+function hostPttButtons() {
+  return [$('#holdPttBtn'), $('#mobileHostPttBtn')].filter(Boolean);
+}
+
 function browserMicrophoneSupported() {
   return Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext));
 }
 
 function updateBrowserMicSupport() {
-  const button = $('#browserPttBtn');
+  const buttons = browserPttButtons();
   const hint = $('#browserMicHint');
-  if (!button || !hint) return;
+  if (!buttons.length || !hint) return;
   const supported = browserMicrophoneSupported();
-  button.disabled = !supported;
+  buttons.forEach(button => { button.disabled = !supported; });
   if (supported) {
     hint.textContent = 'The recording is uploaded after you release. TTS still plays through the Windows host.';
   } else if (!window.isSecureContext) {
@@ -326,7 +328,7 @@ async function cancelBrowserPttCapture(showMessage = false) {
   appState.browserPttHeld = false;
   appState.browserPttStarting = false;
   appState.browserPttActive = false;
-  $('#browserPttBtn')?.classList.remove('active');
+  browserPttButtons().forEach(button => button.classList.remove('active'));
   await cleanupBrowserPttCapture();
   try { await api('/api/browser-ptt/cancel', { method: 'POST' }); } catch (_) {}
   if (showMessage) toast('Dashboard microphone recording was cancelled.');
@@ -342,8 +344,7 @@ async function startBrowserPttCapture(event) {
   }
   appState.browserPttHeld = true;
   appState.browserPttStarting = true;
-  const button = $('#browserPttBtn');
-  button?.classList.add('active');
+  browserPttButtons().forEach(button => button.classList.add('active'));
   try {
     await api('/api/browser-ptt/start', { method: 'POST' });
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -391,8 +392,7 @@ async function stopBrowserPttCapture(event) {
   event?.preventDefault();
   if (!appState.browserPttHeld && !appState.browserPttActive) return;
   appState.browserPttHeld = false;
-  const button = $('#browserPttBtn');
-  button?.classList.remove('active');
+  browserPttButtons().forEach(button => button.classList.remove('active'));
   if (appState.browserPttStarting && !appState.browserPttActive) return;
   if (!appState.browserPttActive) return;
   appState.browserPttActive = false;
@@ -435,6 +435,7 @@ async function loadBootstrap() {
   appState.conversations = data.conversations || [];
   appState.messages = data.messages || [];
   appState.mode = data.mode || 'idle';
+  appState.pipeline = data.pipeline || appState.pipeline;
   appState.queueState = data.queue_state || 'paused';
   renderAll();
   if (data.ollama_error) toast(data.ollama_error, 'error');
@@ -633,7 +634,7 @@ function renderSettings() {
   $('#silenceInput').value = settings.silence_ms || 900;
   $('#maxRecordInput').value = settings.max_record_seconds || 30;
   $('#sttConfidenceFilterToggle').checked = settings.stt_confidence_filter_enabled !== false;
-  $('#sttConfidenceThresholdInput').value = Math.round(Number(settings.stt_confidence_threshold ?? 0.88) * 100);
+  $('#sttConfidenceThresholdInput').value = Math.round(Number(settings.stt_confidence_threshold ?? 0.70) * 100);
   renderAudioDevices();
 }
 
@@ -676,11 +677,11 @@ function updateAudioDeviceHints() {
   const input = inputs.find(device => String(device.id) === inputSelect.value);
   const output = outputs.find(device => String(device.id) === outputSelect.value);
   $('#inputDeviceHint').textContent = input
-    ? `Selected: ${input.name} through ${input.hostapi}. ${input.recommended_input ? 'DJI Mic detected.' : ''}`
-    : 'Using the Windows default input. Select the DJI Mic explicitly to prevent Bluetooth profile switching.';
+    ? `Selected: ${input.name} through ${input.hostapi}.${input.recommended_input ? ' Recommended input detected.' : ''}`
+    : 'Using the Windows default input. Select a specific device to make reconnect behavior more predictable.';
   $('#outputDeviceHint').textContent = output
-    ? `Selected: ${output.name} through ${output.hostapi}. ${output.recommended_output ? 'JYX output detected.' : ''}`
-    : 'Using the Windows default output. Select Headphones (JYX-N882) explicitly.';
+    ? `Selected: ${output.name} through ${output.hostapi}.${output.recommended_output ? ' Recommended output detected.' : ''}`
+    : 'Using the Windows default output. Select a specific device to make reconnect behavior more predictable.';
 }
 
 function selectedAudioDeviceId(selector) {
@@ -700,18 +701,37 @@ function renderRuntimeStatus(data) {
   const stt = data.stt || {};
   const hardware = data.hardware || {};
   const audio = data.audio || {};
+  const pipeline = data.pipeline || appState.pipeline || {};
+  const latency = pipeline.latency_ms || {};
+  const counters = pipeline.counters || {};
+  appState.pipeline = pipeline;
+  const pipelinePanel = $('#pipelineStatusPanel');
+  if (pipelinePanel) {
+    const stage = String(pipeline.state || 'idle').replaceAll('_', ' ');
+    const turn = pipeline.turn_id ? ` · turn ${String(pipeline.turn_id).slice(0, 8)}` : '';
+    const timing = [
+      latency.stt_total != null ? `STT ${latency.stt_total} ms` : null,
+      latency.llm_total != null ? `LLM ${latency.llm_total} ms` : null,
+      latency.tts_total != null ? `TTS ${latency.tts_total} ms` : null,
+      latency.turn_total != null ? `Total ${latency.turn_total} ms` : null,
+    ].filter(Boolean).join(' · ');
+    pipelinePanel.innerHTML = `<strong>Pipeline: ${escapeHtml(stage)}</strong>${escapeHtml(turn)}<br><span class="muted">${escapeHtml(timing || 'No completed timing sample yet.')}</span>`;
+  }
+  const edgeHealth = tts.provider_health?.edge || {};
+  const kokoroHealth = tts.provider_health?.kokoro || {};
   $('#runtimeStatusList').innerHTML = `
     <dt>CPU threads</dt><dd>${hardware.cpu_count ?? 'Unknown'}</dd>
     <dt>Total RAM</dt><dd>${hardware.ram_total_gb ?? 'Unknown'} GB</dd>
     <dt>Available RAM</dt><dd>${hardware.ram_available_gb ?? 'Unknown'} GB</dd>
     <dt>FunASR</dt><dd>${stt.installed ? 'Installed' : 'Missing'}</dd>
     <dt>STT model</dt><dd>${escapeHtml(stt.model || '')}</dd>
-    <dt>Edge TTS</dt><dd>${tts.edge_installed ? 'Installed' : 'Missing'}</dd>
-    <dt>Kokoro runtime</dt><dd>${tts.kokoro_installed ? 'Installed' : 'Missing'}</dd>
-    <dt>Kokoro model</dt><dd>${tts.kokoro_model_ready ? 'Ready' : 'Not downloaded'}</dd>
+    <dt>Edge TTS</dt><dd>${edgeHealth.circuit_open ? 'Fallback active' : (tts.edge_installed ? 'Ready' : 'Missing')}</dd>
+    <dt>Kokoro</dt><dd>${kokoroHealth.circuit_open ? 'Recovering' : (tts.kokoro_model_ready ? 'Ready' : 'Not downloaded')}</dd>
     <dt>Microphone lock</dt><dd>${audio.input_locked ? 'Locked and active' : 'Released'}</dd>
     <dt>Speaker lock</dt><dd>${audio.output_locked ? 'Locked and active' : 'Not opened yet'}</dd>
-    <dt>Audio mode</dt><dd>Persistent duplex streams</dd>`;
+    <dt>Completed turns</dt><dd>${counters.turns_completed ?? 0}</dd>
+    <dt>STT timeouts</dt><dd>${counters.stt_timeouts ?? 0}</dd>
+    <dt>Provider failures</dt><dd>${counters.tts_provider_failures ?? 0}</dd>`;
   $('#ttsProviderStatus').textContent = appState.activeAgent?.kokoro_voice_name || appState.activeAgent?.tts_mode || 'TTS';
 }
 
@@ -721,6 +741,12 @@ function setMode(mode) {
   $('#modeBadge').textContent = mode.toUpperCase();
   $('#modeBadge').classList.toggle('active', active);
   $('#togglePttBtn').textContent = appState.pttToggleActive ? 'Stop host push to talk' : 'Start host push to talk';
+  const mobileMode = $('#mobileConversationBtn');
+  if (mobileMode) {
+    const running = mode === 'conversation';
+    mobileMode.innerHTML = running ? '<span>■</span><b>Stop mode</b>' : '<span>▶</span><b>Start mode</b>';
+    mobileMode.classList.toggle('active', running);
+  }
   if (mode === 'conversation') setLiveStatus('listening', 'Conversation mode', 'Listening on the Windows host');
   else if (mode === 'ptt') setLiveStatus('recording', 'Host push to talk', 'Recording the Windows host microphone');
   else if (mode === 'browser_ptt') setLiveStatus('recording', 'Dashboard device PTT', 'Recording this phone or browser microphone');
@@ -757,8 +783,8 @@ function handleEvent(message) {
     case 'connected': setMode(data?.mode || 'idle'); break;
     case 'mode_changed':
       if (data?.recording === false) {
-        appState.pttToggleActive = false; appState.holdPttActive = false; $('#holdPttBtn').classList.remove('active');
-        if (data?.input_source === 'browser') { appState.browserPttHeld = false; appState.browserPttActive = false; $('#browserPttBtn')?.classList.remove('active'); }
+        appState.pttToggleActive = false; appState.holdPttActive = false; hostPttButtons().forEach(button => button.classList.remove('active'));
+        if (data?.input_source === 'browser') { appState.browserPttHeld = false; appState.browserPttActive = false; browserPttButtons().forEach(button => button.classList.remove('active')); }
       }
       setMode(data?.mode || 'idle');
       break;
@@ -777,6 +803,11 @@ function handleEvent(message) {
     case 'transcript':
       if (data?.accepted === false) appendRejectedTranscript(data);
       else toast(`Heard (${data?.confidence_percent ?? '?'}% estimated): ${data.text}`);
+      break;
+    case 'pipeline_state':
+      appState.pipeline = data || appState.pipeline;
+      if (appState.data) appState.data.pipeline = appState.pipeline;
+      renderRuntimeStatus({ ...(appState.data || {}), pipeline: appState.pipeline });
       break;
     case 'queue_state': appState.queueState = data.state; appState.queue = data.items || []; renderQueue(); break;
     case 'agents_changed': appState.agents = data || []; renderAgents(); break;
@@ -799,10 +830,11 @@ function handleEvent(message) {
     case 'audio_lock_changed':
       appState.data.audio = { ...(appState.data.audio || {}), ...(data || {}) };
       $('#audioDeviceStatus').textContent = data?.input_locked
-        ? 'Persistent audio lock active: JYX output and DJI microphone are both open.'
-        : (data?.output_locked ? 'Microphone released; JYX output remains locked for scripts and TTS.' : 'Audio locks released.');
+        ? 'Persistent audio lock active: microphone and speaker streams are both open.'
+        : (data?.output_locked ? 'Microphone released; speaker output remains locked for scripts and TTS.' : 'Audio locks released.');
       renderRuntimeStatus(appState.data);
       break;
+    case 'takeover_request': showTakeoverModal(data); break;
     case 'control_revoked': resetToLogin('Control was transferred to another device.'); break;
     case 'reload_required': location.reload(); break;
     case 'error': toast(data?.message || 'Runtime error', 'error'); setLiveStatus('idle', 'Ready', 'Waiting for input'); break;
@@ -825,6 +857,7 @@ async function refreshAgentWorkspace() {
     appState.models = data.models;
     appState.kokoroVoices = data.kokoro_voices || appState.kokoroVoices;
     appState.version = data.version || appState.version;
+    appState.pipeline = data.pipeline || appState.pipeline;
     renderAll();
     navigate('chat');
   } catch (error) { toast(error.message, 'error'); }
@@ -860,10 +893,26 @@ function closeMobileNav() {
 
 function closeModal() { $('#modalRoot').innerHTML = ''; }
 
+function showTakeoverModal(data) {
+  const root = $('#modalRoot');
+  root.innerHTML = `<div class="modal-shell"><div class="modal-backdrop"></div><div class="modal-card"><div class="modal-header"><h3>Controller takeover request</h3></div><p><strong>${escapeHtml(data.client_name || 'Another device')}</strong> entered the correct PIN and wants control.</p><p class="muted">Approving will disconnect this browser as the controller.</p><div class="modal-footer"><button id="rejectTakeover" class="btn ghost">Reject</button><button id="approveTakeover" class="btn danger">Approve takeover</button></div></div></div>`;
+  $('#rejectTakeover').onclick = () => respondTakeover(data.request_id, false);
+  $('#approveTakeover').onclick = () => respondTakeover(data.request_id, true);
+}
+
+async function respondTakeover(requestId, approve) {
+  try {
+    await api('/api/auth/takeover/respond', { method: 'POST', body: JSON.stringify({ request_id: requestId, approve }) });
+    closeModal();
+    if (approve) resetToLogin('Control was transferred.');
+    else toast('Takeover rejected.');
+  } catch (error) { toast(error.message, 'error'); closeModal(); }
+}
+
 function agentDefaults() {
   return {
     name: 'New Agent', color: '#6c63ff', avatar: 'NA', role: 'General voice assistant',
-    system_prompt: 'You are a concise English-speaking voice assistant. Always answer in English.',
+    system_prompt: 'You are a friendly, clear, and concise voice assistant. Describe your identity, domain, personality, tone, and speaking style here.',
     greeting: 'Hello. How can I help you?', llm_model: appState.models.find(model => model.name === 'qwen3.5:0.8b')?.name || appState.models[0]?.name || 'qwen3.5:0.8b',
     temperature: 0.2, top_p: 0.8, max_tokens: 224, context_size: 4096, tts_mode: 'edge_fallback',
     edge_voice: 'en-US-AriaNeural', kokoro_voice_id: 0, tts_rate: 1.0, tts_volume: 1.0,
@@ -919,7 +968,7 @@ function openAgentModal(agentId = null) {
       form.elements.namedItem('greeting').value = result.greeting;
       toast('Role configuration generated.', 'success');
     } catch (error) { toast(error.message, 'error'); }
-    finally { button.disabled = false; button.textContent = 'Generate role, prompt, and greeting'; }
+    finally { button.disabled = false; button.textContent = 'Generate identity, character, and greeting'; }
   };
   $('#backupAgentBtn').onclick = () => downloadAuthenticated(`/api/agents/${agent.id}/backup`, `agent-${agent.id}-backup.json`);
   $('#clearAgentMemoryBtn').onclick = async () => {
@@ -1039,21 +1088,32 @@ function bindEvents() {
   $('#startConversationBtn').onclick = async () => { try { await api('/api/conversation/start', { method: 'POST' }); } catch (error) { toast(error.message, 'error'); } };
   $('#stopConversationBtn').onclick = async () => { try { await api('/api/conversation/stop', { method: 'POST' }); } catch (error) { toast(error.message, 'error'); } };
 
-  const hold = $('#holdPttBtn');
-  const startHold = event => { event.preventDefault(); if (appState.holdPttActive) return; appState.holdPttActive = true; hold.classList.add('active'); wsCommand('ptt_start'); };
-  const stopHold = event => { event?.preventDefault(); if (!appState.holdPttActive) return; appState.holdPttActive = false; hold.classList.remove('active'); wsCommand('ptt_stop'); };
-  hold.addEventListener('pointerdown', startHold); hold.addEventListener('pointerup', stopHold); hold.addEventListener('pointercancel', stopHold); hold.addEventListener('pointerleave', event => { if (event.buttons === 0) stopHold(event); });
+  const startHold = event => { event.preventDefault(); if (appState.holdPttActive) return; appState.holdPttActive = true; hostPttButtons().forEach(button => button.classList.add('active')); wsCommand('ptt_start'); };
+  const stopHold = event => { event?.preventDefault(); if (!appState.holdPttActive) return; appState.holdPttActive = false; hostPttButtons().forEach(button => button.classList.remove('active')); wsCommand('ptt_stop'); };
+  hostPttButtons().forEach(hold => {
+    hold.addEventListener('pointerdown', startHold);
+    hold.addEventListener('pointerup', stopHold);
+    hold.addEventListener('pointercancel', stopHold);
+    hold.addEventListener('pointerleave', event => { if (event.buttons === 0) stopHold(event); });
+    hold.addEventListener('contextmenu', event => event.preventDefault());
+  });
   $('#togglePttBtn').onclick = () => {
     appState.pttToggleActive = !appState.pttToggleActive;
     wsCommand(appState.pttToggleActive ? 'ptt_start' : 'ptt_stop');
     $('#togglePttBtn').textContent = appState.pttToggleActive ? 'Stop host push to talk' : 'Start host push to talk';
   };
 
-  const browserPtt = $('#browserPttBtn');
-  browserPtt.addEventListener('pointerdown', startBrowserPttCapture);
-  browserPtt.addEventListener('pointerup', stopBrowserPttCapture);
-  browserPtt.addEventListener('pointercancel', () => cancelBrowserPttCapture(false));
-  browserPtt.addEventListener('contextmenu', event => event.preventDefault());
+  browserPttButtons().forEach(browserPtt => {
+    browserPtt.addEventListener('pointerdown', startBrowserPttCapture);
+    browserPtt.addEventListener('pointerup', stopBrowserPttCapture);
+    browserPtt.addEventListener('pointercancel', () => cancelBrowserPttCapture(false));
+    browserPtt.addEventListener('contextmenu', event => event.preventDefault());
+  });
+  $('#mobileConversationBtn').onclick = async () => {
+    try {
+      await api(appState.mode === 'conversation' ? '/api/conversation/stop' : '/api/conversation/start', { method: 'POST' });
+    } catch (error) { toast(error.message, 'error'); }
+  };
 
   $('#chatForm').onsubmit = async event => {
     event.preventDefault();
@@ -1144,7 +1204,7 @@ function bindEvents() {
   };
   $('#testDuplexLockBtn').onclick = async () => {
     const status = $('#audioDeviceStatus');
-    status.textContent = 'Opening JYX first, then DJI, and playing a tone while both streams stay active…';
+    status.textContent = 'Opening the selected speaker and microphone, then playing a tone while both streams stay active…';
     try {
       const result = await api('/api/audio/test-duplex-lock', {
         method: 'POST',
@@ -1174,7 +1234,7 @@ function bindEvents() {
     try {
       appState.data.runtime_settings = await api('/api/conversation/settings', { method: 'PUT', body: JSON.stringify(payload) });
       renderSettings();
-      $('#audioDeviceStatus').textContent = 'Audio devices saved. Conversation mode will lock JYX first, then keep JYX and DJI open together.';
+      $('#audioDeviceStatus').textContent = 'Audio devices saved. Conversation mode will keep the selected microphone and speaker streams open together.';
       toast('Conversation and audio settings saved.', 'success');
     } catch (error) {
       $('#audioDeviceStatus').textContent = error.message;
@@ -1199,8 +1259,14 @@ function bindEvents() {
   };
 
   setInterval(() => {
-    if (appState.ws?.readyState === WebSocket.OPEN) wsCommand('heartbeat');
-    if (appState.token) api('/api/heartbeat', { method: 'POST' }).catch(() => {});
+    // Use one heartbeat transport at a time. Sending WebSocket and HTTPS
+    // heartbeats together caused repeated WinError 10054 cleanup noise on
+    // Windows Proactor event loops.
+    if (appState.ws?.readyState === WebSocket.OPEN) {
+      wsCommand('heartbeat');
+    } else if (appState.token) {
+      api('/api/heartbeat', { method: 'POST' }).catch(() => {});
+    }
   }, 15000);
 }
 

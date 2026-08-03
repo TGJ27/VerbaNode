@@ -95,4 +95,4 @@ def test_accepted_stt_confidence_is_saved_with_message(tmp_path) -> None:
     assert message["stt_confidence_source"] == "estimated"
     runtime = db.get_runtime_settings()
     assert runtime["stt_confidence_filter_enabled"] is True
-    assert runtime["stt_confidence_threshold"] == 0.88
+    assert runtime["stt_confidence_threshold"] == 0.70

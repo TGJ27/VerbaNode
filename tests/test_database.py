@@ -19,7 +19,9 @@ def test_seed_and_agent_isolation(tmp_path: Path) -> None:
     assert agents[0]["temperature"] == 0.2
     assert agents[0]["top_p"] == 0.8
     assert agents[0]["max_tokens"] == 224
-    assert "Answer the user's actual question directly" in agents[0]["system_prompt"]
+    assert "You are Ropi" in agents[0]["system_prompt"]
+    assert "get_current_time" not in agents[0]["system_prompt"]
+    assert "Mandatory live-data" not in agents[0]["system_prompt"]
 
     info = db.create_information({"title": "Company", "content": "We build robots.", "enabled": True})
     payload = dict(agents[0])
@@ -80,16 +82,62 @@ def test_existing_ropi_receives_requested_defaults_once(tmp_path: Path) -> None:
     ropi = db.list_agents()[0]
     with db.connect() as conn:
         conn.execute(
-            "UPDATE agents SET role='Old role',system_prompt='Old prompt',temperature=0.9,top_p=0.95,max_tokens=900 WHERE id=?",
+            "UPDATE agents SET role='Old role',system_prompt='Old prompt',temperature=0.9,top_p=0.95,max_tokens=900,tools_enabled='[]' WHERE id=?",
             (ropi["id"],),
         )
+        conn.execute("UPDATE settings SET value='0.82' WHERE key='stt_confidence_threshold'")
         conn.execute("UPDATE settings SET value='0' WHERE key='ropi_defaults_version'")
     db.initialize()
     migrated = db.get_agent(ropi["id"])
     assert migrated is not None
-    assert migrated["role"].startswith("Friendly humanoid robot receptionist")
-    assert "Prioritize answering the question" in migrated["system_prompt"]
+    assert migrated["role"] == "Humanoid robot receptionist for Sari Technology Global"
+    assert "You are Ropi" in migrated["system_prompt"]
+    assert "get_current_time" not in migrated["system_prompt"]
     assert migrated["temperature"] == 0.2
     assert migrated["top_p"] == 0.8
     assert migrated["max_tokens"] == 224
-    assert db.get_setting("ropi_defaults_version") == "2"
+    assert set(migrated["tools_enabled"]) >= {
+        "get_current_time",
+        "get_location",
+        "get_weather",
+        "handle_exit_intent",
+    }
+    assert db.get_setting("stt_confidence_threshold") == "0.82"
+    assert db.get_setting("ropi_defaults_version") == "4"
+
+
+def test_v031_operational_prompt_is_migrated_but_custom_role_is_preserved(tmp_path: Path) -> None:
+    settings = Settings(db_path=tmp_path / "test.db", open_browser=False)
+    db = Database(settings)
+    db.initialize()
+    ropi = db.list_agents()[0]
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE agents SET role=?, system_prompt=? WHERE id=?",
+            (
+                "Friendly humanoid robot receptionist",
+                "Primary behavior:\nMandatory live-data and tool rules:\nTools are the only source of truth",
+                ropi["id"],
+            ),
+        )
+        conn.execute("UPDATE settings SET value='3' WHERE key='ropi_defaults_version'")
+    db.initialize()
+    migrated = db.get_agent(ropi["id"])
+    assert migrated is not None
+    assert migrated["role"] == "Humanoid robot receptionist for Sari Technology Global"
+    assert "You are Ropi" in migrated["system_prompt"]
+    assert "Mandatory live-data" not in migrated["system_prompt"]
+    assert db.get_setting("ropi_defaults_version") == "4"
+
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE agents SET role='My custom role', system_prompt='My custom character' WHERE id=?",
+            (ropi["id"],),
+        )
+        conn.execute("UPDATE settings SET value='3' WHERE key='ropi_defaults_version'")
+    db.initialize()
+    custom = db.get_agent(ropi["id"])
+    assert custom is not None
+    assert custom["role"] == "My custom role"
+    assert custom["system_prompt"] == "My custom character"
+    assert db.get_setting("ropi_defaults_version") == "4"

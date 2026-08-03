@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,7 +51,7 @@ class EdgeTtsProvider:
             await communicator.save(str(path))
 
         try:
-            asyncio.run(save())
+            asyncio.run(asyncio.wait_for(save(), timeout=float(self.settings.tts_edge_timeout_seconds)))
             if not path.exists() or path.stat().st_size == 0:
                 raise TtsUnavailable("Edge TTS returned an empty audio file")
             return path
@@ -150,11 +151,12 @@ class KokoroTtsProvider:
 
 
 class TtsService:
-    def __init__(self, settings: Settings, player: HostAudioPlayer):
+    def __init__(self, settings: Settings, player: HostAudioPlayer, monitor: Any | None = None):
         self.settings = settings
         self.player = player
         self.edge = EdgeTtsProvider(settings)
         self.kokoro = KokoroTtsProvider(settings)
+        self.monitor = monitor
         self._synthesis_lock = threading.RLock()
         self._playback_lock = threading.RLock()
         self._generation_lock = threading.RLock()
@@ -163,6 +165,9 @@ class TtsService:
         self._current_provider = ""
         self._last_error: str | None = None
         self._last_playback_meta: dict[str, Any] = {}
+        self._provider_failures: dict[str, int] = {"edge": 0, "kokoro": 0}
+        self._provider_open_until: dict[str, float] = {"edge": 0.0, "kokoro": 0.0}
+        self._provider_last_error: dict[str, str | None] = {"edge": None, "kokoro": None}
 
     @property
     def is_playing(self) -> bool:
@@ -229,6 +234,21 @@ class TtsService:
         folder.mkdir(parents=True, exist_ok=True)
         return folder / f"{digest}{extension}"
 
+    def _provider_circuit_open(self, provider: str) -> bool:
+        return time.monotonic() < self._provider_open_until.get(provider, 0.0)
+
+    def _record_provider_success(self, provider: str) -> None:
+        self._provider_failures[provider] = 0
+        self._provider_open_until[provider] = 0.0
+        self._provider_last_error[provider] = None
+
+    def _record_provider_failure(self, provider: str, error: Exception) -> None:
+        self._provider_failures[provider] = self._provider_failures.get(provider, 0) + 1
+        self._provider_last_error[provider] = str(error)
+        self._provider_open_until[provider] = time.monotonic() + float(self.settings.tts_circuit_open_seconds)
+        if self.monitor:
+            self.monitor.increment("tts_provider_failures")
+
     def generate_audio_blocking(
         self,
         text: str,
@@ -243,12 +263,20 @@ class TtsService:
             return None
         errors: list[str] = []
         with self._synthesis_lock:
-            for provider in self._provider_order(agent.get("tts_mode", "edge_fallback")):
+            provider_order = self._provider_order(agent.get("tts_mode", "edge_fallback"))
+            for provider in provider_order:
                 if not self._is_current(speech_id):
                     return None
+                if self._provider_circuit_open(provider) and len(provider_order) > 1:
+                    LOGGER.warning("Skipping TTS provider %s while its circuit is open", provider)
+                    errors.append(f"{provider}: temporarily disabled after a recent failure")
+                    if self.monitor:
+                        self.monitor.increment("tts_circuit_skips")
+                    continue
                 cache_path = self._cache_path(provider, text, agent, cache_namespace) if use_cache else None
                 if cache_path and cache_path.exists() and cache_path.stat().st_size > 0:
                     LOGGER.info("TTS cache hit [%s]: %s", provider, cache_path.name)
+                    self._record_provider_success(provider)
                     return GeneratedSpeech(
                         path=cache_path,
                         provider=provider,
@@ -256,50 +284,57 @@ class TtsService:
                         cached=True,
                         persistent=True,
                     )
-                generated: Path | None = None
-                try:
-                    if provider == "edge":
-                        generated = self.edge.generate(
-                            text,
-                            str(agent.get("edge_voice") or "en-US-AriaNeural"),
-                            float(agent.get("tts_rate", 1.0)),
-                        )
-                    else:
-                        generated = self.kokoro.generate(
-                            text,
-                            int(agent.get("kokoro_voice_id", 0)),
-                            float(agent.get("tts_rate", 1.0)),
-                        )
-                    if not self._is_current(speech_id):
-                        generated.unlink(missing_ok=True)
-                        return None
-                    if cache_path:
-                        temp_target = cache_path.with_suffix(cache_path.suffix + f".{uuid.uuid4().hex}.tmp")
-                        shutil.move(str(generated), str(temp_target))
-                        os.replace(temp_target, cache_path)
-                        generated = cache_path
-                        LOGGER.info("TTS cached [%s]: %s", provider, cache_path.name)
+                attempts = max(1, int(self.settings.tts_retry_count) + 1)
+                for attempt in range(attempts):
+                    generated: Path | None = None
+                    try:
+                        if provider == "edge":
+                            generated = self.edge.generate(
+                                text,
+                                str(agent.get("edge_voice") or "en-US-AriaNeural"),
+                                float(agent.get("tts_rate", 1.0)),
+                            )
+                        else:
+                            generated = self.kokoro.generate(
+                                text,
+                                int(agent.get("kokoro_voice_id", 0)),
+                                float(agent.get("tts_rate", 1.0)),
+                            )
+                        if not self._is_current(speech_id):
+                            generated.unlink(missing_ok=True)
+                            return None
+                        self._record_provider_success(provider)
+                        if cache_path:
+                            temp_target = cache_path.with_suffix(cache_path.suffix + f".{uuid.uuid4().hex}.tmp")
+                            shutil.move(str(generated), str(temp_target))
+                            os.replace(temp_target, cache_path)
+                            generated = cache_path
+                            LOGGER.info("TTS cached [%s]: %s", provider, cache_path.name)
+                            return GeneratedSpeech(
+                                path=cache_path,
+                                provider=provider,
+                                text=text,
+                                cached=False,
+                                persistent=True,
+                            )
                         return GeneratedSpeech(
-                            path=cache_path,
+                            path=generated,
                             provider=provider,
                             text=text,
                             cached=False,
-                            persistent=True,
+                            persistent=False,
                         )
-                    return GeneratedSpeech(
-                        path=generated,
-                        provider=provider,
-                        text=text,
-                        cached=False,
-                        persistent=False,
-                    )
-                except (TtsUnavailable, AudioUnavailable) as exc:
-                    if generated and generated.exists():
-                        generated.unlink(missing_ok=True)
-                    if not self._is_current(speech_id):
-                        return None
-                    errors.append(f"{provider}: {exc}")
-                    LOGGER.warning("TTS provider %s failed: %s", provider, exc)
+                    except (TtsUnavailable, AudioUnavailable) as exc:
+                        if generated and generated.exists():
+                            generated.unlink(missing_ok=True)
+                        if not self._is_current(speech_id):
+                            return None
+                        if attempt + 1 < attempts:
+                            LOGGER.warning("TTS provider %s failed; retrying once: %s", provider, exc)
+                            continue
+                        self._record_provider_failure(provider, exc)
+                        errors.append(f"{provider}: {exc}")
+                        LOGGER.warning("TTS provider %s failed: %s", provider, exc)
             self._last_error = "; ".join(errors) or "No TTS provider succeeded"
             raise TtsUnavailable(self._last_error)
 
@@ -395,4 +430,13 @@ class TtsService:
             "last_error": self._last_error,
             "last_playback": self.last_playback_meta,
             "cache_dir": str(self.settings.tts_cache_dir),
+            "provider_health": {
+                name: {
+                    "circuit_open": self._provider_circuit_open(name),
+                    "open_for_seconds": max(0, round(self._provider_open_until[name] - time.monotonic(), 1)),
+                    "failures": self._provider_failures[name],
+                    "last_error": self._provider_last_error[name],
+                }
+                for name in ("edge", "kokoro")
+            },
         }

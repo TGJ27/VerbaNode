@@ -4,14 +4,14 @@ __pycache__/
 data/*.db
 data/*.db-*
 backups/*.zip
-models/kokoro/*
-!models/kokoro/README.md
 runtime_audio/
 .pytest_cache/
 
 models/*
 !models/README.md
-!models/**/README.md
+!models/kokoro/
+models/kokoro/*
+!models/kokoro/README.md
 
 data/tts_cache/
 certs/*.key

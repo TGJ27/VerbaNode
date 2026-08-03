@@ -194,7 +194,7 @@ class Database:
             )
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
-                ("stt_confidence_threshold", "0.88", now),
+                ("stt_confidence_threshold", "0.70", now),
             )
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
@@ -218,6 +218,32 @@ class Database:
                 )
                 conn.execute(
                     "UPDATE settings SET value='1', updated_at=? WHERE key='audio_safety_version'",
+                    (now,),
+                )
+            conn.execute(
+                "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
+                ("pipeline_safety_version", "0", now),
+            )
+            pipeline_version_row = conn.execute(
+                "SELECT value FROM settings WHERE key='pipeline_safety_version'"
+            ).fetchone()
+            try:
+                pipeline_version = int(pipeline_version_row[0]) if pipeline_version_row else 0
+            except (TypeError, ValueError):
+                pipeline_version = 0
+            if pipeline_version < 1:
+                # v0.2.6 used 88% as a hard gate even when SenseVoice exposed
+                # only VerbaNode's heuristic quality estimate. Migrate only the
+                # old default so deliberate user thresholds remain unchanged.
+                conn.execute(
+                    """
+                    UPDATE settings SET value='0.70', updated_at=?
+                    WHERE key='stt_confidence_threshold' AND value IN ('0.88','0.880','88')
+                    """,
+                    (now,),
+                )
+                conn.execute(
+                    "UPDATE settings SET value='1', updated_at=? WHERE key='pipeline_safety_version'",
                     (now,),
                 )
             count = conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
@@ -270,9 +296,11 @@ class Database:
                 ropi_version = int(ropi_version_row[0]) if ropi_version_row else 0
             except (TypeError, ValueError):
                 ropi_version = 0
-            if ropi_version < 2:
-                # Apply the requested Ropi defaults to new and existing databases.
-                # Preserve voice, greeting, information, tools, chats, and memory.
+            if ropi_version < 3:
+                # Preserve the v0.3.1 reliability migration for databases that
+                # upgrade directly from v0.2.6 or earlier. Voice, greeting,
+                # information, chats, memory, extra tools, and the user's STT
+                # threshold are preserved.
                 conn.execute(
                     """
                     UPDATE agents
@@ -291,12 +319,47 @@ class Database:
                         now,
                     ),
                 )
+                core_tools = [
+                    "get_current_time",
+                    "get_location",
+                    "get_weather",
+                    "handle_exit_intent",
+                ]
+                ropi_rows = conn.execute(
+                    "SELECT id, tools_enabled FROM agents WHERE lower(trim(name))='ropi'"
+                ).fetchall()
+                for row in ropi_rows:
+                    try:
+                        enabled_tools = json.loads(row["tools_enabled"] or "[]")
+                    except (TypeError, json.JSONDecodeError):
+                        enabled_tools = []
+                    for tool_name in core_tools:
+                        if tool_name not in enabled_tools:
+                            enabled_tools.append(tool_name)
+                    conn.execute(
+                        "UPDATE agents SET tools_enabled=?, updated_at=? WHERE id=?",
+                        (json.dumps(enabled_tools), now, row["id"]),
+                    )
+                ropi_version = 3
+
+            if ropi_version < 4:
+                # v0.3.2 separates the editable Ropi character from hidden
+                # VerbaNode operating policies. Replace only the known v0.3.1
+                # operational prompt, preserving genuinely customized prompts.
                 conn.execute(
-                    "UPDATE settings SET value='0.88', updated_at=? WHERE key='stt_confidence_threshold'",
-                    (now,),
+                    """
+                    UPDATE agents
+                    SET role=?, system_prompt=?, updated_at=?
+                    WHERE lower(trim(name))='ropi'
+                      AND (
+                        system_prompt LIKE '%Mandatory live-data and tool rules:%'
+                        OR system_prompt LIKE '%Tools are the only source of truth%'
+                      )
+                    """,
+                    (ROPI_ROLE, ROPI_SYSTEM_PROMPT, now),
                 )
                 conn.execute(
-                    "UPDATE settings SET value='2', updated_at=? WHERE key='ropi_defaults_version'",
+                    "UPDATE settings SET value='4', updated_at=? WHERE key='ropi_defaults_version'",
                     (now,),
                 )
             agent_id = conn.execute("SELECT id FROM agents ORDER BY id LIMIT 1").fetchone()[0]
@@ -318,7 +381,7 @@ class Database:
                     "INSERT INTO scripts(title,text,enabled,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?)",
                     (
                         "Introduction",
-                        "Hello and welcome. This is VerbaNode.",
+                        "Hello and welcome. This is the VerbaNode standalone voice assistant.",
                         1,
                         0,
                         now,
@@ -353,6 +416,8 @@ class Database:
             "stt_confidence_threshold",
             "input_device",
             "output_device",
+            "input_device_fingerprint",
+            "output_device_fingerprint",
         ]
         result: dict[str, Any] = {}
         with self.connect() as conn:
@@ -368,7 +433,7 @@ class Database:
                 try:
                     value = max(0.0, min(1.0, float(value)))
                 except (TypeError, ValueError):
-                    value = 0.88
+                    value = 0.70
             elif row["key"] in {"active_agent_id", "silence_ms", "max_record_seconds", "input_device", "output_device"}:
                 value = int(value) if value not in {"", "none", "null"} else None
             result[row["key"]] = value
@@ -376,9 +441,11 @@ class Database:
         result.setdefault("silence_ms", self.settings.silence_ms)
         result.setdefault("max_record_seconds", self.settings.max_record_seconds)
         result.setdefault("stt_confidence_filter_enabled", True)
-        result.setdefault("stt_confidence_threshold", 0.88)
+        result.setdefault("stt_confidence_threshold", 0.70)
         result.setdefault("input_device", None)
         result.setdefault("output_device", None)
+        result.setdefault("input_device_fingerprint", None)
+        result.setdefault("output_device_fingerprint", None)
         return result
 
     # Agents

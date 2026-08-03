@@ -25,10 +25,20 @@ class SentenceChunker:
     }
     _CLOSERS = {'"', "'", "’", "”", ")", "]", "}"}
 
-    def __init__(self, *, min_chars: int = 5, max_chars: int = 180):
+    def __init__(
+        self,
+        *,
+        min_chars: int = 5,
+        max_chars: int = 180,
+        first_clause_min_chars: int = 24,
+        first_clause_max_chars: int = 72,
+    ):
         self.min_chars = min_chars
         self.max_chars = max_chars
+        self.first_clause_min_chars = first_clause_min_chars
+        self.first_clause_max_chars = first_clause_max_chars
         self._buffer = ""
+        self._emitted_count = 0
 
     @property
     def buffered_text(self) -> str:
@@ -41,6 +51,8 @@ class SentenceChunker:
         chunks: list[str] = []
         while True:
             boundary = self._find_sentence_boundary()
+            if boundary is None and self._emitted_count == 0:
+                boundary = self._find_first_clause_boundary()
             if boundary is None and len(self._buffer) >= self.max_chars:
                 boundary = self._find_forced_boundary()
             if boundary is None:
@@ -49,6 +61,7 @@ class SentenceChunker:
             self._buffer = self._buffer[boundary:].lstrip()
             if chunk:
                 chunks.append(chunk)
+                self._emitted_count += 1
         return chunks
 
     def flush(self) -> list[str]:
@@ -76,6 +89,20 @@ class SentenceChunker:
             # Wait for following whitespace before committing a sentence. The
             # final remainder is emitted by flush() when generation ends.
             if end < len(text) and text[end].isspace() and len(text[:end].strip()) >= self.min_chars:
+                return end
+        return None
+
+    def _find_first_clause_boundary(self) -> int | None:
+        """Emit one natural early clause to reduce time-to-first-audio."""
+        text = self._buffer
+        if len(text) < self.first_clause_min_chars:
+            return None
+        window = text[: self.first_clause_max_chars]
+        for index, char in enumerate(window):
+            if char not in ",;:":
+                continue
+            end = index + 1
+            if end < len(text) and text[end].isspace() and len(text[:end].strip()) >= self.first_clause_min_chars:
                 return end
         return None
 
@@ -118,17 +145,25 @@ class StreamingTtsSession:
         events: EventHub,
         agent: dict[str, Any],
         source: str = "assistant",
+        turn_id: str | None = None,
+        generation_id: str | None = None,
     ):
         self.tts = tts
         self.events = events
         self.agent = agent
         self.source = source
+        self.turn_id = turn_id
+        self.generation_id = generation_id
         self.chunker = SentenceChunker()
         self.started = asyncio.Event()  # first audio chunk actually starts playback
         self.finished = asyncio.Event()
         self.cancelled = threading.Event()
-        self._text_queue: asyncio.Queue[tuple[int, str] | object] = asyncio.Queue()
-        self._audio_queue: asyncio.Queue[tuple[int, str, GeneratedSpeech] | object] = asyncio.Queue()
+        self._text_queue: asyncio.Queue[tuple[int, str] | object] = asyncio.Queue(
+            maxsize=int(getattr(getattr(tts, "settings", None), "tts_text_queue_size", 8))
+        )
+        self._audio_queue: asyncio.Queue[tuple[int, str, GeneratedSpeech] | object] = asyncio.Queue(
+            maxsize=int(getattr(getattr(tts, "settings", None), "tts_audio_queue_size", 4))
+        )
         self._generator_task: asyncio.Task | None = None
         self._player_task: asyncio.Task | None = None
         self._speech_id: int | None = None
@@ -195,7 +230,7 @@ class StreamingTtsSession:
             self._player_task = asyncio.create_task(self._player(), name="assistant-tts-player")
             await self.events.broadcast(
                 "tts_started",
-                {"source": self.source, "text": chunk, "streaming": True, "phase": "preparing"},
+                {"source": self.source, "text": chunk, "streaming": True, "phase": "preparing", "turn_id": self.turn_id, "generation_id": self.generation_id},
             )
         LOGGER.info("Queued TTS sentence %d: %s", index, chunk[:120])
         await self._text_queue.put((index, chunk))
@@ -211,7 +246,7 @@ class StreamingTtsSession:
                     continue
                 await self.events.broadcast(
                     "tts_chunk_generating",
-                    {"source": self.source, "index": index, "text": chunk},
+                    {"source": self.source, "index": index, "text": chunk, "turn_id": self.turn_id, "generation_id": self.generation_id},
                 )
                 try:
                     generated = await asyncio.to_thread(
@@ -253,6 +288,8 @@ class StreamingTtsSession:
                         "text": chunk,
                         "provider": generated.provider,
                         "cached": generated.cached,
+                        "turn_id": self.turn_id,
+                        "generation_id": self.generation_id,
                     },
                 )
                 try:
@@ -273,7 +310,7 @@ class StreamingTtsSession:
             self.finished.set()
             if not self._stopped_event_sent:
                 self._stopped_event_sent = True
-                await self.events.broadcast("tts_stopped", {"source": self.source})
+                await self.events.broadcast("tts_stopped", {"source": self.source, "turn_id": self.turn_id, "generation_id": self.generation_id})
 
 
 def empty_audio() -> np.ndarray:

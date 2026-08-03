@@ -68,15 +68,13 @@ echo.
 echo Next steps:
 echo 1. Install Ollama for Windows and pull a model:
 echo    ollama pull qwen3.5:0.8b
-echo 2. Create the default database:
+echo 2. Create or migrate the SQLite database:
 echo    setup_database.bat
 echo 3. Download the local Kokoro model:
 echo    download_kokoro.bat
-echo.
-echo 4. Pre-download the FunASR speech model before first conversation:
+echo 4. Pre-download the FunASR speech model:
 echo    download_funasr.bat
 echo 5. Start VerbaNode with run.bat
-
 echo.
 pause
 exit /b 0

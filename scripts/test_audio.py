@@ -45,7 +45,7 @@ def main() -> None:
     played = player.play_file(tone, volume=1.0)
     if not played:
         raise SystemExit("The test tone was cancelled or did not complete.")
-    print("Playback completed. If you heard nothing, use Settings > Host audio to select and test the JYX output.")
+    print("Playback completed. If you heard nothing, use Settings > Host audio to select and test the preferred output device.")
 
 
 if __name__ == "__main__":

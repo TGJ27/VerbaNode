@@ -43,6 +43,7 @@ from app.services.kokoro_voices import KOKORO_VOICES
 from app.services.audio import AudioUnavailable, decode_pcm_wav
 from app.services.llm import OllamaUnavailable
 from app.version import APP_VERSION, BUILD_LABEL
+from app.runtime import install_asyncio_exception_filter
 from app.state import state
 
 logging.basicConfig(
@@ -51,9 +52,15 @@ logging.basicConfig(
 )
 LOGGER = logging.getLogger(__name__)
 
-app = FastAPI(title="VerbaNode", version=APP_VERSION)
+app = FastAPI(title="VerbaNode Standalone", version=APP_VERSION)
 STATIC_DIR = ROOT_DIR / "app" / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    install_asyncio_exception_filter()
 
 
 @app.middleware("http")
@@ -109,7 +116,7 @@ async def health() -> dict[str, Any]:
     return {"status": "ok", "version": app.version, "build": BUILD_LABEL}
 
 
-# Authentication and requester-confirmed controller takeover
+# Authentication and single-controller takeover
 @app.post("/api/auth/login")
 async def login(payload: LoginRequest) -> JSONResponse:
     result = state.controller.login(payload.pin, payload.client_name, payload.force_takeover)
@@ -229,8 +236,10 @@ def audio_device_payload() -> dict[str, Any]:
     recommended_output = preferred(outputs, "jyx")
     for device in inputs:
         device["recommended_input"] = device["id"] == recommended_input
+        device["fingerprint"] = state.recorder.device_fingerprint(device, "input")
     for device in outputs:
         device["recommended_output"] = device["id"] == recommended_output
+        device["fingerprint"] = state.recorder.device_fingerprint(device, "output")
 
     return {
         "inputs": inputs,
@@ -278,6 +287,11 @@ async def bootstrap(token: Token) -> dict[str, Any]:
         "models": models,
         "ollama_error": ollama_error,
         "hardware": hardware_status(),
+        "pipeline": state.monitor.snapshot(),
+        "audio_health": {
+            "input": state.recorder.health(),
+            "output": state.player.health(),
+        },
     }
 
 
@@ -312,6 +326,23 @@ async def system_status(token: Token) -> dict[str, Any]:
             "output_locked": state.player.output_locked,
             "mode": "persistent_duplex_lock",
         },
+        "pipeline": state.monitor.snapshot(),
+        "audio_health": {
+            "input": state.recorder.health(),
+            "output": state.player.health(),
+        },
+    }
+
+
+@app.get("/api/pipeline")
+async def pipeline_status(token: Token) -> dict[str, Any]:
+    return {
+        "pipeline": state.monitor.snapshot(),
+        "audio": {
+            "input": state.recorder.health(),
+            "output": state.player.health(),
+        },
+        "tts": state.tts.status(),
     }
 
 
@@ -769,9 +800,16 @@ async def update_conversation_settings(
         if not device or int(device.get("max_output_channels", 0)) <= 0:
             raise HTTPException(status_code=400, detail="Selected speaker is unavailable")
 
+    input_info = available.get(selected_input) if selected_input is not None else None
+    output_info = available.get(selected_output) if selected_output is not None else None
+    values["input_device_fingerprint"] = state.recorder.device_fingerprint(input_info, "input")
+    values["output_device_fingerprint"] = state.recorder.device_fingerprint(output_info, "output")
+
     device_changed = (
         previous.get("input_device") != selected_input
         or previous.get("output_device") != selected_output
+        or previous.get("input_device_fingerprint") != values.get("input_device_fingerprint")
+        or previous.get("output_device_fingerprint") != values.get("output_device_fingerprint")
     )
     if device_changed:
         await state.conversation.stop_conversation(stop_tts=True)
@@ -781,6 +819,7 @@ async def update_conversation_settings(
     updated = state.db.get_runtime_settings()
     if device_changed:
         state.player.set_output_device(updated.get("output_device"))
+        state.monitor.increment("audio_device_recoveries")
     await state.events.broadcast("runtime_settings_changed", updated)
     return updated
 
@@ -846,10 +885,15 @@ async def restore_backup(token: Token, file: UploadFile = File(...)) -> dict[str
         try:
             with zipfile.ZipFile(zip_path) as archive:
                 names = set(archive.namelist())
-                if "verbanode.db" not in names:
+                database_name = (
+                    "verbanode.db" if "verbanode.db" in names
+                    else "verbanode_standalone.db" if "verbanode_standalone.db" in names
+                    else None
+                )
+                if database_name is None:
                     raise HTTPException(status_code=400, detail="Backup database is missing")
-                archive.extract("verbanode.db", temp_dir)
-            restored = temp_dir / "verbanode.db"
+                archive.extract(database_name, temp_dir)
+            restored = temp_dir / database_name
             with sqlite3.connect(restored) as conn:
                 result = conn.execute("PRAGMA integrity_check").fetchone()[0]
                 if result != "ok":

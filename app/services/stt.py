@@ -195,53 +195,85 @@ class FunASRService:
         samples: np.ndarray,
         model_name: str | None = None,
     ) -> TranscriptionResult:
-        if samples.size == 0:
+        """Transcribe one immutable PCM snapshot with one transient retry.
+
+        SenseVoice accepts NumPy PCM in current FunASR builds, avoiding a WAV
+        round-trip. Older builds are retained through a file fallback. A retry
+        is used only for transient runtime/I/O failures; empty speech is never
+        retried.
+        """
+        audio = np.asarray(samples, dtype=np.float32).reshape(-1).copy()
+        if audio.size == 0:
             return TranscriptionResult("", 0.0, "empty")
         model_name = model_name or self.settings.funasr_model
         model = self._load(model_name)
-        output_path = self.settings.runtime_audio_dir / f"stt-{uuid.uuid4().hex}.wav"
-        try:
-            import soundfile as sf
+        attempts = max(1, int(getattr(self.settings, "stt_retry_count", 1)) + 1)
+        errors: list[str] = []
 
-            sf.write(output_path, samples, self.settings.sample_rate, subtype="PCM_16")
-            result = model.generate(
-                input=str(output_path),
-                cache={},
-                language="en",
-                use_itn=True,
-                batch_size_s=60,
-            )
-            if not result:
-                return TranscriptionResult("", 0.0, "empty")
-            first = result[0] if isinstance(result, list) else result
-            if isinstance(first, dict):
-                text = str(first.get("text") or first.get("sentence_info") or "")
-            else:
-                text = str(first)
-            text = self._clean_text(text)
-            provider_confidence = self._provider_confidence(first)
-            if provider_confidence is not None:
-                confidence = max(0.0, min(1.0, provider_confidence))
-                source = "provider"
-            else:
-                confidence = self._estimated_confidence(samples, text)
-                source = "estimated"
-            LOGGER.info(
-                "STT result confidence=%d%% source=%s text=%r",
-                round(confidence * 100),
-                source,
-                text[:160],
-            )
-            return TranscriptionResult(text, confidence, source)
-        except SttUnavailable:
-            raise
-        except Exception as exc:
-            raise SttUnavailable(f"Speech recognition failed: {exc}") from exc
-        finally:
+        for attempt in range(attempts):
+            output_path = self.settings.runtime_audio_dir / f"stt-{uuid.uuid4().hex}.wav"
             try:
-                output_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+                try:
+                    result = model.generate(
+                        input=audio,
+                        cache={},
+                        language="en",
+                        use_itn=True,
+                        batch_size_s=60,
+                    )
+                except (TypeError, ValueError, AttributeError) as direct_exc:
+                    # Compatibility with FunASR/provider builds that only accept
+                    # a file path as input.
+                    import soundfile as sf
+
+                    sf.write(output_path, audio, self.settings.sample_rate, subtype="PCM_16")
+                    LOGGER.debug("Direct PCM ASR unsupported; using WAV fallback: %s", direct_exc)
+                    result = model.generate(
+                        input=str(output_path),
+                        cache={},
+                        language="en",
+                        use_itn=True,
+                        batch_size_s=60,
+                    )
+                if not result:
+                    return TranscriptionResult("", 0.0, "empty")
+                first = result[0] if isinstance(result, list) else result
+                if isinstance(first, dict):
+                    text = str(first.get("text") or first.get("sentence_info") or "")
+                else:
+                    text = str(first)
+                text = self._clean_text(text)
+                provider_confidence = self._provider_confidence(first)
+                if provider_confidence is not None:
+                    confidence = max(0.0, min(1.0, provider_confidence))
+                    source = "provider"
+                else:
+                    confidence = self._estimated_confidence(audio, text)
+                    source = "estimated"
+                LOGGER.info(
+                    "STT result confidence=%d%% source=%s attempt=%d text=%r",
+                    round(confidence * 100),
+                    source,
+                    attempt + 1,
+                    text[:160],
+                )
+                return TranscriptionResult(text, confidence, source)
+            except SttUnavailable:
+                raise
+            except (OSError, RuntimeError) as exc:
+                errors.append(str(exc))
+                if attempt + 1 >= attempts:
+                    break
+                LOGGER.warning("Transient STT failure; retrying once: %s", exc)
+            except Exception as exc:
+                raise SttUnavailable(f"Speech recognition failed: {exc}") from exc
+            finally:
+                try:
+                    output_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        raise SttUnavailable("Speech recognition failed after retry: " + "; ".join(errors))
 
     def transcribe(self, samples: np.ndarray, model_name: str | None = None) -> str:
         """Backward-compatible text-only interface."""

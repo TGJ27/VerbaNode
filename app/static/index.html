@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#11131a">
-  <title>VerbaNode</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.2.6">
+  <meta name="theme-color" content="#eef4ff">
+  <title>VerbaNode Standalone</title>
+  <link rel="stylesheet" href="/static/styles.css?v=0.3.3">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
@@ -15,7 +15,7 @@
       <div class="brand-mark large">VN</div>
       <p class="eyebrow">LOCAL VOICE SYSTEM</p>
       <h1>VerbaNode</h1>
-      <p class="muted">Windows voice assistant · browser control panel</p>
+      <p class="muted">Standalone Windows host · browser control panel</p>
       <form id="loginForm" class="stack gap-12">
         <label>Controller name
           <input id="clientName" value="My browser" maxlength="80" autocomplete="nickname">
@@ -36,7 +36,7 @@
         <div class="brand-mark">VN</div>
         <div>
           <strong>VerbaNode</strong>
-          <span>VerbaNode · <b id="appVersion">v0.2.6</b></span>
+          <span>Standalone · <b id="appVersion">v0.3.3</b></span>
         </div>
         <button id="mobileCloseNav" class="icon-btn mobile-only" aria-label="Close menu">×</button>
       </div>
@@ -140,7 +140,7 @@
       </section>
 
       <section id="page-agents" class="page">
-        <div class="page-actions"><div><p class="muted">Each agent keeps its own prompt, models, voice, information, chats, and memory.</p></div><button id="addAgentBtn" class="btn primary">＋ Create agent</button></div>
+        <div class="page-actions"><div><p class="muted">Each agent keeps its own identity, personality, models, voice, information, tools, chats, and memory. VerbaNode handles operational policies internally.</p></div><button id="addAgentBtn" class="btn primary">＋ Create agent</button></div>
         <div id="agentGrid" class="card-grid agents-grid"></div>
       </section>
 
@@ -183,14 +183,13 @@
 
           <section class="card settings-card">
             <p class="eyebrow">HOST AUDIO</p><h3>Microphone and speaker</h3>
-            <p class="muted">Audio always uses devices connected to this Windows PC. Conversation mode locks the JYX output first, then keeps both JYX and DJI streams open until conversation mode stops.</p>
             <label>Microphone input
               <select id="inputDeviceSelect"></select>
-              <small id="inputDeviceHint" class="field-help">Prefer the DJI Mic entry using Windows WASAPI when available.</small>
+              <small id="inputDeviceHint" class="field-help">Choose the preferred Windows input device. The saved selection is restored after reconnects when possible.</small>
             </label>
             <label>Speaker output
               <select id="outputDeviceSelect"></select>
-              <small id="outputDeviceHint" class="field-help">Choose Headphones (JYX-N882). The selection is pinned instead of following the changing Windows default.</small>
+              <small id="outputDeviceHint" class="field-help">Choose the preferred Windows output device. The saved selection is restored after reconnects when possible.</small>
             </label>
             <div class="button-grid three audio-device-actions">
               <button id="refreshAudioDevicesBtn" type="button" class="btn ghost compact">↻ Refresh</button>
@@ -211,6 +210,7 @@
 
           <section class="card settings-card">
             <p class="eyebrow">AUDIO & TTS</p><h3>Runtime status</h3>
+            <div id="pipelineStatusPanel" class="status-box">Pipeline is idle.</div>
             <div id="runtimeStatusList" class="definition-list"></div>
             <button id="refreshStatusBtn" class="btn ghost">Refresh status</button>
           </section>
@@ -225,6 +225,12 @@
         </div>
       </section>
     </main>
+
+    <div class="mobile-voice-dock" aria-label="Quick voice controls">
+      <button id="mobileConversationBtn" class="mobile-voice-action mode"><span>▶</span><b>Start mode</b></button>
+      <button id="mobileHostPttBtn" class="mobile-voice-action"><span>●</span><b>Host mic</b></button>
+      <button id="mobileBrowserPttBtn" class="mobile-voice-action"><span>●</span><b>Device mic</b></button>
+    </div>
 
     <nav class="mobile-bottom-nav">
       <button class="active" data-page="chat">◉<span>Chat</span></button>
@@ -258,11 +264,11 @@
             <label>UI color<input name="color" type="color"></label>
             <label>Greeting<input name="greeting" maxlength="500"></label>
           </div>
-          <label>Role<input name="role" maxlength="500"></label>
-          <label>System prompt<textarea name="system_prompt" rows="8"></textarea></label>
+          <label>Role summary<input name="role" maxlength="500"><small class="field-help">A short description of who this agent is.</small></label>
+          <label>Character instructions<textarea name="system_prompt" rows="8"></textarea><small class="field-help">Identity, domain, personality, tone, and speaking style only. Tool use, memory, safety, external data, and runtime behavior are handled internally by VerbaNode.</small></label>
           <div class="ai-role-box">
             <label>Describe the agent you want<textarea id="roleDescription" rows="3" placeholder="Example: A professional receptionist for a robotics company..."></textarea></label>
-            <button id="generateRoleBtn" type="button" class="btn secondary">Generate role, prompt, and greeting</button>
+            <button id="generateRoleBtn" type="button" class="btn secondary">Generate identity, character, and greeting</button>
           </div>
         </div>
         <div class="tab-panel" data-panel="models">
@@ -295,6 +301,6 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/app.js?v=0.2.6" defer></script>
+  <script src="/static/app.js?v=0.3.3" defer></script>
 </body>
 </html>

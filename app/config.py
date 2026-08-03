@@ -20,11 +20,12 @@ class Settings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = 8002
-    pin: str = "CHANGE_ME"
+    pin: str = "1234"
     db_path: Path = ROOT_DIR / "data" / "verbanode.db"
     ollama_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:0.8b"
     default_location: str = "Jakarta"
+    default_timezone: str = "Asia/Jakarta"
     funasr_model: str = "iic/SenseVoiceSmall"
     sample_rate: int = 16000
     silence_ms: int = 900
@@ -41,6 +42,17 @@ class Settings(BaseSettings):
     takeover_timeout_seconds: int = 30
     summary_trigger_messages: int = 24
     summary_keep_recent: int = 10
+    stt_timeout_seconds: float = Field(default=30.0, ge=3.0, le=120.0)
+    stt_retry_count: int = Field(default=1, ge=0, le=3)
+    ollama_connect_timeout_seconds: float = Field(default=5.0, ge=1.0, le=60.0)
+    ollama_read_timeout_seconds: float = Field(default=120.0, ge=10.0, le=600.0)
+    tool_timeout_seconds: float = Field(default=12.0, ge=1.0, le=120.0)
+    max_tool_rounds: int = Field(default=3, ge=1, le=5)
+    tts_edge_timeout_seconds: float = Field(default=12.0, ge=3.0, le=120.0)
+    tts_retry_count: int = Field(default=1, ge=0, le=3)
+    tts_circuit_open_seconds: float = Field(default=60.0, ge=5.0, le=600.0)
+    tts_text_queue_size: int = Field(default=8, ge=2, le=64)
+    tts_audio_queue_size: int = Field(default=4, ge=1, le=32)
 
     @property
     def runtime_audio_dir(self) -> Path:

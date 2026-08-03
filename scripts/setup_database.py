@@ -39,7 +39,7 @@ def main() -> None:
     print(f"{action} database: {db_path}")
     print("Default agent: Ropi")
     print("Default model: qwen3.5:0.8b")
-    print("Default STT confidence threshold: 88%")
+    print("Default STT confidence threshold: 70%")
     print("Default maximum response tokens: 224")
 
 

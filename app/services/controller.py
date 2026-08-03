@@ -56,16 +56,8 @@ class ControllerManager:
                 return {"status": "granted", "token": token, "takeover": False}
 
             previous_client = self.active.client_name
-            if not force_takeover:
-                return {
-                    "status": "takeover_required",
-                    "takeover_required": True,
-                    "active_client": previous_client,
-                }
-
-            # The requester explicitly confirmed takeover after entering the
-            # correct PIN. Ownership transfers immediately; the old browser is
-            # revoked by the API layer without asking it for approval.
+            # A correct PIN is the authorization boundary. Transfer ownership
+            # immediately without approval or a second confirmation prompt.
             old_token = self.active.token
             token = self._new_token()
             now = time.monotonic()

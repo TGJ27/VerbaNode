@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -8,6 +9,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
+from app.services.prompts import PromptComposer
 from app.services.tools import ToolService
 
 LOGGER = logging.getLogger(__name__)
@@ -20,9 +22,19 @@ class OllamaUnavailable(RuntimeError):
 
 
 class OllamaService:
-    def __init__(self, settings: Settings, tools: ToolService):
+    def __init__(self, settings: Settings, tools: ToolService, monitor: Any | None = None):
         self.settings = settings
         self.tools = tools
+        self.monitor = monitor
+        self.prompts = PromptComposer(settings)
+
+    def _timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            connect=float(self.settings.ollama_connect_timeout_seconds),
+            read=float(self.settings.ollama_read_timeout_seconds),
+            write=30.0,
+            pool=float(self.settings.ollama_connect_timeout_seconds),
+        )
 
     async def list_models(self) -> list[dict[str, Any]]:
         try:
@@ -61,22 +73,93 @@ class OllamaService:
         information: list[dict[str, Any]],
         summary: str | None,
     ) -> str:
-        sections = [
-            f"ROLE: {agent.get('role', '')}",
-            str(agent.get("system_prompt") or ""),
-            "The application is a voice assistant. Produce natural spoken English. Avoid markdown tables and excessive formatting unless specifically requested.",
-        ]
-        if information:
-            info_text = "\n\n".join(
-                f"[{item['title']}]\n{item['content']}" for item in information
-            )
-            sections.append(
-                "ENABLED INFORMATION:\nUse the following information as trusted local context. Do not mention that it was injected.\n"
-                + info_text
-            )
-        if summary:
-            sections.append("MEMORY SUMMARY:\n" + summary)
-        return "\n\n".join(section for section in sections if section.strip())
+        return self.prompts.compose(
+            agent=agent,
+            information=information,
+            summary=summary,
+            tool_schemas=self.tools.schemas(agent.get("tools_enabled") or []),
+        )
+
+    @staticmethod
+    def _repair_tool_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Ensure interrupted assistant tool calls have matching tool results."""
+        repaired: list[dict[str, Any]] = []
+        pending: list[str] = []
+        for message in messages:
+            if pending and message.get("role") != "tool":
+                for name in pending:
+                    repaired.append({
+                        "role": "tool",
+                        "tool_name": name,
+                        "content": json.dumps({"status": "cancelled", "reason": "user_interrupted"}),
+                    })
+                pending = []
+            repaired.append(message)
+            if message.get("role") == "assistant" and message.get("tool_calls"):
+                pending = [
+                    str((call.get("function") or {}).get("name") or "unknown_tool")
+                    for call in message.get("tool_calls") or []
+                ]
+            elif message.get("role") == "tool" and pending:
+                tool_name = str(message.get("tool_name") or "")
+                if tool_name in pending:
+                    pending.remove(tool_name)
+        if pending:
+            for name in pending:
+                repaired.append({
+                    "role": "tool",
+                    "tool_name": name,
+                    "content": json.dumps({"status": "cancelled", "reason": "user_interrupted"}),
+                })
+        return repaired
+
+    async def _stream_round(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        agent: dict[str, Any],
+        messages: list[dict[str, Any]],
+        options: dict[str, Any],
+        tools: list[dict[str, Any]],
+        on_token: TokenCallback,
+    ) -> tuple[str, list[dict[str, Any]]]:
+        text = ""
+        calls: list[dict[str, Any]] = []
+        thinking_chars = 0
+        async with client.stream(
+            "POST",
+            f"{self.settings.ollama_url}/api/chat",
+            json={
+                "model": agent["llm_model"],
+                "messages": messages,
+                "tools": tools,
+                "stream": True,
+                "think": False,
+                "options": options,
+            },
+        ) as response:
+            if response.status_code >= 400:
+                error_body = (await response.aread()).decode("utf-8", errors="replace")
+                raise OllamaUnavailable(
+                    f"Ollama returned {response.status_code}: {error_body[:500]}"
+                )
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                payload = json.loads(line)
+                message = payload.get("message") or {}
+                content = message.get("content") or ""
+                thinking_chars += len(message.get("thinking") or "")
+                if content:
+                    text += content
+                    await on_token(content)
+                if message.get("tool_calls"):
+                    calls.extend(message["tool_calls"])
+        LOGGER.info(
+            "Ollama stream round completed: content_chars=%d thinking_chars=%d tool_calls=%d",
+            len(text), thinking_chars, len(calls),
+        )
+        return text, calls
 
     async def chat_stream(
         self,
@@ -93,159 +176,106 @@ class OllamaService:
             "num_ctx": int(agent.get("context_size", 4096)),
         }
         tools = self.tools.schemas(agent.get("tools_enabled") or [])
-        full_text = ""
+        working_messages = self._repair_tool_history(list(messages))
+        visible_parts: list[str] = []
         exit_requested = False
-        tool_calls: list[dict[str, Any]] = []
-        thinking_chars = 0
-        assistant_message: dict[str, Any] = {"role": "assistant", "content": ""}
+        last_executed: list[tuple[str, dict[str, Any]]] = []
+        max_rounds = max(1, int(self.settings.max_tool_rounds))
 
         try:
-            async with httpx.AsyncClient(timeout=None) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self.settings.ollama_url}/api/chat",
-                    json={
-                        "model": agent["llm_model"],
-                        "messages": messages,
-                        "tools": tools,
-                        "stream": True,
-                        "think": False,
-                        "options": options,
-                    },
-                ) as response:
-                    if response.status_code >= 400:
-                        error_body = (await response.aread()).decode("utf-8", errors="replace")
-                        raise OllamaUnavailable(
-                            f"Ollama returned {response.status_code}: {error_body[:500]}"
-                        )
-                    async for line in response.aiter_lines():
-                        if not line:
-                            continue
-                        payload = json.loads(line)
-                        message = payload.get("message") or {}
-                        content = message.get("content") or ""
-                        thinking_chars += len(message.get("thinking") or "")
-                        if content:
-                            full_text += content
-                            await on_token(content)
-                        if message.get("tool_calls"):
-                            tool_calls.extend(message["tool_calls"])
-            LOGGER.info(
-                "Ollama initial stream completed: content_chars=%d thinking_chars=%d tool_calls=%d",
-                len(full_text),
-                thinking_chars,
-                len(tool_calls),
-            )
-            assistant_message["content"] = full_text
-            if tool_calls:
-                assistant_message["tool_calls"] = tool_calls
-                followup_messages = [*messages, assistant_message]
-                executed_tools: list[tuple[str, dict[str, Any]]] = []
-                for call in tool_calls:
-                    function = call.get("function") or {}
-                    name = function.get("name", "")
-                    arguments = function.get("arguments") or {}
-                    if isinstance(arguments, str):
+            async with httpx.AsyncClient(timeout=self._timeout()) as client:
+                for round_index in range(max_rounds + 1):
+                    round_text, tool_calls = await self._stream_round(
+                        client=client,
+                        agent=agent,
+                        messages=working_messages,
+                        options=options,
+                        tools=tools if round_index < max_rounds else [],
+                        on_token=on_token,
+                    )
+                    if round_text:
+                        visible_parts.append(round_text)
+                    assistant_message: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": round_text,
+                    }
+                    if tool_calls:
+                        assistant_message["tool_calls"] = tool_calls
+                    working_messages.append(assistant_message)
+
+                    if not tool_calls:
+                        break
+                    if round_index >= max_rounds:
+                        LOGGER.warning("Maximum tool rounds reached; refusing further tool recursion")
+                        break
+
+                    last_executed = []
+                    for call in tool_calls:
+                        function = call.get("function") or {}
+                        name = str(function.get("name") or "")
+                        arguments = function.get("arguments") or {}
+                        if isinstance(arguments, str):
+                            try:
+                                arguments = json.loads(arguments)
+                            except json.JSONDecodeError:
+                                arguments = {}
+                        if self.monitor:
+                            self.monitor.transition("tooling", tool=name)
                         try:
-                            arguments = json.loads(arguments)
-                        except json.JSONDecodeError:
-                            arguments = {}
-                    result = await self.tools.execute(name, arguments)
-                    if name == "handle_exit_intent" and result.get("conversation_should_stop"):
-                        exit_requested = True
-                    executed_tools.append((name, result))
-                    if on_tool:
-                        await on_tool(name, arguments, result)
-                    followup_messages.append(
-                        {
+                            result = await asyncio.wait_for(
+                                self.tools.execute(name, arguments),
+                                timeout=float(self.settings.tool_timeout_seconds),
+                            )
+                        except asyncio.TimeoutError:
+                            result = {"error": f"Tool '{name}' timed out after {self.settings.tool_timeout_seconds:g} seconds"}
+                            if self.monitor:
+                                self.monitor.increment("tool_timeouts")
+                        except Exception as exc:
+                            result = {"error": f"Tool '{name}' failed: {exc}"}
+                        if name == "handle_exit_intent" and result.get("conversation_should_stop"):
+                            exit_requested = True
+                        last_executed.append((name, result))
+                        if on_tool:
+                            await on_tool(name, arguments, result)
+                        working_messages.append({
                             "role": "tool",
                             "tool_name": name,
                             "content": json.dumps(result, ensure_ascii=False),
-                        }
-                    )
-                if full_text:
-                    await on_token("\n")
-                followup_text = await self._stream_without_tools(
-                    agent=agent,
-                    messages=followup_messages,
-                    options=options,
-                    on_token=on_token,
-                )
-                if not followup_text.strip():
-                    fallback = " ".join(
-                        self.tools.format_result(name, result)
-                        for name, result in executed_tools
-                    ).strip()
-                    if fallback:
-                        LOGGER.warning(
-                            "Ollama tool follow-up returned no visible content; using direct tool result fallback"
-                        )
-                        await on_token(fallback)
-                        followup_text = fallback
-                full_text = (full_text + " " + followup_text).strip()
-            if not full_text.strip():
+                        })
+                    if round_text:
+                        await on_token("\n")
+
+            full_text = " ".join(part.strip() for part in visible_parts if part.strip()).strip()
+            if not full_text and last_executed:
+                fallback = " ".join(
+                    self.tools.format_result(name, result)
+                    for name, result in last_executed
+                ).strip()
+                if fallback:
+                    LOGGER.warning("Ollama tool flow returned no visible content; using direct result fallback")
+                    await on_token(fallback)
+                    full_text = fallback
+            if not full_text:
                 LOGGER.warning("Ollama completed without visible response text")
-            return full_text.strip(), exit_requested
+            return full_text, exit_requested
         except OllamaUnavailable:
             raise
         except httpx.HTTPStatusError as exc:
-            # Non-streaming HTTP errors may still arrive here. Avoid reading an
-            # unread streaming response, which would mask the real Ollama error.
             raise OllamaUnavailable(
                 f"Ollama returned {exc.response.status_code}: {exc.response.reason_phrase}"
             ) from exc
-        except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        except (httpx.TimeoutException, httpx.HTTPError, json.JSONDecodeError) as exc:
             raise OllamaUnavailable(f"Ollama communication failed: {exc}") from exc
-
-    async def _stream_without_tools(
-        self,
-        *,
-        agent: dict[str, Any],
-        messages: list[dict[str, Any]],
-        options: dict[str, Any],
-        on_token: TokenCallback,
-    ) -> str:
-        text = ""
-        thinking_chars = 0
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream(
-                "POST",
-                f"{self.settings.ollama_url}/api/chat",
-                json={
-                    "model": agent["llm_model"],
-                    "messages": messages,
-                    "stream": True,
-                    "think": False,
-                    "options": options,
-                },
-            ) as response:
-                if response.status_code >= 400:
-                    error_body = (await response.aread()).decode("utf-8", errors="replace")
-                    raise OllamaUnavailable(
-                        f"Ollama returned {response.status_code}: {error_body[:500]}"
-                    )
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    message = (json.loads(line).get("message") or {})
-                    thinking_chars += len(message.get("thinking") or "")
-                    content = message.get("content") or ""
-                    if content:
-                        text += content
-                        await on_token(content)
-        LOGGER.info(
-            "Ollama tool follow-up completed: content_chars=%d thinking_chars=%d",
-            len(text),
-            thinking_chars,
-        )
-        return text
 
     async def generate_role(self, description: str, model: str | None = None) -> dict[str, str]:
         prompt = (
-            "Create a voice-assistant role configuration from the user's description. "
+            "Create an agent identity and character configuration from the user's description. "
             "Return only valid JSON with keys role, system_prompt, greeting. "
-            "The greeting must be one short spoken English sentence. "
-            "The system_prompt must clearly define behavior, limits, and response style.\n\n"
+            "The role must be a short role summary. The system_prompt must contain only identity, "
+            "domain, personality, tone, and speaking style. Do not include instructions about tools, "
+            "memory, external data, safety policy, prompt hierarchy, runtime state, or application internals; "
+            "VerbaNode handles those separately. The greeting must be one short natural spoken sentence "
+            "appropriate to the described agent and language.\n\n"
             f"DESCRIPTION:\n{description}"
         )
         payload = {

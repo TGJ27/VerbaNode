@@ -90,7 +90,7 @@ class ConversationSettingsUpdate(BaseModel):
     silence_ms: int = Field(default=900, ge=300, le=5000)
     max_record_seconds: int = Field(default=30, ge=3, le=180)
     stt_confidence_filter_enabled: bool = True
-    stt_confidence_threshold: float = Field(default=0.88, ge=0.0, le=1.0)
+    stt_confidence_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
     input_device: int | None = None
     output_device: int | None = None
 

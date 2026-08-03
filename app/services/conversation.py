@@ -13,6 +13,7 @@ from app.db import Database
 from app.services.audio import AudioUnavailable, HostAudioRecorder
 from app.services.events import EventHub
 from app.services.llm import OllamaService, OllamaUnavailable
+from app.services.pipeline import PipelineMonitor, TurnContext
 from app.services.script_queue import ScriptQueueManager
 from app.services.sentence_tts import StreamingTtsSession, empty_audio
 from app.services.stt import FunASRService, SttUnavailable, TranscriptionResult
@@ -31,6 +32,7 @@ class ConversationManager:
         stt: FunASRService,
         llm: OllamaService,
         tts: TtsService,
+        monitor: PipelineMonitor | None = None,
     ):
         self.settings = settings
         self.db = db
@@ -39,6 +41,7 @@ class ConversationManager:
         self.stt = stt
         self.llm = llm
         self.tts = tts
+        self.monitor = monitor or PipelineMonitor()
         self.script_queue: ScriptQueueManager | None = None
         self._conversation_task: asyncio.Task | None = None
         self._stop_event = threading.Event()
@@ -50,13 +53,22 @@ class ConversationManager:
         self._active_tts_stream: StreamingTtsSession | None = None
         self._barge_capture_cancel: threading.Event | None = None
 
+    async def _set_pipeline(self, stage: str, **payload: Any) -> None:
+        monitor = getattr(self, "monitor", None)
+        if monitor is None:
+            monitor = PipelineMonitor()
+            self.monitor = monitor
+        snapshot = monitor.transition(stage, **payload)
+        await self.events.broadcast("pipeline_state", snapshot)
+
     @property
     def mode(self) -> str:
         return self._mode
 
     @property
     def is_conversation_running(self) -> bool:
-        return bool(self._conversation_task and not self._conversation_task.done())
+        task = getattr(self, "_conversation_task", None)
+        return bool(task and not task.done())
 
     def active_agent(self) -> dict[str, Any]:
         agent_id = int(self.db.get_setting("active_agent_id", "1") or 1)
@@ -108,8 +120,8 @@ class ConversationManager:
             await self.script_queue.interrupt_for_conversation()
 
         # Lock output first, then input. The output callback continuously emits
-        # silence while idle, so Windows keeps the selected JYX endpoint alive
-        # when the DJI microphone stream is activated. Both streams remain open
+        # silence while idle, so Windows keeps the selected output endpoint alive
+        # when the microphone stream is activated. Both streams remain open
         # for the complete conversation instead of being recreated every turn.
         runtime = self.db.get_runtime_settings()
         self.tts.player.set_output_device(runtime.get("output_device"))
@@ -126,6 +138,7 @@ class ConversationManager:
 
         self._stop_event.clear()
         self._mode = "conversation"
+        await self._set_pipeline("listening", mode=self._mode)
         self._conversation_task = asyncio.create_task(self._conversation_loop(), name="conversation-mode")
         await self.events.broadcast(
             "audio_lock_changed",
@@ -160,6 +173,7 @@ class ConversationManager:
             except (asyncio.CancelledError, Exception):
                 pass
         self._mode = "idle"
+        await self._set_pipeline("idle", mode=self._mode)
         await self.events.broadcast("mode_changed", {"mode": self._mode})
 
     async def start_ptt(self) -> None:
@@ -178,6 +192,7 @@ class ConversationManager:
         self.recorder.start_ptt(runtime.get("input_device"))
         self._ptt_active = True
         self._mode = "ptt"
+        await self._set_pipeline("recording", mode=self._mode, source="host_ptt")
         await self.events.broadcast("mode_changed", {"mode": self._mode, "recording": True})
 
     async def stop_ptt(self) -> None:
@@ -319,8 +334,10 @@ class ConversationManager:
         allow_barge_in: bool,
         stt_confidence: float | None = None,
         stt_confidence_source: str | None = None,
+        turn_context: TurnContext | None = None,
     ) -> dict[str, Any]:
         async with self._generation_lock:
+            turn_context = turn_context or self.monitor.begin_turn(source, audio=False)
             agent = self.active_agent()
             if conversation_id is None:
                 conversation_id = int(self.active_conversation(int(agent["id"]))["id"])
@@ -338,10 +355,10 @@ class ConversationManager:
                 stt_confidence_source=stt_confidence_source,
             )
             await self.events.broadcast("message_added", user_message)
-            generation_id = uuid.uuid4().hex
+            generation_id = turn_context.generation_id
             await self.events.broadcast(
                 "assistant_start",
-                {"generation_id": generation_id, "conversation_id": conversation_id},
+                {"generation_id": generation_id, "turn_id": turn_context.turn_id, "capture_id": turn_context.capture_id, "conversation_id": conversation_id},
             )
 
             information = self.db.enabled_information_for_agent(int(agent["id"]))
@@ -362,6 +379,8 @@ class ConversationManager:
                     tts=self.tts,
                     events=self.events,
                     agent=agent,
+                    turn_id=turn_context.turn_id,
+                    generation_id=generation_id,
                 )
                 self._active_tts_stream = speech_stream
 
@@ -419,35 +438,79 @@ class ConversationManager:
                     if self._barge_capture_cancel is cancel_capture:
                         self._barge_capture_cancel = None
 
+            direct_intent = self.llm.tools.match_core_intent(
+                text, agent.get("tools_enabled") or []
+            )
+            used_direct_tool = direct_intent is not None
+            assistant_source = "tool" if used_direct_tool else "llm"
+
             try:
-                llm_task = asyncio.create_task(
-                    self.llm.chat_stream(
-                        agent=agent,
-                        messages=messages,
-                        on_token=token_callback,
-                        on_tool=tool_callback,
-                    ),
-                    name=f"llm-{generation_id}",
-                )
-                if speech_stream and interruption_enabled:
-                    monitor_task = asyncio.create_task(monitor_barge_in(), name=f"barge-{generation_id}")
-                    barge_wait_task = asyncio.create_task(barge_started.wait())
-                    done, _ = await asyncio.wait(
-                        {llm_task, barge_wait_task},
-                        return_when=asyncio.FIRST_COMPLETED,
+                if direct_intent:
+                    tool_name, tool_arguments = direct_intent
+                    self.monitor.mark("tool_started")
+                    await self._set_pipeline(
+                        "tooling",
+                        turn_id=turn_context.turn_id,
+                        generation_id=generation_id,
+                        tool=tool_name,
+                        deterministic=True,
                     )
-                    if barge_wait_task in done and barge_started.is_set() and not llm_task.done():
-                        llm_task.cancel()
-                        try:
-                            await llm_task
-                        except asyncio.CancelledError:
-                            pass
-                        reply = "".join(token_parts).strip()
-                        exit_requested = False
+                    LOGGER.info(
+                        "Deterministic core tool route: intent=%s text=%r",
+                        tool_name,
+                        text,
+                    )
+                    try:
+                        tool_result = await asyncio.wait_for(
+                            self.llm.tools.execute(tool_name, tool_arguments),
+                            timeout=float(self.settings.tool_timeout_seconds),
+                        )
+                    except asyncio.TimeoutError:
+                        tool_result = {
+                            "error": f"Tool '{tool_name}' timed out after "
+                            f"{self.settings.tool_timeout_seconds:g} seconds"
+                        }
+                        self.monitor.increment("tool_timeouts")
+                    except Exception as exc:
+                        tool_result = {"error": f"Tool '{tool_name}' failed: {exc}"}
+                    await tool_callback(tool_name, tool_arguments, tool_result)
+                    reply = self.llm.tools.format_result(tool_name, tool_result).strip()
+                    await token_callback(reply)
+                    exit_requested = bool(
+                        tool_name == "handle_exit_intent"
+                        and tool_result.get("conversation_should_stop")
+                    )
+                else:
+                    self.monitor.mark("llm_started")
+                    await self._set_pipeline("thinking", turn_id=turn_context.turn_id, generation_id=generation_id)
+                    llm_task = asyncio.create_task(
+                        self.llm.chat_stream(
+                            agent=agent,
+                            messages=messages,
+                            on_token=token_callback,
+                            on_tool=tool_callback,
+                        ),
+                        name=f"llm-{generation_id}",
+                    )
+                    if speech_stream and interruption_enabled:
+                        monitor_task = asyncio.create_task(monitor_barge_in(), name=f"barge-{generation_id}")
+                        barge_wait_task = asyncio.create_task(barge_started.wait())
+                        done, _ = await asyncio.wait(
+                            {llm_task, barge_wait_task},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        if barge_wait_task in done and barge_started.is_set() and not llm_task.done():
+                            llm_task.cancel()
+                            try:
+                                await llm_task
+                            except asyncio.CancelledError:
+                                pass
+                            reply = "".join(token_parts).strip()
+                            exit_requested = False
+                        else:
+                            reply, exit_requested = await llm_task
                     else:
                         reply, exit_requested = await llm_task
-                else:
-                    reply, exit_requested = await llm_task
             except OllamaUnavailable as exc:
                 reply = f"I could not reach the local Ollama model. {exc}"
                 exit_requested = False
@@ -457,21 +520,31 @@ class ConversationManager:
                 if barge_wait_task and not barge_wait_task.done():
                     barge_wait_task.cancel()
 
+            if used_direct_tool:
+                self.monitor.mark("tool_completed")
+                self.monitor.duration("tool_total", "tool_started", "tool_completed")
+            else:
+                self.monitor.mark("llm_completed")
+                self.monitor.duration("llm_total", "llm_started", "llm_completed")
             assistant_message = self.db.add_message(
                 conversation_id,
                 "assistant",
                 reply,
-                "llm",
+                assistant_source,
             )
             await self.events.broadcast(
                 "assistant_complete",
                 {
                     "generation_id": generation_id,
+                    "turn_id": turn_context.turn_id,
+                    "capture_id": turn_context.capture_id,
                     "message": assistant_message,
                 },
             )
 
             if speech_stream:
+                await self._set_pipeline("speaking", turn_id=turn_context.turn_id, generation_id=generation_id)
+                self.monitor.mark("tts_started")
                 await speech_stream.close_input()
                 finish_task = asyncio.create_task(speech_stream.wait_finished())
                 if monitor_task:
@@ -507,12 +580,16 @@ class ConversationManager:
                     await asyncio.sleep(guard_seconds)
                 if self._active_tts_stream is speech_stream:
                     self._active_tts_stream = None
+                self.monitor.mark("tts_completed")
+                self.monitor.duration("tts_total", "tts_started", "tts_completed")
             asyncio.create_task(
                 self._maybe_summarize(int(agent["id"]), conversation_id, agent["llm_model"]),
                 name=f"summarize-{conversation_id}",
             )
             if exit_requested:
                 self._stop_event.set()
+            self.monitor.finish_turn(cancelled=False)
+            await self._set_pipeline("listening" if self.is_conversation_running else "idle")
             return {
                 "message": assistant_message,
                 "exit_requested": exit_requested,
@@ -681,36 +758,57 @@ class ConversationManager:
         allow_barge_in: bool,
     ) -> dict[str, Any]:
         agent = self.active_agent()
-        await self.events.broadcast("stt_started", {"source": source})
+        if not hasattr(self, "monitor") or self.monitor is None:
+            self.monitor = PipelineMonitor()
+        turn_context = self.monitor.begin_turn(source, audio=True)
+        await self._set_pipeline("transcribing", turn_id=turn_context.turn_id, capture_id=turn_context.capture_id)
+        self.monitor.mark("stt_started")
+        await self.events.broadcast("stt_started", {"source": source, "turn_id": turn_context.turn_id, "capture_id": turn_context.capture_id})
         try:
             if hasattr(self.stt, "transcribe_with_confidence"):
-                transcription = await asyncio.to_thread(
-                    self.stt.transcribe_with_confidence,
-                    samples,
-                    str(agent.get("stt_model") or self.settings.funasr_model),
+                transcription = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.stt.transcribe_with_confidence,
+                        samples.copy(),
+                        str(agent.get("stt_model") or self.settings.funasr_model),
+                    ),
+                    timeout=float(getattr(self.settings, "stt_timeout_seconds", 30.0)),
                 )
             else:
-                # Compatibility for custom STT adapters that still expose only
-                # the older text-returning interface.
-                text_only = await asyncio.to_thread(
-                    self.stt.transcribe,
-                    samples,
-                    str(agent.get("stt_model") or self.settings.funasr_model),
+                text_only = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.stt.transcribe,
+                        samples.copy(),
+                        str(agent.get("stt_model") or self.settings.funasr_model),
+                    ),
+                    timeout=float(getattr(self.settings, "stt_timeout_seconds", 30.0)),
                 )
                 transcription = TranscriptionResult(str(text_only), 1.0, "unavailable")
+        except asyncio.TimeoutError:
+            self.monitor.increment("stt_timeouts")
+            self.monitor.error("stt", "Speech recognition timed out")
+            await self.events.broadcast("error", {"message": "Speech recognition timed out.", "source": "stt"})
+            self.monitor.finish_turn(cancelled=True)
+            return {"interrupted_audio": np.empty(0, dtype=np.float32)}
         except SttUnavailable as exc:
+            self.monitor.error("stt", str(exc))
             await self.events.broadcast("error", {"message": str(exc), "source": "stt"})
+            self.monitor.finish_turn(cancelled=True)
             return {"interrupted_audio": np.empty(0, dtype=np.float32)}
         finally:
-            await self.events.broadcast("stt_stopped", {"source": source})
+            self.monitor.mark("stt_completed")
+            self.monitor.duration("stt_total", "stt_started", "stt_completed")
+            await self.events.broadcast("stt_stopped", {"source": source, "turn_id": turn_context.turn_id, "capture_id": turn_context.capture_id})
 
         text = transcription.text.strip()
         if not text:
+            self.monitor.finish_turn(cancelled=True)
+            await self._set_pipeline("listening" if self.is_conversation_running else "idle")
             return {"interrupted_audio": np.empty(0, dtype=np.float32)}
 
         runtime = self.db.get_runtime_settings()
         confidence = max(0.0, min(1.0, float(transcription.confidence)))
-        threshold = max(0.0, min(1.0, float(runtime.get("stt_confidence_threshold", 0.88))))
+        threshold = max(0.0, min(1.0, float(runtime.get("stt_confidence_threshold", 0.70))))
         filtering_enabled = bool(runtime.get("stt_confidence_filter_enabled", True))
         accepted = not filtering_enabled or confidence >= threshold
         transcript_event = {
@@ -722,6 +820,8 @@ class ConversationManager:
             "accepted": accepted,
             "threshold": threshold,
             "threshold_percent": int(round(threshold * 100)),
+            "turn_id": turn_context.turn_id,
+            "capture_id": turn_context.capture_id,
         }
         await self.events.broadcast("transcript", transcript_event)
 
@@ -734,6 +834,8 @@ class ConversationManager:
             )
             # Deliberately do not speak an apology and do not add the rejected
             # transcript to LLM history. The browser shows it as a local notice.
+            self.monitor.finish_turn(cancelled=True)
+            await self._set_pipeline("listening" if self.is_conversation_running else "idle")
             return {
                 "interrupted_audio": np.empty(0, dtype=np.float32),
                 "rejected": True,
@@ -748,6 +850,7 @@ class ConversationManager:
             allow_barge_in=allow_barge_in,
             stt_confidence=confidence,
             stt_confidence_source=transcription.confidence_source,
+            turn_context=turn_context,
         )
 
     async def _maybe_summarize(self, agent_id: int, conversation_id: int, model: str) -> None:

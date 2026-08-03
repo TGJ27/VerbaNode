@@ -1,2 +1,2 @@
-APP_VERSION = "0.2.6"
-BUILD_LABEL = "requester-confirmed-immediate-takeover"
+APP_VERSION = "0.3.3"
+BUILD_LABEL = "phase1-natural-core-tool-routing"

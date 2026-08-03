@@ -1,6 +1,6 @@
-# Pipeline comparison: Xiaozhi reference vs VerbaNode
+# Pipeline comparison: Xiaozhi reference vs VerbaNode Standalone
 
-This comparison is based on the uploaded `xiaozhi-esp32-server-main` source tree and VerbaNode v0.1.8.
+This comparison is based on the uploaded `xiaozhi-esp32-server-main` source tree and VerbaNode Standalone v0.1.8.
 
 ## Xiaozhi reference pipeline
 
@@ -43,7 +43,7 @@ Notable design choices:
 - The provider architecture supports many ASR, LLM, TTS, memory, and tool backends.
 - FunASR local recognition is still utterance-final, although other configured ASR providers can be streaming.
 
-## VerbaNode pipeline
+## VerbaNode Standalone pipeline
 
 Key source paths:
 
@@ -84,7 +84,7 @@ Notable design choices:
 
 ## Main differences
 
-| Area | Xiaozhi reference | VerbaNode |
+| Area | Xiaozhi reference | VerbaNode Standalone |
 |---|---|---|
 | Intended deployment | Remote/multiple embedded clients and central server | One Windows host with browser controls |
 | Audio location | Client device microphone/speaker | Windows host microphone/speaker |
@@ -101,13 +101,13 @@ Notable design choices:
 
 ## Which is better?
 
-For the requested single-host Windows product, **VerbaNode is the better base**. It directly matches the required topology, avoids unnecessary device binding and network-audio codecs, is easier to install on different PCs, and already includes the required agent, script, information, memory, and browser-management workflows.
+For the requested standalone Windows product, **VerbaNode Standalone is the better base**. It directly matches the required topology, avoids unnecessary device binding and network-audio codecs, is easier to install on different PCs, and already includes the required agent, script, information, memory, and browser-management workflows.
 
 The Xiaozhi pipeline is technically stronger for a different problem: remote embedded devices, many simultaneous connections, true packet-level audio streaming, and robust full-duplex interruption with AEC. Its first-clause TTS segmentation can also produce lower time-to-first-audio than waiting for a complete sentence.
 
 ## Recommended hybrid improvements
 
-The best future direction is to keep the single-host architecture and selectively borrow these ideas from Xiaozhi:
+The best future direction is to keep the standalone architecture and selectively borrow these ideas from Xiaozhi:
 
 1. Optional first-clause TTS split at a comma for faster first speech.
 2. True streaming TTS audio frames when a local/online provider supports them.
@@ -115,4 +115,4 @@ The best future direction is to keep the single-host architecture and selectivel
 4. Optional streaming ASR provider while retaining SenseVoiceSmall as the low-CPU default.
 5. More robust multi-step tool execution with an explicit depth limit.
 
-Do not copy the remote device binding, Opus transport, or per-connection server machinery into the Windows-hosted edition unless network audio clients become a requirement.
+Do not copy the remote device binding, Opus transport, or per-connection server machinery into the standalone edition unless network audio clients become a requirement.
