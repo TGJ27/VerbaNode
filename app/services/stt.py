@@ -275,6 +275,30 @@ class FunASRService:
 
         raise SttUnavailable("Speech recognition failed after retry: " + "; ".join(errors))
 
+
+    def warmup(self, model_name: str | None = None) -> dict[str, Any]:
+        """Load the configured model once without performing transcription."""
+        model_name = model_name or self.settings.funasr_model
+        self._load(model_name)
+        return self.status()
+
+    def reload_model(
+        self,
+        model_name: str | None = None,
+        *,
+        load: bool = True,
+    ) -> dict[str, Any]:
+        """Release the current model reference and optionally load it again."""
+        import gc
+
+        with self._lock:
+            self._model = None
+            self._model_name = None
+            gc.collect()
+        if load:
+            return self.warmup(model_name)
+        return self.status()
+
     def transcribe(self, samples: np.ndarray, model_name: str | None = None) -> str:
         """Backward-compatible text-only interface."""
         return self.transcribe_with_confidence(samples, model_name).text

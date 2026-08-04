@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#eef4ff">
   <title>VerbaNode Standalone</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.4.2">
+  <link rel="stylesheet" href="/static/styles.css?v=0.5.1">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
@@ -36,7 +36,7 @@
         <div class="brand-mark">VN</div>
         <div>
           <strong>VerbaNode</strong>
-          <span>Standalone · <b id="appVersion">v0.4.2</b></span>
+          <span>Standalone · <b id="appVersion">v0.5.1</b></span>
         </div>
         <button id="mobileCloseNav" class="icon-btn mobile-only" aria-label="Close menu">×</button>
       </div>
@@ -169,62 +169,124 @@
       </section>
 
       <section id="page-settings" class="page">
-        <div class="settings-grid">
-          <section class="card settings-card">
-            <p class="eyebrow">GLOBAL</p><h3>Conversation behavior</h3>
-            <label class="toggle-row"><span><strong>Voice interruption (experimental)</strong><small>Off is recommended with PC speakers. Enable only with a headset or echo-cancelled microphone.</small></span><input id="interruptionToggle" type="checkbox"><i></i></label>
-            <label>End-of-speech silence (ms)<input id="silenceInput" type="number" min="300" max="5000" step="50"></label>
-            <label>Maximum recording time (seconds)<input id="maxRecordInput" type="number" min="3" max="180"></label>
-            <label class="toggle-row"><span><strong>Filter low-confidence STT</strong><small>Show uncertain transcripts in chat, but do not send them to the agent.</small></span><input id="sttConfidenceFilterToggle" type="checkbox"><i></i></label>
-            <label>Minimum estimated STT confidence (%)<input id="sttConfidenceThresholdInput" type="number" min="0" max="100" step="1"></label>
-            <p class="tiny muted">SenseVoice does not always return a calibrated confidence value, so VerbaNode labels this as an estimate. No apology audio is played when a transcript is rejected.</p>
-            <button id="saveRuntimeSettingsBtn" class="btn primary">Save conversation settings</button>
-          </section>
-
-          <section class="card settings-card">
-            <p class="eyebrow">HOST AUDIO</p><h3>Microphone and speaker</h3>
-            <label>Microphone input
-              <select id="inputDeviceSelect"></select>
-              <small id="inputDeviceHint" class="field-help">Choose the preferred Windows input device. The saved selection is restored after reconnects when possible.</small>
-            </label>
-            <label>Speaker output
-              <select id="outputDeviceSelect"></select>
-              <small id="outputDeviceHint" class="field-help">Choose the preferred Windows output device. The saved selection is restored after reconnects when possible.</small>
-            </label>
-            <div class="button-grid three audio-device-actions">
-              <button id="refreshAudioDevicesBtn" type="button" class="btn ghost compact">↻ Refresh</button>
-              <button id="testInputDeviceBtn" type="button" class="btn secondary compact">Test mic</button>
-              <button id="testOutputDeviceBtn" type="button" class="btn secondary compact">Test speaker</button>
+        <div class="settings-layout">
+          <aside class="card settings-subnav" aria-label="Settings categories">
+            <div class="settings-subnav-title">
+              <p class="eyebrow">CONTROL CENTER</p>
+              <h3>Settings</h3>
+              <p>Open one category at a time.</p>
             </div>
-            <button id="testDuplexLockBtn" type="button" class="btn secondary">Test both locked</button>
-            <button id="saveAudioDevicesBtn" type="button" class="btn primary">Save audio devices</button>
-            <div id="audioDeviceStatus" class="status-box">Select and save both devices. Newly connected USB or Bluetooth audio can be refreshed and recovered without restarting VerbaNode.</div>
-          </section>
+            <button type="button" class="settings-subnav-item active" data-settings-panel="conversation"><span>◉</span><div><strong>Conversation</strong><small>Recording, STT and transcript display</small></div></button>
+            <button type="button" class="settings-subnav-item" data-settings-panel="audio"><span>◌</span><div><strong>Host audio</strong><small>Microphone, speaker and device tests</small></div></button>
+            <button type="button" class="settings-subnav-item" data-settings-panel="models"><span>◇</span><div><strong>AI models</strong><small>Ollama model management</small></div></button>
+            <button type="button" class="settings-subnav-item" data-settings-panel="runtime"><span>▤</span><div><strong>Runtime</strong><small>Pipeline and engine health</small></div></button>
+            <button type="button" class="settings-subnav-item" data-settings-panel="data"><span>⇩</span><div><strong>Data</strong><small>Backup and restore</small></div></button>
+          </aside>
 
-          <section class="card settings-card">
-            <p class="eyebrow">LOCAL MODELS</p><h3>Ollama model manager</h3>
-            <div id="ollamaStatusBox" class="status-box"></div>
-            <div id="modelList" class="model-list"></div>
-            <form id="pullModelForm" class="inline-form"><input id="pullModelInput" placeholder="Example: qwen3.5:0.8b"><button class="btn secondary" type="submit">Pull</button></form>
-          </section>
+          <div class="settings-content">
+            <section id="settings-panel-conversation" class="settings-panel active" data-settings-panel-content="conversation">
+              <div class="settings-panel-heading">
+                <div><p class="eyebrow">CONVERSATION</p><h3>Listening and recognition</h3></div>
+                <p>Control how speech is captured, accepted and displayed.</p>
+              </div>
+              <div class="settings-panel-grid two">
+                <section class="card settings-card">
+                  <p class="eyebrow">RECORDING</p><h3>Conversation behavior</h3>
+                  <label class="toggle-row"><span><strong>Voice interruption (experimental)</strong><small>Off is recommended with PC speakers. Enable only with a headset or echo-cancelled microphone.</small></span><input id="interruptionToggle" type="checkbox"><i></i></label>
+                  <label>End-of-speech silence (ms)<input id="silenceInput" type="number" min="300" max="5000" step="50"></label>
+                  <label>Maximum recording time (seconds)<input id="maxRecordInput" type="number" min="3" max="180"></label>
+                </section>
 
-          <section class="card settings-card">
-            <p class="eyebrow">AUDIO & TTS</p><h3>Runtime status</h3>
-            <div id="pipelineStatusPanel" class="status-box">Pipeline is idle.</div>
-            <div id="runtimeStatusList" class="definition-list"></div>
-            <div class="button-grid two">
-              <button id="refreshStatusBtn" class="btn ghost">Refresh status</button>
-              <button id="restartAudioEngineBtn" class="btn secondary">Restart Audio Engine</button>
-            </div>
-          </section>
+                <section class="card settings-card">
+                  <p class="eyebrow">SPEECH RECOGNITION</p><h3>Confidence and transcript display</h3>
+                  <label class="toggle-row"><span><strong>Filter low-confidence STT</strong><small>Do not send transcripts below the threshold to the agent.</small></span><input id="sttConfidenceFilterToggle" type="checkbox"><i></i></label>
+                  <label>Minimum estimated STT confidence (%)<input id="sttConfidenceThresholdInput" type="number" min="0" max="100" step="1"></label>
+                  <label class="toggle-row"><span><strong>Show rejected STT transcripts</strong><small>Display filtered speech in the chat as muted diagnostic messages. Turn this off for a cleaner conversation view.</small></span><input id="showRejectedSttToggle" type="checkbox"><i></i></label>
+                  <p class="tiny muted">SenseVoice does not always return a calibrated confidence value, so VerbaNode labels this as an estimate. Rejected transcripts are never sent to the agent and never trigger apology audio.</p>
+                </section>
+              </div>
+              <div class="settings-panel-actions"><button id="saveRuntimeSettingsBtn" class="btn primary">Save conversation settings</button></div>
+            </section>
 
-          <section class="card settings-card">
-            <p class="eyebrow">DATA</p><h3>Backup and restore</h3>
-            <p class="muted">Back up agents, information, scripts, conversations, summaries, and queue state.</p>
-            <a id="backupDownloadBtn" class="btn secondary full" href="#">Download full backup</a>
-            <label class="file-drop">Restore a backup ZIP<input id="restoreFileInput" type="file" accept=".zip"></label>
-            <p class="tiny muted">Restore replaces the current database and reloads all connected browsers.</p>
-          </section>
+            <section id="settings-panel-audio" class="settings-panel" data-settings-panel-content="audio">
+              <div class="settings-panel-heading">
+                <div><p class="eyebrow">HOST AUDIO</p><h3>Microphone and speaker</h3></div>
+                <p>Select Windows endpoints and validate persistent duplex locking.</p>
+              </div>
+              <section class="card settings-card settings-card-wide">
+                <div class="audio-settings-columns">
+                  <label>Microphone input
+                    <select id="inputDeviceSelect"></select>
+                    <small id="inputDeviceHint" class="field-help">Choose the preferred Windows input device. The saved selection is restored after reconnects when possible.</small>
+                  </label>
+                  <label>Speaker output
+                    <select id="outputDeviceSelect"></select>
+                    <small id="outputDeviceHint" class="field-help">Choose the preferred Windows output device. The saved selection is restored after reconnects when possible.</small>
+                  </label>
+                </div>
+                <div class="button-grid three audio-device-actions">
+                  <button id="refreshAudioDevicesBtn" type="button" class="btn ghost compact">↻ Refresh devices</button>
+                  <button id="testInputDeviceBtn" type="button" class="btn secondary compact">Test microphone</button>
+                  <button id="testOutputDeviceBtn" type="button" class="btn secondary compact">Test speaker</button>
+                </div>
+                <div class="button-grid two">
+                  <button id="testDuplexLockBtn" type="button" class="btn secondary">Test both locked</button>
+                  <button id="saveAudioDevicesBtn" type="button" class="btn primary">Save audio devices</button>
+                </div>
+                <div id="audioDeviceStatus" class="status-box">Select and save both devices. Newly connected USB or Bluetooth audio can be refreshed and recovered without restarting VerbaNode.</div>
+              </section>
+            </section>
+
+            <section id="settings-panel-models" class="settings-panel" data-settings-panel-content="models">
+              <div class="settings-panel-heading">
+                <div><p class="eyebrow">AI MODELS</p><h3>Ollama model manager</h3></div>
+                <p>View locally installed language models or download another model.</p>
+              </div>
+              <section class="card settings-card settings-card-wide">
+                <div id="ollamaStatusBox" class="status-box"></div>
+                <div id="modelList" class="model-list model-list-tall"></div>
+                <form id="pullModelForm" class="inline-form"><input id="pullModelInput" placeholder="Example: qwen3.5:0.8b"><button class="btn secondary" type="submit">Pull model</button></form>
+              </section>
+            </section>
+
+            <section id="settings-panel-runtime" class="settings-panel" data-settings-panel-content="runtime">
+              <div class="settings-panel-heading">
+                <div><p class="eyebrow">RUNTIME</p><h3>Pipeline and engine health</h3></div>
+                <p>Inspect the Core, Audio Engine and AI Engine without leaving the dashboard.</p>
+              </div>
+              <div class="settings-panel-grid runtime-grid">
+                <section class="card settings-card">
+                  <p class="eyebrow">PIPELINE</p><h3>Current state</h3>
+                  <div id="pipelineStatusPanel" class="status-box">Pipeline is idle.</div>
+                  <div id="runtimeStatusList" class="definition-list"></div>
+                </section>
+                <section class="card settings-card">
+                  <p class="eyebrow">ENGINE CONTROLS</p><h3>Recovery actions</h3>
+                  <button id="refreshStatusBtn" class="btn ghost">Refresh status</button>
+                  <button id="restartAudioEngineBtn" class="btn secondary">Restart Audio Engine</button>
+                  <button id="restartAiEngineBtn" class="btn secondary">Restart AI Engine</button>
+                  <div class="button-grid two">
+                    <button id="reloadAsrModelBtn" class="btn ghost">Reload SenseVoice</button>
+                    <button id="reloadKokoroModelBtn" class="btn ghost">Reload Kokoro</button>
+                  </div>
+                </section>
+              </div>
+            </section>
+
+            <section id="settings-panel-data" class="settings-panel" data-settings-panel-content="data">
+              <div class="settings-panel-heading">
+                <div><p class="eyebrow">DATA</p><h3>Backup and restore</h3></div>
+                <p>Protect agents, knowledge, scripts, conversations, summaries and queue state.</p>
+              </div>
+              <section class="card settings-card settings-card-wide data-settings-card">
+                <div><h3>Full VerbaNode backup</h3><p class="muted">Download a portable ZIP of the current database, or restore a previous backup. Restoring replaces the current database and reloads connected dashboards.</p></div>
+                <div class="button-grid two">
+                  <a id="backupDownloadBtn" class="btn secondary full" href="#">Download full backup</a>
+                  <label class="file-drop compact-file-drop">Restore a backup ZIP<input id="restoreFileInput" type="file" accept=".zip"></label>
+                </div>
+              </section>
+            </section>
+          </div>
         </div>
       </section>
     </main>
@@ -304,6 +366,6 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/app.js?v=0.4.2" defer></script>
+  <script src="/static/app.js?v=0.5.1" defer></script>
 </body>
 </html>

@@ -12,7 +12,8 @@ const appState = {
   models: [],
   kokoroVoices: [],
   audioDevices: { inputs: [], outputs: [], recommended_input: null, recommended_output: null },
-  version: '0.4.2',
+  version: '0.5.1',
+  settingsPanel: localStorage.getItem('verbanode_settings_panel') || 'conversation',
   activeAgent: null,
   conversation: null,
   conversations: [],
@@ -483,6 +484,27 @@ function scrollMessagesToBottom(force = false) {
   }
 }
 
+function rejectedTranscriptVisibilityEnabled() {
+  const toggle = $('#showRejectedSttToggle');
+  if (toggle) return toggle.checked;
+  return appState.data?.runtime_settings?.show_rejected_stt_transcripts !== false;
+}
+
+function applyRejectedTranscriptVisibility() {
+  const list = $('#messageList');
+  if (!list) return;
+  list.classList.toggle('hide-rejected-transcripts', !rejectedTranscriptVisibilityEnabled());
+}
+
+function activateSettingsPanel(panelName, remember = true) {
+  const available = new Set($$('[data-settings-panel-content]').map(node => node.dataset.settingsPanelContent));
+  const resolved = available.has(panelName) ? panelName : 'conversation';
+  appState.settingsPanel = resolved;
+  $$('[data-settings-panel]').forEach(button => button.classList.toggle('active', button.dataset.settingsPanel === resolved));
+  $$('[data-settings-panel-content]').forEach(panel => panel.classList.toggle('active', panel.dataset.settingsPanelContent === resolved));
+  if (remember) localStorage.setItem('verbanode_settings_panel', resolved);
+}
+
 function renderMessages() {
   const list = $('#messageList');
   appState.streaming.clear();
@@ -491,6 +513,7 @@ function renderMessages() {
     return;
   }
   list.innerHTML = appState.messages.map(messageHtml).join('');
+  applyRejectedTranscriptVisibility();
   scrollMessagesToBottom(true);
 }
 
@@ -510,15 +533,22 @@ function messageHtml(message) {
 
 function appendRejectedTranscript(data) {
   const list = $('#messageList');
+  if (!rejectedTranscriptVisibilityEnabled()) {
+    setLiveStatus('idle', 'Ready', 'Low-confidence speech was filtered');
+    return;
+  }
   const stickToBottom = messageListNearBottom(list);
   $('.empty-state', list)?.remove();
   const confidence = Number(data.confidence_percent ?? Math.round(Number(data.confidence || 0) * 100));
   const threshold = Number(data.threshold_percent ?? Math.round(Number(data.threshold || 0) * 100));
   const node = document.createElement('article');
   node.className = 'message user rejected-transcript';
-  node.innerHTML = `<div class="message-bubble">${escapeHtml(data.text || '')}</div>
+  node.innerHTML = `<div class="message-bubble"><span class="rejected-transcript-label">Filtered STT</span>${escapeHtml(data.text || '')}</div>
     <div class="message-meta">Not sent to agent · estimated STT ${confidence}% · threshold ${threshold}%</div>`;
   list.appendChild(node);
+  const rejectedNodes = $$('.rejected-transcript', list);
+  rejectedNodes.slice(0, Math.max(0, rejectedNodes.length - 100)).forEach(item => item.remove());
+  applyRejectedTranscriptVisibility();
   if (stickToBottom) scrollMessagesToBottom(true);
   setLiveStatus('idle', 'Ready', 'Low-confidence transcript was not sent');
 }
@@ -635,7 +665,10 @@ function renderSettings() {
   $('#maxRecordInput').value = settings.max_record_seconds || 30;
   $('#sttConfidenceFilterToggle').checked = settings.stt_confidence_filter_enabled !== false;
   $('#sttConfidenceThresholdInput').value = Math.round(Number(settings.stt_confidence_threshold ?? 0.70) * 100);
+  $('#showRejectedSttToggle').checked = settings.show_rejected_stt_transcripts !== false;
   renderAudioDevices();
+  applyRejectedTranscriptVisibility();
+  activateSettingsPanel(appState.settingsPanel, false);
 }
 
 function audioDeviceLabel(device, direction) {
@@ -702,6 +735,11 @@ function renderRuntimeStatus(data) {
   const hardware = data.hardware || {};
   const audio = data.audio || {};
   const audioEngine = audio.engine || {};
+  const ai = data.ai || {};
+  const aiEngine = ai.engine || {};
+  const aiRemote = aiEngine.remote || {};
+  const aiAsr = aiRemote.asr || {};
+  const aiKokoro = aiRemote.kokoro || {};
   const pipeline = data.pipeline || appState.pipeline || {};
   const latency = pipeline.latency_ms || {};
   const counters = pipeline.counters || {};
@@ -727,7 +765,13 @@ function renderRuntimeStatus(data) {
     <dt>FunASR</dt><dd>${stt.installed ? 'Installed' : 'Missing'}</dd>
     <dt>STT model</dt><dd>${escapeHtml(stt.model || '')}</dd>
     <dt>Edge TTS</dt><dd>${edgeHealth.circuit_open ? 'Fallback active' : (tts.edge_installed ? 'Ready' : 'Missing')}</dd>
-    <dt>Kokoro</dt><dd>${kokoroHealth.circuit_open ? 'Recovering' : (tts.kokoro_model_ready ? 'Ready' : 'Not downloaded')}</dd>
+    <dt>Kokoro</dt><dd>${kokoroHealth.circuit_open ? 'Recovering' : (tts.kokoro_model_ready ? (tts.kokoro_loaded ? 'Loaded' : 'Model available') : 'Not downloaded')}</dd>
+    <dt>AI Engine</dt><dd>${aiEngine.mode === 'isolated_process' ? (aiEngine.alive ? `Process ${aiEngine.pid} active` : 'Process unavailable') : 'In-process compatibility mode'}</dd>
+    <dt>AI state</dt><dd>${escapeHtml(String(aiRemote.coordinator_state || 'idle'))}</dd>
+    <dt>SenseVoice state</dt><dd>${escapeHtml(String(aiAsr.state || stt.state || 'unknown'))}${aiAsr.last_latency_ms != null ? ` · ${aiAsr.last_latency_ms} ms` : ''}</dd>
+    <dt>Kokoro state</dt><dd>${escapeHtml(String(aiKokoro.state || tts.kokoro_status?.state || 'unknown'))}${aiKokoro.last_latency_ms != null ? ` · ${aiKokoro.last_latency_ms} ms` : ''}</dd>
+    <dt>AI queues</dt><dd>ASR ${aiEngine.inflight?.asr ?? 0}/${aiEngine.queue_limits?.asr ?? '-'} · TTS ${aiEngine.inflight?.kokoro ?? 0}/${aiEngine.queue_limits?.kokoro ?? '-'}</dd>
+    <dt>AI restarts</dt><dd>${aiEngine.restart_count ?? 0}</dd>
     <dt>Audio Engine</dt><dd>${audioEngine.mode === 'isolated_process' ? (audioEngine.alive ? `Process ${audioEngine.pid} active` : 'Process unavailable') : 'In-process compatibility mode'}</dd>
     <dt>Audio state</dt><dd>${escapeHtml(String(audioEngine.remote?.coordinator_state || 'idle'))}</dd>
     <dt>Audio restarts</dt><dd>${audioEngine.restart_count ?? 0}</dd>
@@ -1085,6 +1129,8 @@ function bindEvents() {
   $('#logoutBtn').onclick = async () => { try { await api('/api/auth/logout', { method: 'POST' }); } catch (_) {} resetToLogin(); };
   $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.onclick = () => navigate(node.dataset.page));
   $$('[data-nav]').forEach(node => node.onclick = () => navigate(node.dataset.nav));
+  $$('[data-settings-panel]').forEach(node => node.onclick = () => activateSettingsPanel(node.dataset.settingsPanel));
+  $('#showRejectedSttToggle').onchange = applyRejectedTranscriptVisibility;
   $('#mobileMenuBtn').onclick = openMobileNav; $('#mobileCloseNav').onclick = closeMobileNav; $('#sidebarBackdrop').onclick = closeMobileNav;
   $('#queueQuickBtn').onclick = openQueueDrawer; $$('[data-close-drawer]').forEach(node => node.onclick = closeQueueDrawer);
   $('#drawerPlayQueue').onclick = () => queueAction('play'); $('#drawerClearQueue').onclick = () => queueAction('clear');
@@ -1239,6 +1285,7 @@ function bindEvents() {
       max_record_seconds: Number($('#maxRecordInput').value),
       stt_confidence_filter_enabled: $('#sttConfidenceFilterToggle').checked,
       stt_confidence_threshold: thresholdPercent / 100,
+      show_rejected_stt_transcripts: $('#showRejectedSttToggle').checked,
       input_device: selectedAudioDeviceId('#inputDeviceSelect'),
       output_device: selectedAudioDeviceId('#outputDeviceSelect'),
     };
@@ -1276,6 +1323,37 @@ function bindEvents() {
       button.disabled = false;
       button.textContent = 'Restart Audio Engine';
     }
+  };
+  $('#restartAiEngineBtn').onclick = async () => {
+    if (!confirm('Restart the isolated AI Engine? Active conversation and local model jobs will stop.')) return;
+    const button = $('#restartAiEngineBtn');
+    button.disabled = true; button.textContent = 'Restarting…';
+    try {
+      const health = await api('/api/ai/restart-engine', { method: 'POST' });
+      renderRuntimeStatus(await api('/api/status'));
+      toast(`AI Engine restarted in process ${health.pid}.`, 'success');
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; button.textContent = 'Restart AI Engine'; }
+  };
+  $('#reloadAsrModelBtn').onclick = async () => {
+    const button = $('#reloadAsrModelBtn');
+    button.disabled = true; button.textContent = 'Loading…';
+    try {
+      await api('/api/ai/reload-asr', { method: 'POST' });
+      renderRuntimeStatus(await api('/api/status'));
+      toast('SenseVoice reloaded inside the AI Engine.', 'success');
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; button.textContent = 'Reload SenseVoice'; }
+  };
+  $('#reloadKokoroModelBtn').onclick = async () => {
+    const button = $('#reloadKokoroModelBtn');
+    button.disabled = true; button.textContent = 'Loading…';
+    try {
+      await api('/api/ai/reload-kokoro', { method: 'POST' });
+      renderRuntimeStatus(await api('/api/status'));
+      toast('Kokoro reloaded inside the AI Engine.', 'success');
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; button.textContent = 'Reload Kokoro'; }
   };
   $('#backupDownloadBtn').onclick = event => { event.preventDefault(); downloadAuthenticated('/api/backup', 'verbanode-backup.zip'); };
   $('#restoreFileInput').onchange = async event => {

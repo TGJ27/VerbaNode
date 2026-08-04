@@ -11,6 +11,11 @@ from app.services.audio_engine import (
     AudioPlayerProxy,
     AudioRecorderProxy,
 )
+from app.services.ai_engine import (
+    AiEngineSupervisor,
+    AiKokoroProxy,
+    AiSttProxy,
+)
 from app.services.controller import ControllerManager
 from app.services.conversation import ConversationManager
 from app.services.events import EventHub
@@ -19,7 +24,7 @@ from app.services.pipeline import PipelineMonitor
 from app.services.script_queue import ScriptQueueManager
 from app.services.stt import FunASRService
 from app.services.tools import ToolService
-from app.services.tts import TtsService
+from app.services.tts import KokoroTtsProvider, TtsService
 
 
 @dataclass
@@ -32,7 +37,8 @@ class AppState:
     recorder: Any
     player: Any
     audio_engine: AudioEngineSupervisor | None
-    stt: FunASRService
+    ai_engine: AiEngineSupervisor | None
+    stt: Any
     tools: ToolService
     llm: OllamaService
     tts: TtsService
@@ -147,10 +153,32 @@ def build_state() -> AppState:
     else:
         player = HostAudioPlayer(resolved_output)
 
-    stt = FunASRService(settings)
+    ai_engine: AiEngineSupervisor | None = None
+    if settings.ai_engine_process:
+        ai_engine = AiEngineSupervisor(
+            settings,
+            startup_timeout=settings.ai_engine_startup_timeout_seconds,
+            command_timeout=settings.ai_engine_command_timeout_seconds,
+            watchdog_interval=settings.ai_engine_watchdog_seconds,
+            asr_queue_size=settings.ai_engine_asr_queue_size,
+            kokoro_queue_size=settings.ai_engine_kokoro_queue_size,
+            preload_asr=settings.ai_engine_preload_asr,
+            preload_kokoro=settings.ai_engine_preload_kokoro,
+        )
+        stt: Any = AiSttProxy(ai_engine, settings)
+        kokoro_provider: Any = AiKokoroProxy(ai_engine, settings)
+    else:
+        stt = FunASRService(settings)
+        kokoro_provider = KokoroTtsProvider(settings)
+
     tools = ToolService(settings)
     llm = OllamaService(settings, tools, monitor)
-    tts = TtsService(settings, player, monitor)
+    tts = TtsService(
+        settings,
+        player,
+        monitor,
+        kokoro_provider=kokoro_provider,
+    )
     conversation = ConversationManager(
         settings,
         db,
@@ -172,6 +200,7 @@ def build_state() -> AppState:
         recorder=recorder,
         player=player,
         audio_engine=audio_engine,
+        ai_engine=ai_engine,
         stt=stt,
         tools=tools,
         llm=llm,

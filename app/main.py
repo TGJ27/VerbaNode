@@ -69,6 +69,13 @@ async def startup_event() -> None:
         # Keep the management UI online so the user can inspect settings and
         # retry device operations even when the child process cannot start.
         LOGGER.error("Audio initialization failed: %s", exc)
+    try:
+        if state.ai_engine is not None:
+            await asyncio.to_thread(state.ai_engine.start)
+    except Exception as exc:
+        # Text chat, Edge TTS, tools, memory, and the management UI remain
+        # available even when local model isolation cannot start.
+        LOGGER.error("AI Engine initialization failed: %s", exc)
 
 
 @app.middleware("http")
@@ -85,6 +92,8 @@ async def disable_ui_caching(request, call_next):
 async def shutdown_event() -> None:
     await state.conversation.stop_conversation(stop_tts=True)
     await state.script_queue.stop()
+    if state.ai_engine is not None:
+        await asyncio.to_thread(state.ai_engine.stop)
     if state.audio_engine is not None:
         await asyncio.to_thread(state.audio_engine.stop)
     else:
@@ -293,6 +302,10 @@ async def bootstrap(token: Token) -> dict[str, Any]:
             "mode": "isolated_audio_engine" if state.audio_engine is not None else "persistent_duplex_lock",
             "engine": state.audio_engine.health() if state.audio_engine is not None else None,
         },
+        "ai": {
+            "mode": "isolated_ai_engine" if state.ai_engine is not None else "in_process_models",
+            "engine": state.ai_engine.health() if state.ai_engine is not None else None,
+        },
         "mode": state.conversation.mode,
         "tts": state.tts.status(),
         "stt": state.stt.status(),
@@ -339,6 +352,10 @@ async def system_status(token: Token) -> dict[str, Any]:
             "mode": "isolated_audio_engine" if state.audio_engine is not None else "persistent_duplex_lock",
             "engine": state.audio_engine.health() if state.audio_engine is not None else None,
         },
+        "ai": {
+            "mode": "isolated_ai_engine" if state.ai_engine is not None else "in_process_models",
+            "engine": state.ai_engine.health() if state.ai_engine is not None else None,
+        },
         "pipeline": state.monitor.snapshot(),
         "audio_health": {
             "input": state.recorder.health(),
@@ -356,6 +373,10 @@ async def pipeline_status(token: Token) -> dict[str, Any]:
             "output": state.player.health(),
             "engine": state.audio_engine.health() if state.audio_engine is not None else None,
         },
+        "ai": {
+            "engine": state.ai_engine.health() if state.ai_engine is not None else None,
+        },
+        "stt": state.stt.status(),
         "tts": state.tts.status(),
     }
 
@@ -720,6 +741,54 @@ async def restart_audio_engine(token: Token) -> dict[str, Any]:
     health = state.audio_engine.health()
     await state.events.broadcast("audio_engine_restarted", health)
     return health
+
+
+@app.post("/api/ai/restart-engine")
+async def restart_ai_engine(token: Token) -> dict[str, Any]:
+    if state.ai_engine is None:
+        raise HTTPException(
+            status_code=400,
+            detail="AI Engine process isolation is disabled in .env",
+        )
+    await state.conversation.stop_conversation(stop_tts=True)
+    await state.script_queue.stop()
+    try:
+        await asyncio.to_thread(state.ai_engine.restart, "manual dashboard request")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if not state.ai_engine.process_alive:
+        raise HTTPException(status_code=503, detail="AI Engine could not be restarted")
+    health = state.ai_engine.health()
+    await state.events.broadcast("ai_engine_restarted", health)
+    return health
+
+
+@app.post("/api/ai/reload-asr")
+async def reload_ai_asr(token: Token) -> dict[str, Any]:
+    if state.ai_engine is None:
+        raise HTTPException(status_code=400, detail="AI Engine process isolation is disabled")
+    await state.conversation.stop_conversation(stop_tts=True)
+    await state.script_queue.stop()
+    try:
+        result = await asyncio.to_thread(state.ai_engine.reload_asr)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    await state.events.broadcast("ai_model_reloaded", {"provider": "asr", "status": result})
+    return {"ok": True, "provider": "asr", "status": result, "engine": state.ai_engine.health()}
+
+
+@app.post("/api/ai/reload-kokoro")
+async def reload_ai_kokoro(token: Token) -> dict[str, Any]:
+    if state.ai_engine is None:
+        raise HTTPException(status_code=400, detail="AI Engine process isolation is disabled")
+    await state.conversation.stop_conversation(stop_tts=True)
+    await state.script_queue.stop()
+    try:
+        result = await asyncio.to_thread(state.ai_engine.reload_kokoro)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    await state.events.broadcast("ai_model_reloaded", {"provider": "kokoro", "status": result})
+    return {"ok": True, "provider": "kokoro", "status": result, "engine": state.ai_engine.health()}
 
 
 @app.post("/api/audio/test-input")

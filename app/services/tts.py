@@ -128,6 +128,36 @@ class KokoroTtsProvider:
             except Exception as exc:
                 raise TtsUnavailable(f"Unable to initialize Kokoro: {exc}") from exc
 
+    def warmup(self) -> dict[str, Any]:
+        """Load Kokoro once so the first local sentence has predictable latency."""
+        self._load()
+        return self.status()
+
+    def reload_model(self, *, load: bool = True) -> dict[str, Any]:
+        """Release the native Kokoro object and optionally initialize it again."""
+        import gc
+
+        with self._lock:
+            self._tts = None
+            gc.collect()
+        if load:
+            return self.warmup()
+        return self.status()
+
+    def status(self) -> dict[str, Any]:
+        try:
+            import sherpa_onnx  # noqa: F401
+
+            installed = True
+        except Exception:
+            installed = False
+        return {
+            "installed": installed,
+            "model_ready": self.model_ready(),
+            "loaded": self._tts is not None,
+            "model": self.model_fingerprint(),
+        }
+
     def generate(self, text: str, voice_id: int, speed: float) -> Path:
         try:
             import sherpa_onnx
@@ -152,11 +182,17 @@ class KokoroTtsProvider:
 
 
 class TtsService:
-    def __init__(self, settings: Settings, player: HostAudioPlayer, monitor: Any | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        player: HostAudioPlayer,
+        monitor: Any | None = None,
+        kokoro_provider: Any | None = None,
+    ):
         self.settings = settings
         self.player = player
         self.edge = EdgeTtsProvider(settings)
-        self.kokoro = KokoroTtsProvider(settings)
+        self.kokoro = kokoro_provider or KokoroTtsProvider(settings)
         self.monitor = monitor
         self._synthesis_lock = threading.RLock()
         self._playback_lock = threading.RLock()
@@ -416,18 +452,28 @@ class TtsService:
         except Exception:
             edge_installed = False
         try:
-            import sherpa_onnx  # noqa: F401
-
-            sherpa_installed = True
-        except Exception:
-            sherpa_installed = False
+            kokoro_status = (
+                dict(self.kokoro.status())
+                if hasattr(self.kokoro, "status")
+                else {"installed": False, "model_ready": self.kokoro.model_ready(), "loaded": False}
+            )
+        except Exception as exc:
+            kokoro_status = {
+                "installed": False,
+                "model_ready": self.kokoro.model_ready(),
+                "loaded": False,
+                "state": "unavailable",
+                "last_error": str(exc),
+            }
         return {
             "playing": self.is_playing,
             "current_text": self.current_text,
             "current_provider": self._current_provider,
             "edge_installed": edge_installed,
-            "kokoro_installed": sherpa_installed,
-            "kokoro_model_ready": self.kokoro.model_ready(),
+            "kokoro_installed": bool(kokoro_status.get("installed")),
+            "kokoro_model_ready": bool(kokoro_status.get("model_ready")),
+            "kokoro_loaded": bool(kokoro_status.get("loaded")),
+            "kokoro_status": kokoro_status,
             "last_error": self._last_error,
             "last_playback": self.last_playback_meta,
             "cache_dir": str(self.settings.tts_cache_dir),

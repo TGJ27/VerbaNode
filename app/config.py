@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     audio_engine_startup_timeout_seconds: float = Field(default=8.0, ge=2.0, le=60.0)
     audio_engine_command_timeout_seconds: float = Field(default=15.0, ge=3.0, le=120.0)
     audio_engine_watchdog_seconds: float = Field(default=3.0, ge=1.0, le=30.0)
+    ai_engine_process: bool = True
+    ai_engine_startup_timeout_seconds: float = Field(default=10.0, ge=2.0, le=60.0)
+    ai_engine_command_timeout_seconds: float = Field(default=45.0, ge=5.0, le=300.0)
+    ai_engine_watchdog_seconds: float = Field(default=3.0, ge=1.0, le=30.0)
+    ai_engine_asr_queue_size: int = Field(default=2, ge=1, le=8)
+    ai_engine_kokoro_queue_size: int = Field(default=4, ge=1, le=16)
+    ai_engine_preload_asr: bool = True
+    ai_engine_preload_kokoro: bool = True
+    ai_engine_kokoro_timeout_seconds: float = Field(default=60.0, ge=10.0, le=300.0)
 
     @property
     def runtime_audio_dir(self) -> Path:

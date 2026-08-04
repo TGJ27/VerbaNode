@@ -2,7 +2,7 @@
 
 VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
 
-**Current test release:** v0.4.2 Phase 2 Windows hot-plug recovery.
+**Current test release:** v0.5.1 Phase 3 settings navigation and rejected-STT display controls.
 
 ## Main features
 
@@ -16,6 +16,27 @@ VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive bro
 - One active controller; a valid PIN transfers control immediately.
 
 
+
+## v0.5.1 settings navigation and rejected-STT display controls
+
+- Splits Settings into focused Conversation, Host audio, AI models, Runtime, and Data submenus.
+- Uses a desktop settings sidebar and a horizontally scrollable mobile category bar.
+- Adds a persistent **Show rejected STT transcripts** toggle.
+- Keeps low-confidence speech out of the agent pipeline while optionally showing it as muted gray diagnostic messages.
+- Hides future rejected transcripts completely when the display toggle is off.
+- Preserves the isolated Audio Engine and AI Engine architecture from v0.5.0.
+
+## v0.5.0 Phase 3 isolated AI Engine
+
+- Moves SenseVoice/FunASR and local Kokoro model ownership into one supervised AI Engine child process.
+- Keeps Ollama as its own external service and keeps Edge TTS in the core.
+- Preloads SenseVoice once, optionally preloads Kokoro, and reuses both models across turns.
+- Adds bounded inference queues, timeouts, heartbeat monitoring, automatic restart, and manual model reload controls.
+- Keeps the v0.4.2 isolated Audio Engine and Windows hot-plug recovery unchanged.
+- Exposes AI Engine PID, model state, load time, queue usage, inference latency, and restart count in Settings.
+- Provides `VERBANODE_AI_ENGINE_PROCESS=false` for compatibility troubleshooting.
+
+This remains a hardware test build until long-duration model and audio behavior is validated on the target Windows PC.
 
 ## v0.4.2 Phase 2 isolated Audio Engine and hot-plug recovery
 
@@ -135,7 +156,7 @@ HTTPS is required for phone/browser microphone permission. Use `run_http.bat` on
 ## Upgrade from v0.2.6
 
 1. Back up the current installation and use the dashboard backup function for the database.
-2. Replace repository files with v0.4.2, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
+2. Replace repository files with v0.5.1, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
 3. Run:
 
 ```bat
@@ -217,6 +238,10 @@ download_kokoro.bat          Kokoro model downloader
 | `VERBANODE_TTS_CACHE_PATH` | Persistent script/greeting cache |
 | `VERBANODE_AUDIO_ENGINE_PROCESS` | Enable the Phase 2 isolated audio process |
 | `VERBANODE_AUDIO_ENGINE_WATCHDOG_SECONDS` | Audio process heartbeat interval |
+| `VERBANODE_AI_ENGINE_PROCESS` | Enable isolated SenseVoice and Kokoro models |
+| `VERBANODE_AI_ENGINE_WATCHDOG_SECONDS` | AI process heartbeat interval |
+| `VERBANODE_AI_ENGINE_PRELOAD_ASR` | Load SenseVoice when the AI process starts |
+| `VERBANODE_AI_ENGINE_PRELOAD_KOKORO` | Load Kokoro at startup when model files exist |
 
 Do not commit `.env`, databases, models, certificates, backups, or TTS cache files.
 
@@ -236,12 +261,12 @@ From the existing Git repository:
 ```bat
 git status
 git add .
-git commit -m "fix: add VerbaNode v0.4.2 Windows audio hot-plug recovery"
+git commit -m "feat: add VerbaNode v0.5.1 settings navigation"
 git push origin main
 ```
 
-Test this build on the target Windows audio hardware first. After validation, create a GitHub release tagged `v0.4.2` and use `RELEASE_NOTES.md` as the release description.
+Test this build on the target Windows audio hardware first. After validation, create a GitHub pre-release tagged `v0.5.1-beta.1` and use `RELEASE_NOTES.md` as the release description.
 
 ## Reference architecture
 
-The project was architecturally informed by the MIT-licensed `xiaozhi-esp32-server` project. VerbaNode uses a Windows-hosted topology rather than its remote ESP32 audio-device topology. See `THIRD_PARTY_NOTICES.md`, `docs/PIPELINE_COMPARISON.md`, `docs/PHASE1_IMPLEMENTATION.md`, and `docs/PHASE2_IMPLEMENTATION.md`.
+The project was architecturally informed by the MIT-licensed `xiaozhi-esp32-server` project. VerbaNode uses a Windows-hosted topology rather than its remote ESP32 audio-device topology. See `THIRD_PARTY_NOTICES.md`, `docs/PIPELINE_COMPARISON.md`, `docs/PHASE1_IMPLEMENTATION.md`, `docs/PHASE2_IMPLEMENTATION.md`, and `docs/PHASE3_IMPLEMENTATION.md`.

@@ -198,6 +198,10 @@ class Database:
             )
             conn.execute(
                 "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
+                ("show_rejected_stt_transcripts", "true", now),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
                 ("audio_safety_version", "0", now),
             )
             safety_version_row = conn.execute(
@@ -414,6 +418,7 @@ class Database:
             "max_record_seconds",
             "stt_confidence_filter_enabled",
             "stt_confidence_threshold",
+            "show_rejected_stt_transcripts",
             "input_device",
             "output_device",
             "input_device_fingerprint",
@@ -427,7 +432,7 @@ class Database:
             ).fetchall()
         for row in rows:
             value: Any = row["value"]
-            if row["key"] in {"interruption_enabled", "stt_confidence_filter_enabled"}:
+            if row["key"] in {"interruption_enabled", "stt_confidence_filter_enabled", "show_rejected_stt_transcripts"}:
                 value = value.lower() == "true"
             elif row["key"] == "stt_confidence_threshold":
                 try:
@@ -442,6 +447,7 @@ class Database:
         result.setdefault("max_record_seconds", self.settings.max_record_seconds)
         result.setdefault("stt_confidence_filter_enabled", True)
         result.setdefault("stt_confidence_threshold", 0.70)
+        result.setdefault("show_rejected_stt_transcripts", True)
         result.setdefault("input_device", None)
         result.setdefault("output_device", None)
         result.setdefault("input_device_fingerprint", None)

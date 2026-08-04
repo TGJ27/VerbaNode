@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.1
+
+- Reorganized the Settings page into Conversation, Host audio, AI models, Runtime, and Data submenus.
+- Added responsive desktop side navigation and mobile horizontal category navigation for Settings.
+- Added the persistent `show_rejected_stt_transcripts` runtime setting.
+- Added a dashboard toggle to show or hide low-confidence STT transcripts that were not sent to the agent.
+- Restyled rejected transcripts as muted gray diagnostic messages with a Filtered STT label.
+- Prevented hidden rejected transcripts from removing the empty conversation state or cluttering the visible chat.
+- Added database, schema, static UI, and version regression tests.
+
+## 0.5.0
+
+- Added a supervised AI Engine child process that owns SenseVoice/FunASR and local Kokoro native model objects.
+- Added asynchronous model preload, persistent model reuse, model reload controls, heartbeat monitoring, and automatic AI process restart.
+- Added bounded ASR and Kokoro queues with one active inference per provider.
+- Routed immutable PCM utterances to the AI Engine and returned structured transcription results with confidence metadata.
+- Routed Kokoro generation to the AI Engine while keeping Edge TTS and Ollama outside it.
+- Added AI Engine and model health, load time, inference latency, queue depth, PID, heartbeat, and restart information to the API and dashboard.
+- Added authenticated Restart AI Engine, Reload SenseVoice, and Reload Kokoro actions.
+- Added an in-process compatibility mode through `VERBANODE_AI_ENGINE_PROCESS=false`.
+- Added Phase 3 process, proxy, queue-boundary, and shared-audio-path tests.
+
 ## 0.4.2
 
 - Added a real Windows/PortAudio hot-plug refresh operation inside the isolated Audio Engine.
