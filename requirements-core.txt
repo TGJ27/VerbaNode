@@ -8,3 +8,4 @@ httpx>=0.28,<1.0
 python-multipart>=0.0.20,<1.0
 ollama>=0.6,<1.0
 psutil>=6.1,<8.0
+tzdata>=2024.1
