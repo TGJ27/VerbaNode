@@ -28,7 +28,7 @@ def test_settings_ui_is_split_into_submenus_and_rejected_messages_are_muted() ->
     javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
     css = (ROOT / "app" / "static" / "styles.css").read_text(encoding="utf-8")
 
-    for panel in ("conversation", "audio", "models", "runtime", "data"):
+    for panel in ("conversation", "audio", "models", "runtime", "diagnostics", "data"):
         assert f'data-settings-panel="{panel}"' in html
         assert f'data-settings-panel-content="{panel}"' in html
 
@@ -36,4 +36,4 @@ def test_settings_ui_is_split_into_submenus_and_rejected_messages_are_muted() ->
     assert "show_rejected_stt_transcripts" in javascript
     assert ".message.user.rejected-transcript" in css
     assert ".message-list.hide-rejected-transcripts .rejected-transcript" in css
-    assert APP_VERSION == "0.5.1"
+    assert APP_VERSION == "0.6.2"

@@ -101,6 +101,15 @@ class AudioDeviceTestRequest(BaseModel):
     output_device: int | None = None
 
 
+class DiagnosticsSoakRequest(BaseModel):
+    duration_minutes: int = Field(default=30, ge=1, le=480)
+    interval_seconds: int = Field(default=5, ge=2, le=60)
+
+
+class PluginStateUpdate(BaseModel):
+    enabled: bool
+
+
 class QueueReorder(BaseModel):
     ordered_ids: list[int]
 

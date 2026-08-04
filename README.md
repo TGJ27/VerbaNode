@@ -2,7 +2,7 @@
 
 VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
 
-**Current test release:** v0.5.1 Phase 3 settings navigation and rejected-STT display controls.
+**Current test release:** v0.6.2 Phase 3 trusted local external plugins.
 
 ## Main features
 
@@ -15,6 +15,51 @@ VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive bro
 - Selectable host input/output devices with persistent streams and device fingerprint recovery.
 - One active controller; a valid PIN transfers control immediately.
 
+
+
+## v0.6.2 external plugins Phase 3
+
+- Scans the top-level `plugins/` folder at startup and on demand.
+- Validates `plugin.json`, SDK compatibility, entry paths, IDs, permissions, and tool schemas before registration.
+- Loads trusted local Python plugins into the same registry as built-in capabilities.
+- Isolates missing files, invalid manifests, import failures, duplicate IDs, and runtime exceptions so VerbaNode remains online.
+- Adds reload-all and per-plugin reload controls, external/built-in labels, plugin paths, and failed-load cards to the Plugins page.
+- Unloads a plugin when its folder is removed and **Reload external** is pressed.
+- Includes `plugins/example_echo/` as a working reference plugin.
+
+External plugins are trusted local Python code and run inside the VerbaNode Core process. This release does not provide a security sandbox, dependency installer, marketplace, or automatic updater.
+
+## v0.6.1 built-in Plugin Manager Phase 2
+
+- Adds a dedicated responsive **Plugins** page for all registered built-in capabilities.
+- Allows global enable/disable control with persistent state in SQLite settings.
+- Shows plugin health, version, author, category, permissions, agent assignments, execution count, errors, average latency, last latency, and last error.
+- Adds per-plugin and global metric reset actions.
+- Adds Plugin Manager capability reporting to bootstrap, runtime status, diagnostics export, and the system self-test.
+
+## v0.6.0 internal plugin architecture Phase 1
+
+- Separates current time, configured location, live weather, and stop-conversation capabilities into independent backend modules.
+- Adds an ordered internal plugin registry and plugin manager with execution health and latency metrics.
+- Keeps the existing agent tool names, deterministic routing, LLM function calling, prompts, database, APIs, and dashboard behavior compatible.
+- Uses a small `ToolService` compatibility facade, allowing the conversation and LLM layers to remain independent of capability implementations.
+- Does not add external plugin installation or dynamic loading yet.
+
+## v0.5.3 diagnostics UI hotfix
+
+- Detects dashboard/backend version mismatches before Diagnostics requests are made.
+- Replaces repeated 404 toasts with clear restart instructions.
+- Aligns Diagnostics cards and loading placeholders consistently.
+
+## v0.5.2 diagnostics and soak monitoring
+
+- Adds **Settings → Diagnostics** with separate health cards for the Core, Audio Engine, AI Engine, and Windows host.
+- Shows process CPU/RAM/thread use, heartbeat age, model state, queue use, device locks, and restart counts.
+- Adds a non-destructive installation self-test for SQLite, runtime directories, audio endpoints, engines, Ollama, and pipeline state.
+- Records the latest completed-turn STT, LLM, TTS, and total response latency without storing conversation text.
+- Adds configurable 5-minute to 2-hour soak monitoring and summarizes resource use, queue pressure, engine restarts, and pipeline errors.
+- Adds redacted recent logs and a safe diagnostics ZIP export that excludes the PIN, `.env`, database, conversations, certificates, caches, and model binaries.
+- Adds a dashboard favicon to remove the harmless `/favicon.ico` startup 404.
 
 
 ## v0.5.1 settings navigation and rejected-STT display controls
@@ -153,10 +198,31 @@ run.bat
 
 HTTPS is required for phone/browser microphone permission. Use `run_http.bat` only when browser-device microphone capture is not needed. Run `allow_firewall.bat` as Administrator to permit another device through Windows Firewall.
 
+## External plugins
+
+VerbaNode scans the top-level `plugins/` directory. Each external plugin uses this structure:
+
+```text
+plugins/my_plugin/
+├── plugin.json
+├── plugin.py
+└── README.md
+```
+
+After adding or changing a folder, open **Plugins** and press **Reload external**. New tools must also be enabled for the active agent under **Agents → Edit → Models & Voice → Tools**.
+
+The included `example_echo` plugin can be tested with:
+
+```text
+Echo external plugins are working.
+```
+
+See `docs/EXTERNAL_PLUGINS.md` for the manifest, lifecycle, compatibility rules, and security limitations.
+
 ## Upgrade from v0.2.6
 
 1. Back up the current installation and use the dashboard backup function for the database.
-2. Replace repository files with v0.5.1, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
+2. Replace repository files with v0.6.2, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
 3. Run:
 
 ```bat
@@ -261,12 +327,12 @@ From the existing Git repository:
 ```bat
 git status
 git add .
-git commit -m "feat: add VerbaNode v0.5.1 settings navigation"
+git commit -m "feat: add VerbaNode v0.6.2 external plugin loading"
 git push origin main
 ```
 
-Test this build on the target Windows audio hardware first. After validation, create a GitHub pre-release tagged `v0.5.1-beta.1` and use `RELEASE_NOTES.md` as the release description.
+Test this build on the target Windows audio hardware first. After validation, create a GitHub pre-release tagged `v0.6.2-alpha.1` and use `RELEASE_NOTES.md` as the release description.
 
 ## Reference architecture
 
-The project was architecturally informed by the MIT-licensed `xiaozhi-esp32-server` project. VerbaNode uses a Windows-hosted topology rather than its remote ESP32 audio-device topology. See `THIRD_PARTY_NOTICES.md`, `docs/PIPELINE_COMPARISON.md`, `docs/PHASE1_IMPLEMENTATION.md`, `docs/PHASE2_IMPLEMENTATION.md`, and `docs/PHASE3_IMPLEMENTATION.md`.
+The project was architecturally informed by the MIT-licensed `xiaozhi-esp32-server` project. VerbaNode uses a Windows-hosted topology rather than its remote ESP32 audio-device topology. See `THIRD_PARTY_NOTICES.md`, `docs/PIPELINE_COMPARISON.md`, `docs/PHASE1_IMPLEMENTATION.md`, `docs/PHASE2_IMPLEMENTATION.md`, `docs/PHASE3_IMPLEMENTATION.md`, `docs/PHASE3_DIAGNOSTICS.md`, and `docs/INTERNAL_PLUGIN_ARCHITECTURE.md`, and `docs/EXTERNAL_PLUGINS.md`.

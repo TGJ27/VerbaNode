@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     ai_engine_preload_asr: bool = True
     ai_engine_preload_kokoro: bool = True
     ai_engine_kokoro_timeout_seconds: float = Field(default=60.0, ge=10.0, le=300.0)
+    external_plugins_path: Path = ROOT_DIR / "plugins"
+
+    @property
+    def external_plugins_dir(self) -> Path:
+        path = self.external_plugins_path
+        if not path.is_absolute():
+            path = ROOT_DIR / path
+        path.mkdir(parents=True, exist_ok=True)
+        return path
 
     @property
     def runtime_audio_dir(self) -> Path:
@@ -85,6 +94,12 @@ class Settings(BaseSettings):
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    @property
+    def diagnostics_dir(self) -> Path:
+        path = ROOT_DIR / "diagnostics"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -95,6 +110,8 @@ def get_settings() -> Settings:
         settings.kokoro_dir = ROOT_DIR / settings.kokoro_dir
     if not settings.tts_cache_path.is_absolute():
         settings.tts_cache_path = ROOT_DIR / settings.tts_cache_path
+    if not settings.external_plugins_path.is_absolute():
+        settings.external_plugins_path = ROOT_DIR / settings.external_plugins_path
     if settings.ssl_certfile and not settings.ssl_certfile.is_absolute():
         settings.ssl_certfile = ROOT_DIR / settings.ssl_certfile
     if settings.ssl_keyfile and not settings.ssl_keyfile.is_absolute():

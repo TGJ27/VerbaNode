@@ -24,3 +24,6 @@ certs/local-ip.txt
 *.log
 .DS_Store
 Thumbs.db
+
+# Runtime diagnostics and soak-test reports
+diagnostics/

@@ -47,3 +47,8 @@ Test model preload, first-turn latency, Edge-to-Kokoro fallback, model reload, A
 ## v0.5.1 dashboard addendum
 
 The Phase 3 runtime architecture is unchanged. Settings is now category-based, and rejected STT visibility is a persisted presentation preference. Confidence filtering remains a backend pipeline decision; the new visibility toggle affects only whether rejected transcript diagnostics are rendered in chat.
+
+
+## v0.5.2 diagnostics addendum
+
+The process boundaries remain unchanged. A core-side Diagnostics Manager now collects redacted logs, process resource metrics, engine health, recent turn latency, self-test results, and optional soak samples. Diagnostics sampling uses supervisor health APIs and `psutil`; it does not move model or audio ownership back into the Core. Exported reports deliberately exclude private configuration and conversation data.

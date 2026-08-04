@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.6.2
+
+- Added startup and on-demand discovery of trusted local Python plugins from the top-level `plugins/` folder.
+- Added strict JSON manifest validation, SDK-major compatibility checks, safe entry-path validation, duplicate-ID protection, and tool-schema verification.
+- Unified built-in and external capabilities in the existing Plugin Registry without changing the conversation or LLM tool interfaces.
+- Added per-plugin and reload-all lifecycle controls, safe unload when a plugin folder is removed, and optional async shutdown hooks.
+- Added failed-load isolation and dashboard reporting for missing manifests, invalid JSON, unsupported SDK versions, import errors, factory errors, and duplicate IDs.
+- Added built-in/external source labels, external plugin paths, SDK versions, reload controls, and failed-load cards to the responsive Plugins page.
+- Added the `example_echo` reference plugin and external-plugin developer documentation.
+- Preserved Phase 2 global enable/disable state and migrated it to the generalized `disabled_plugins` setting while maintaining downgrade compatibility.
+- Added regression tests for discovery, execution, reload, folder removal, load-error recovery, duplicate IDs, APIs, and UI integration.
+
+## v0.6.1 - Built-in Plugin Manager Phase 2
+
+- Added a responsive Plugins page with global enable/disable controls for built-in capabilities.
+- Persisted disabled plugin IDs in SQLite settings and restored them at startup.
+- Added plugin metadata, health state, permissions, agent assignment counts, execution/error totals, and latency metrics.
+- Added per-plugin and global metric reset actions.
+- Added authenticated Plugin Manager APIs and live `plugins_changed` dashboard events.
+- Added Plugin Manager information to bootstrap, runtime status, diagnostics snapshots, exports, and the non-destructive self-test.
+- Marked globally disabled tools inside the agent editor without deleting agent assignments.
+- Kept external plugin discovery, installation, manifests, removal, and hot reload out of scope for Phase 2.
+
+## v0.6.0 - Internal plugin architecture Phase 1
+
+- Split current time, location, weather, and stop-conversation capabilities into independent built-in plugin modules.
+- Added an ordered plugin registry and manager with execution health and latency metrics.
+- Kept the existing ToolService API, agent tool IDs, prompts, database settings, and conversation behavior backwards compatible.
+- Added internal plugin architecture documentation and automated tests.
+
+## 0.5.3
+
+- Added frontend/backend version capability checks for Diagnostics.
+- Replaced repeated 404 `Not Found` toasts with a clear update/restart notice when static files and the running backend do not match.
+- Added an explicit Diagnostics capability declaration to `/api/bootstrap`.
+- Aligned Diagnostics health, self-test, soak, latency, log, and export cards to a consistent grid.
+- Added four loading placeholders so the health row remains straight before the first runtime snapshot.
+
+## 0.5.2
+
+- Added a dedicated Diagnostics Settings submenu with Core, Audio Engine, AI Engine, system-resource, heartbeat, queue, and restart health cards.
+- Added non-destructive system self-tests for SQLite, writable runtime directories, Audio Engine responsiveness, Windows audio endpoints, AI Engine responsiveness, Ollama, and pipeline state.
+- Added rolling redacted runtime logs with level filtering, dashboard clearing, and safe diagnostics ZIP export.
+- Added per-turn latency history for STT, LLM, tools, TTS, and total response time without storing conversation content.
+- Added configurable 5-minute to 2-hour soak monitoring for CPU, RAM, process RSS, thread counts, engine heartbeat age, queue use, restart deltas, and pipeline errors.
+- Added process-level resource metrics for Core, Audio Engine, and AI Engine.
+- Added an SVG favicon so normal dashboard startup no longer produces a favicon 404.
+- Added diagnostics privacy protections: session tokens are redacted and exports exclude `.env`, PIN, database, conversations, certificates, caches, and model files.
+- Added Phase 3 diagnostics regression tests; 70 automated tests pass.
+
 ## 0.5.1
 
 - Reorganized the Settings page into Conversation, Host audio, AI models, Runtime, and Data submenus.

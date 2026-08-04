@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#eef4ff">
   <title>VerbaNode Standalone</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.5.1">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css?v=0.6.2">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
@@ -36,7 +37,7 @@
         <div class="brand-mark">VN</div>
         <div>
           <strong>VerbaNode</strong>
-          <span>Standalone · <b id="appVersion">v0.5.1</b></span>
+          <span>Standalone · <b id="appVersion">v0.6.1</b></span>
         </div>
         <button id="mobileCloseNav" class="icon-btn mobile-only" aria-label="Close menu">×</button>
       </div>
@@ -45,6 +46,7 @@
         <button class="nav-item active" data-page="chat"><span>◉</span>Conversation</button>
         <button class="nav-item" data-page="agents"><span>◇</span>Agents</button>
         <button class="nav-item" data-page="information"><span>▤</span>Information</button>
+        <button class="nav-item" data-page="plugins"><span>⬡</span>Plugins</button>
         <button class="nav-item" data-page="scripts"><span>▶</span>Scripts & Queue</button>
         <button class="nav-item" data-page="settings"><span>⚙</span>Settings</button>
       </nav>
@@ -149,6 +151,36 @@
         <div id="informationList" class="list-stack"></div>
       </section>
 
+      <section id="page-plugins" class="page">
+        <div class="page-actions plugin-page-actions">
+          <div>
+            <p class="eyebrow">PLUGIN MANAGER</p>
+            <p class="muted">Manage built-in capabilities and trusted local plugins loaded from <code id="externalPluginDirectory">plugins/</code>. External Python plugins run inside the VerbaNode Core process, so install only code you trust.</p>
+          </div>
+          <div class="plugin-page-buttons">
+            <button id="refreshPluginsBtn" class="btn ghost">↻ Refresh status</button>
+            <button id="reloadExternalPluginsBtn" class="btn primary">↻ Reload external</button>
+            <button id="resetAllPluginMetricsBtn" class="btn secondary">Reset all metrics</button>
+          </div>
+        </div>
+
+        <div id="pluginSummary" class="plugin-summary-grid" aria-live="polite">
+          <article class="card plugin-summary-card"><span>Registered</span><strong>–</strong><small>Loading plugin manager</small></article>
+          <article class="card plugin-summary-card"><span>Enabled</span><strong>–</strong><small>Globally available</small></article>
+          <article class="card plugin-summary-card"><span>Executions</span><strong>–</strong><small>Since startup</small></article>
+          <article class="card plugin-summary-card"><span>Health</span><strong>–</strong><small>Runtime status</small></article>
+        </div>
+
+        <div id="pluginGrid" class="plugin-grid">
+          <article class="card plugin-card plugin-card-loading"><div class="plugin-card-head"><div><p class="eyebrow">PLUGIN MANAGER</p><h3>Loading plugins</h3></div><span class="plugin-status neutral">…</span></div><p class="muted">Waiting for the backend registry and external plugin discovery.</p></article>
+        </div>
+
+        <section class="card plugin-phase-note">
+          <div><p class="eyebrow">PHASE 3</p><h3>Trusted local external plugins</h3><p class="muted">Add one folder per plugin under <code>plugins/</code>, then reload. Missing, invalid, incompatible, and duplicate plugins are isolated and reported without stopping VerbaNode. Dependency installation and an untrusted-code sandbox are not included.</p></div>
+          <span class="chip">verbanode-plugins/1</span>
+        </section>
+      </section>
+
       <section id="page-scripts" class="page">
         <div class="scripts-layout">
           <div>
@@ -180,6 +212,7 @@
             <button type="button" class="settings-subnav-item" data-settings-panel="audio"><span>◌</span><div><strong>Host audio</strong><small>Microphone, speaker and device tests</small></div></button>
             <button type="button" class="settings-subnav-item" data-settings-panel="models"><span>◇</span><div><strong>AI models</strong><small>Ollama model management</small></div></button>
             <button type="button" class="settings-subnav-item" data-settings-panel="runtime"><span>▤</span><div><strong>Runtime</strong><small>Pipeline and engine health</small></div></button>
+            <button type="button" class="settings-subnav-item" data-settings-panel="diagnostics"><span>⌁</span><div><strong>Diagnostics</strong><small>Tests, latency, logs and soak monitoring</small></div></button>
             <button type="button" class="settings-subnav-item" data-settings-panel="data"><span>⇩</span><div><strong>Data</strong><small>Backup and restore</small></div></button>
           </aside>
 
@@ -271,6 +304,60 @@
                   </div>
                 </section>
               </div>
+            </section>
+
+            <section id="settings-panel-diagnostics" class="settings-panel" data-settings-panel-content="diagnostics">
+              <div class="settings-panel-heading">
+                <div><p class="eyebrow">DIAGNOSTICS</p><h3>System health and reliability</h3></div>
+                <p>Run non-destructive checks, inspect process resources and latency, export safe logs, or monitor a longer soak test.</p>
+              </div>
+
+              <div id="diagnosticHealthCards" class="diagnostic-health-grid" aria-live="polite">
+                <article class="card diagnostic-health-card diagnostic-skeleton"><span class="diagnostic-state neutral">…</span><div><small>CORE</small><strong>Loading diagnostics</strong><p>Waiting for the backend snapshot.</p></div></article>
+                <article class="card diagnostic-health-card diagnostic-skeleton"><span class="diagnostic-state neutral">…</span><div><small>AUDIO ENGINE</small><strong>Loading diagnostics</strong><p>Waiting for the backend snapshot.</p></div></article>
+                <article class="card diagnostic-health-card diagnostic-skeleton"><span class="diagnostic-state neutral">…</span><div><small>AI ENGINE</small><strong>Loading diagnostics</strong><p>Waiting for the backend snapshot.</p></div></article>
+                <article class="card diagnostic-health-card diagnostic-skeleton"><span class="diagnostic-state neutral">…</span><div><small>SYSTEM</small><strong>Loading diagnostics</strong><p>Waiting for the backend snapshot.</p></div></article>
+              </div>
+
+              <div class="settings-panel-grid diagnostics-control-grid">
+                <section class="card settings-card diagnostic-panel-card">
+                  <div class="card-title-row"><div><p class="eyebrow">SELF-TEST</p><h3>Component checks</h3></div><span id="diagnosticSelfTestBadge" class="chip">Not run</span></div>
+                  <p class="muted">Checks SQLite, writable runtime directories, Audio Engine, Windows endpoints, AI Engine, Ollama and the pipeline. It does not play audio.</p>
+                  <div id="diagnosticSelfTestResults" class="diagnostic-test-list"><div class="queue-empty">Run the self-test to validate the current installation.</div></div>
+                  <button id="runDiagnosticSelfTestBtn" class="btn primary">Run system self-test</button>
+                </section>
+
+                <section class="card settings-card diagnostic-panel-card">
+                  <div class="card-title-row"><div><p class="eyebrow">SOAK TEST</p><h3>Long-session monitor</h3></div><span id="soakStateBadge" class="chip">Idle</span></div>
+                  <p class="muted">Samples CPU, RAM, process health, engine heartbeats, queue use and restart counts while VerbaNode operates normally.</p>
+                  <div class="form-grid two compact-diagnostic-form">
+                    <label>Duration<select id="soakDurationSelect"><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30" selected>30 minutes</option><option value="60">60 minutes</option><option value="120">2 hours</option></select></label>
+                    <label>Sample interval<select id="soakIntervalSelect"><option value="3">3 seconds</option><option value="5" selected>5 seconds</option><option value="10">10 seconds</option><option value="30">30 seconds</option></select></label>
+                  </div>
+                  <div class="soak-progress"><span id="soakProgressBar"></span></div>
+                  <div id="soakStatusText" class="status-box">No soak test is running.</div>
+                  <div class="button-grid two"><button id="startSoakTestBtn" class="btn secondary">Start soak test</button><button id="stopSoakTestBtn" class="btn danger-outline" disabled>Stop soak test</button></div>
+                </section>
+              </div>
+
+              <div class="settings-panel-grid diagnostics-detail-grid">
+                <section class="card settings-card diagnostic-panel-card">
+                  <div class="card-title-row"><div><p class="eyebrow">LATENCY</p><h3>Recent completed turns</h3></div><button id="clearLatencyHistoryBtn" class="btn ghost compact">Clear</button></div>
+                  <div id="diagnosticLatencySummary" class="diagnostic-metric-strip"></div>
+                  <div class="diagnostic-table-wrap"><table class="diagnostic-table"><thead><tr><th>Source</th><th>STT</th><th>LLM</th><th>TTS</th><th>Total</th></tr></thead><tbody id="diagnosticLatencyRows"><tr><td colspan="5">No completed turns yet.</td></tr></tbody></table></div>
+                </section>
+
+                <section class="card settings-card diagnostic-panel-card">
+                  <div class="card-title-row"><div><p class="eyebrow">RECENT LOGS</p><h3>Core runtime events</h3></div><select id="diagnosticLogLevel" class="compact-select"><option value="">Info+</option><option value="WARNING">Warnings+</option><option value="ERROR">Errors</option></select></div>
+                  <div id="diagnosticLogList" class="diagnostic-log-list"><div class="queue-empty">No captured logs yet.</div></div>
+                  <div class="button-grid two"><button id="refreshDiagnosticsBtn" class="btn ghost">Refresh diagnostics</button><button id="clearDiagnosticLogsBtn" class="btn danger-outline">Clear log view</button></div>
+                </section>
+              </div>
+
+              <section class="card settings-card diagnostics-export-card">
+                <div><p class="eyebrow">EXPORT</p><h3>Portable diagnostics report</h3><p class="muted">Downloads a ZIP containing the health snapshot, dependency versions, recent redacted logs, latency history and soak summary. It excludes the PIN, .env, database, conversations, certificates and model files.</p></div>
+                <button id="downloadDiagnosticsBtn" class="btn primary">Download diagnostics ZIP</button>
+              </section>
             </section>
 
             <section id="settings-panel-data" class="settings-panel" data-settings-panel-content="data">
@@ -366,6 +453,6 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/app.js?v=0.5.1" defer></script>
+  <script src="/static/app.js?v=0.6.2" defer></script>
 </body>
 </html>

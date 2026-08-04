@@ -1,0 +1,12 @@
+{
+  "id": "example_echo",
+  "name": "Example Echo",
+  "version": "1.0.0",
+  "author": "Sari Technology Global",
+  "description": "Example external plugin that repeats text supplied by the user.",
+  "entry": "plugin.py",
+  "sdk_version": "1.0",
+  "category": "Developer example",
+  "priority": 250,
+  "permissions": []
+}

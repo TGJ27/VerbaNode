@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,6 +32,7 @@ class TurnContext:
     capture_id: str | None = None
     generation_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     started_at: float = field(default_factory=time.monotonic)
+    started_unix: float = field(default_factory=time.time)
 
     @classmethod
     def for_audio(cls, source: str) -> "TurnContext":
@@ -52,6 +54,8 @@ class PipelineMonitor:
         self._turn: TurnContext | None = None
         self._marks: dict[str, float] = {}
         self._last_latency_ms: dict[str, int] = {}
+        self._current_latency_ms: dict[str, int] = {}
+        self._history: deque[dict[str, Any]] = deque(maxlen=100)
         self._counters: dict[str, int] = {
             "turns_started": 0,
             "turns_completed": 0,
@@ -79,6 +83,7 @@ class PipelineMonitor:
         with self._lock:
             self._turn = turn
             self._marks = {"turn_started": now}
+            self._current_latency_ms = {}
             self._counters["turns_started"] += 1
         return turn
 
@@ -108,13 +113,37 @@ class PipelineMonitor:
                 return None
             value = max(0, int(round((end - start) * 1000)))
             self._last_latency_ms[name] = value
+            self._current_latency_ms[name] = value
             return value
 
     def finish_turn(self, *, cancelled: bool = False) -> None:
         with self._lock:
+            turn = self._turn
             self.duration("turn_total", "turn_started")
             self._counters["turns_cancelled" if cancelled else "turns_completed"] += 1
+            if turn is not None:
+                self._history.append(
+                    {
+                        "turn_id": turn.turn_id,
+                        "capture_id": turn.capture_id,
+                        "generation_id": turn.generation_id,
+                        "source": turn.source,
+                        "started_at_unix": round(turn.started_unix, 3),
+                        "completed_at_unix": round(time.time(), 3),
+                        "cancelled": bool(cancelled),
+                        "latency_ms": dict(self._current_latency_ms),
+                    }
+                )
             self._turn = None
+
+    def recent_turns(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._lock:
+            values = list(self._history)
+        return values[-max(1, min(int(limit), 100)) :]
+
+    def clear_history(self) -> None:
+        with self._lock:
+            self._history.clear()
 
     def increment(self, name: str, amount: int = 1) -> None:
         with self._lock:
@@ -141,6 +170,8 @@ class PipelineMonitor:
                 "generation_id": turn.generation_id if turn else None,
                 "source": turn.source if turn else None,
                 "latency_ms": dict(self._last_latency_ms),
+                "current_latency_ms": dict(self._current_latency_ms),
+                "history_size": len(self._history),
                 "counters": dict(self._counters),
                 "last_error": dict(self._last_error) if self._last_error else None,
             }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,7 @@ from app.services.ai_engine import (
     AiSttProxy,
 )
 from app.services.controller import ControllerManager
+from app.services.diagnostics import DiagnosticsManager
 from app.services.conversation import ConversationManager
 from app.services.events import EventHub
 from app.services.llm import OllamaService
@@ -44,6 +46,7 @@ class AppState:
     tts: TtsService
     conversation: ConversationManager
     script_queue: ScriptQueueManager
+    diagnostics: DiagnosticsManager
 
     def reconcile_audio_devices(self) -> dict[str, int | None]:
         runtime = self.db.get_runtime_settings()
@@ -172,6 +175,17 @@ def build_state() -> AppState:
         kokoro_provider = KokoroTtsProvider(settings)
 
     tools = ToolService(settings)
+    try:
+        stored_disabled = db.get_setting("disabled_plugins", "") or db.get_setting(
+            "disabled_builtin_plugins", "[]"
+        )
+        disabled_plugins = json.loads(stored_disabled or "[]")
+        if not isinstance(disabled_plugins, list):
+            disabled_plugins = []
+    except (TypeError, ValueError, json.JSONDecodeError):
+        disabled_plugins = []
+    tools.configure_disabled_plugins(disabled_plugins)
+    tools.load_external_plugins(settings.external_plugins_dir)
     llm = OllamaService(settings, tools, monitor)
     tts = TtsService(
         settings,
@@ -191,6 +205,13 @@ def build_state() -> AppState:
     )
     script_queue = ScriptQueueManager(db, tts, events, conversation.active_agent)
     conversation.script_queue = script_queue
+    from app.version import APP_VERSION, BUILD_LABEL
+
+    diagnostics = DiagnosticsManager(
+        settings.diagnostics_dir,
+        app_version=APP_VERSION,
+        build_label=BUILD_LABEL,
+    )
     return AppState(
         settings=settings,
         db=db,
@@ -207,6 +228,7 @@ def build_state() -> AppState:
         tts=tts,
         conversation=conversation,
         script_queue=script_queue,
+        diagnostics=diagnostics,
     )
 
 

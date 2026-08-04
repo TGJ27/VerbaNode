@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 import sqlite3
 import tempfile
 import zipfile
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -31,8 +33,10 @@ from app.schemas import (
     AudioDeviceTestRequest,
     ConversationCreate,
     ConversationSettingsUpdate,
+    DiagnosticsSoakRequest,
     InfoCreate,
     LoginRequest,
+    PluginStateUpdate,
     QueueReorder,
     RoleGenerateRequest,
     ScriptCreate,
@@ -61,6 +65,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.on_event("startup")
 async def startup_event() -> None:
     install_asyncio_exception_filter()
+    state.diagnostics.install_logging()
+    LOGGER.info("Diagnostics recorder initialized for VerbaNode %s", APP_VERSION)
     try:
         if state.audio_engine is not None:
             await asyncio.to_thread(state.audio_engine.start)
@@ -90,10 +96,12 @@ async def disable_ui_caching(request, call_next):
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    state.diagnostics.shutdown()
     await state.conversation.stop_conversation(stop_tts=True)
     await state.script_queue.stop()
     if state.ai_engine is not None:
         await asyncio.to_thread(state.ai_engine.stop)
+    await state.tools.shutdown_plugins()
     if state.audio_engine is not None:
         await asyncio.to_thread(state.audio_engine.stop)
     else:
@@ -282,6 +290,13 @@ async def bootstrap(token: Token) -> dict[str, Any]:
     return {
         "version": APP_VERSION,
         "build": BUILD_LABEL,
+        "features": {
+            "diagnostics": True,
+            "diagnostics_api_version": 1,
+            "plugin_manager": True,
+            "plugin_manager_api_version": 2,
+            "external_plugins": True,
+        },
         "kokoro_voices": KOKORO_VOICES,
         "agents": state.db.list_agents(),
         "active_agent": agent,
@@ -313,11 +328,44 @@ async def bootstrap(token: Token) -> dict[str, Any]:
         "ollama_error": ollama_error,
         "hardware": hardware_status(),
         "pipeline": state.monitor.snapshot(),
+        "plugins": plugin_payload(),
         "audio_health": {
             "input": state.recorder.health(),
             "output": state.player.health(),
         },
     }
+
+
+def plugin_payload() -> dict[str, Any]:
+    """Return dashboard-safe metadata and runtime metrics for all plugins."""
+    usage: Counter[str] = Counter()
+    agents = state.db.list_agents()
+    for agent in agents:
+        usage.update(str(item) for item in agent.get("tools_enabled", []))
+
+    plugins: list[dict[str, Any]] = []
+    for item in state.tools.plugin_health():
+        plugin = dict(item)
+        plugin["agent_count"] = int(usage.get(plugin["id"], 0))
+        plugin["agent_total"] = len(agents)
+        plugins.append(plugin)
+
+    summary = state.tools.plugin_summary()
+    summary["agent_assignments"] = sum(usage.values())
+    return {
+        "sdk": "verbanode-plugins/1",
+        "external_plugins_supported": True,
+        "external_plugins_directory": str(state.tools.external_plugins_directory()),
+        "plugins": plugins,
+        "summary": summary,
+    }
+
+
+def persist_plugin_state() -> None:
+    payload = json.dumps(state.tools.disabled_plugin_ids(), separators=(",", ":"))
+    state.db.set_setting("disabled_plugins", payload)
+    # Retain the Phase 2 key so downgrades still preserve built-in choices.
+    state.db.set_setting("disabled_builtin_plugins", payload)
 
 
 def hardware_status() -> dict[str, Any]:
@@ -332,6 +380,219 @@ def hardware_status() -> dict[str, Any]:
         }
     except Exception:
         return {}
+
+
+def _safe_component_health(callback, fallback: dict[str, Any]) -> dict[str, Any]:
+    try:
+        value = callback()
+        return dict(value) if isinstance(value, dict) else fallback
+    except Exception as exc:
+        return {**fallback, "error": str(exc)}
+
+
+def diagnostics_snapshot() -> dict[str, Any]:
+    runtime = state.db.get_runtime_settings()
+    audio_engine = (
+        _safe_component_health(state.audio_engine.health, {"alive": False})
+        if state.audio_engine is not None
+        else {"mode": "in_process", "alive": True, "pid": os.getpid()}
+    )
+    ai_engine = (
+        _safe_component_health(state.ai_engine.health, {"alive": False})
+        if state.ai_engine is not None
+        else {"mode": "in_process", "alive": True, "pid": os.getpid()}
+    )
+    audio_input = _safe_component_health(state.recorder.health, {"input_locked": False})
+    audio_output = _safe_component_health(state.player.health, {"output_locked": False})
+    resources = state.diagnostics.resource_snapshot(
+        core_pid=os.getpid(),
+        audio_pid=audio_engine.get("pid"),
+        ai_pid=ai_engine.get("pid"),
+    )
+    return {
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "environment": state.diagnostics.environment(),
+        "resources": resources,
+        "mode": state.conversation.mode,
+        "queue_state": state.script_queue.state,
+        "controller": state.controller.active_info(),
+        "runtime_settings": {
+            "input_device": runtime.get("input_device"),
+            "output_device": runtime.get("output_device"),
+            "silence_ms": runtime.get("silence_ms"),
+            "max_record_seconds": runtime.get("max_record_seconds"),
+            "stt_confidence_threshold": runtime.get("stt_confidence_threshold"),
+        },
+        "pipeline": state.monitor.snapshot(),
+        "audio": {
+            "engine": audio_engine,
+            "input": audio_input,
+            "output": audio_output,
+        },
+        "ai": {"engine": ai_engine},
+        "stt": _safe_component_health(state.stt.status, {}),
+        "tts": _safe_component_health(state.tts.status, {}),
+        "plugins": plugin_payload(),
+    }
+
+
+def diagnostics_soak_sample() -> dict[str, Any]:
+    snapshot = diagnostics_snapshot()
+    resources = snapshot.get("resources", {})
+    audio_engine = snapshot.get("audio", {}).get("engine", {})
+    ai_engine = snapshot.get("ai", {}).get("engine", {})
+    pipeline = snapshot.get("pipeline", {})
+    return {
+        "system": resources.get("system", {}),
+        "processes": resources.get("processes", {}),
+        "pipeline_state": pipeline.get("state"),
+        "pipeline_errors": pipeline.get("counters", {}).get("errors", 0),
+        "turns_completed": pipeline.get("counters", {}).get("turns_completed", 0),
+        "audio_alive": audio_engine.get("alive"),
+        "audio_restart_count": audio_engine.get("restart_count", 0),
+        "audio_heartbeat_age_seconds": audio_engine.get("seconds_since_heartbeat"),
+        "ai_alive": ai_engine.get("alive"),
+        "ai_restart_count": ai_engine.get("restart_count", 0),
+        "ai_heartbeat_age_seconds": ai_engine.get("heartbeat_age_seconds"),
+        "asr_inflight": ai_engine.get("inflight", {}).get("asr", 0),
+        "kokoro_inflight": ai_engine.get("inflight", {}).get("kokoro", 0),
+        "input_locked": snapshot.get("audio", {}).get("input", {}).get("input_locked"),
+        "output_locked": snapshot.get("audio", {}).get("output", {}).get("output_locked"),
+    }
+
+
+def _diagnostic_check(name: str, status: str, detail: str, duration_ms: int = 0) -> dict[str, Any]:
+    return {
+        "name": name,
+        "status": status,
+        "detail": str(detail),
+        "duration_ms": max(0, int(duration_ms)),
+    }
+
+
+async def run_diagnostics_self_test() -> dict[str, Any]:
+    checks: list[dict[str, Any]] = []
+
+    async def measured(name: str, callback, *, warning: bool = False) -> None:
+        started = asyncio.get_running_loop().time()
+        try:
+            detail = await callback()
+            status = "warn" if warning else "pass"
+        except Exception as exc:
+            detail = str(exc)
+            status = "fail"
+        checks.append(
+            _diagnostic_check(
+                name,
+                status,
+                str(detail),
+                round((asyncio.get_running_loop().time() - started) * 1000),
+            )
+        )
+
+    async def database_check() -> str:
+        def query() -> str:
+            with state.db.connect() as conn:
+                value = conn.execute("SELECT 1").fetchone()[0]
+            return "SQLite read/write connection is healthy" if value == 1 else "Unexpected SQLite result"
+        return await asyncio.to_thread(query)
+
+    async def directories_check() -> str:
+        def write_probe() -> str:
+            paths = [
+                state.settings.db_path.parent,
+                state.settings.runtime_audio_dir,
+                state.settings.tts_cache_dir,
+                state.settings.diagnostics_dir,
+            ]
+            for directory in paths:
+                directory.mkdir(parents=True, exist_ok=True)
+                probe = directory / ".verbanode-write-test"
+                probe.write_text("ok", encoding="utf-8")
+                probe.unlink(missing_ok=True)
+            return f"{len(paths)} runtime directories are writable"
+        return await asyncio.to_thread(write_probe)
+
+    async def audio_engine_check() -> str:
+        if state.audio_engine is None:
+            return "Audio Engine isolation is disabled; compatibility mode is active"
+        health = await asyncio.to_thread(state.audio_engine.health)
+        if not health.get("alive"):
+            raise RuntimeError("Audio Engine process is not alive")
+        heartbeat = health.get("seconds_since_heartbeat")
+        if heartbeat is not None and float(heartbeat) > 10:
+            raise RuntimeError(f"Audio Engine heartbeat is stale ({heartbeat}s)")
+        return f"Audio Engine PID {health.get('pid')} is responsive"
+
+    async def audio_devices_check() -> str:
+        devices = await asyncio.to_thread(state.recorder.list_devices)
+        inputs = sum(1 for device in devices if int(device.get("max_input_channels", 0)) > 0)
+        outputs = sum(1 for device in devices if int(device.get("max_output_channels", 0)) > 0)
+        if inputs < 1 or outputs < 1:
+            raise RuntimeError(f"Found {inputs} input and {outputs} output endpoints")
+        return f"Found {inputs} input and {outputs} output endpoints"
+
+    async def ai_engine_check() -> str:
+        if state.ai_engine is None:
+            return "AI Engine isolation is disabled; compatibility mode is active"
+        health = await asyncio.to_thread(state.ai_engine.health)
+        if not health.get("alive"):
+            raise RuntimeError("AI Engine process is not alive")
+        heartbeat = health.get("heartbeat_age_seconds")
+        if heartbeat is not None and float(heartbeat) > 10:
+            raise RuntimeError(f"AI Engine heartbeat is stale ({heartbeat}s)")
+        remote = health.get("remote") or {}
+        asr_state = (remote.get("asr") or {}).get("state", "unknown")
+        return f"AI Engine PID {health.get('pid')} is responsive; SenseVoice state is {asr_state}"
+
+    async def ollama_check() -> str:
+        models = await state.llm.list_models()
+        return f"Ollama is reachable with {len(models)} local model(s)"
+
+    async def pipeline_check() -> str:
+        pipeline = state.monitor.snapshot()
+        if pipeline.get("state") == "error":
+            raise RuntimeError(str(pipeline.get("last_error") or "Pipeline is in error state"))
+        return f"Pipeline state is {pipeline.get('state', 'unknown')}"
+
+    async def plugin_manager_check() -> str:
+        payload = plugin_payload()
+        summary = payload["summary"]
+        if summary["loaded"] < 1:
+            raise RuntimeError("No plugins are loaded")
+        failed = [
+            item["name"]
+            for item in payload["plugins"]
+            if item["status"] in {"error", "load_error"}
+        ]
+        if failed:
+            raise RuntimeError("Plugin errors: " + ", ".join(failed))
+        return (
+            f"{summary['enabled']} of {summary['loaded']} loaded plugins enabled; "
+            f"{summary['external']} external"
+        )
+
+    await measured("Database", database_check)
+    await measured("Runtime directories", directories_check)
+    await measured("Audio Engine", audio_engine_check, warning=state.audio_engine is None)
+    await measured("Windows audio endpoints", audio_devices_check)
+    await measured("AI Engine", ai_engine_check, warning=state.ai_engine is None)
+    await measured("Ollama", ollama_check)
+    await measured("Plugin Manager", plugin_manager_check)
+    await measured("Conversation pipeline", pipeline_check)
+
+    failures = sum(1 for check in checks if check["status"] == "fail")
+    warnings = sum(1 for check in checks if check["status"] == "warn")
+    overall = "fail" if failures else "warn" if warnings else "pass"
+    result = {
+        "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "overall": overall,
+        "failures": failures,
+        "warnings": warnings,
+        "checks": checks,
+    }
+    state.diagnostics.set_last_self_test(result)
+    return result
 
 
 @app.get("/api/status")
@@ -357,6 +618,7 @@ async def system_status(token: Token) -> dict[str, Any]:
             "engine": state.ai_engine.health() if state.ai_engine is not None else None,
         },
         "pipeline": state.monitor.snapshot(),
+        "plugins": plugin_payload(),
         "audio_health": {
             "input": state.recorder.health(),
             "output": state.player.health(),
@@ -368,6 +630,7 @@ async def system_status(token: Token) -> dict[str, Any]:
 async def pipeline_status(token: Token) -> dict[str, Any]:
     return {
         "pipeline": state.monitor.snapshot(),
+        "recent_turns": state.monitor.recent_turns(20),
         "audio": {
             "input": state.recorder.health(),
             "output": state.player.health(),
@@ -379,6 +642,147 @@ async def pipeline_status(token: Token) -> dict[str, Any]:
         "stt": state.stt.status(),
         "tts": state.tts.status(),
     }
+
+
+@app.get("/api/diagnostics")
+async def diagnostics_status(token: Token) -> dict[str, Any]:
+    snapshot = await asyncio.to_thread(diagnostics_snapshot)
+    return {
+        "snapshot": snapshot,
+        "recent_turns": state.monitor.recent_turns(20),
+        "recent_logs": state.diagnostics.logs(limit=80),
+        "self_test": state.diagnostics.last_self_test(),
+        "soak": state.diagnostics.soak_status(include_samples=False),
+    }
+
+
+@app.post("/api/diagnostics/self-test")
+async def diagnostics_self_test(token: Token) -> dict[str, Any]:
+    return await run_diagnostics_self_test()
+
+
+@app.get("/api/diagnostics/logs")
+async def diagnostics_logs(
+    token: Token,
+    limit: int = 200,
+    minimum_level: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "entries": state.diagnostics.logs(limit=limit, minimum_level=minimum_level),
+        "capacity": state.diagnostics.log_handler.capacity,
+    }
+
+
+@app.delete("/api/diagnostics/logs")
+async def clear_diagnostics_logs(token: Token) -> dict[str, bool]:
+    state.diagnostics.clear_logs()
+    LOGGER.info("Diagnostics log buffer cleared from the dashboard")
+    return {"ok": True}
+
+
+@app.delete("/api/diagnostics/turns")
+async def clear_diagnostics_turns(token: Token) -> dict[str, bool]:
+    state.monitor.clear_history()
+    return {"ok": True}
+
+
+@app.get("/api/diagnostics/export")
+async def export_diagnostics(token: Token) -> FileResponse:
+    snapshot = await asyncio.to_thread(diagnostics_snapshot)
+    path = await asyncio.to_thread(
+        state.diagnostics.create_report,
+        snapshot,
+        recent_turns=state.monitor.recent_turns(100),
+        self_test=state.diagnostics.last_self_test(),
+    )
+    return FileResponse(path, filename=path.name, media_type="application/zip")
+
+
+@app.post("/api/diagnostics/soak/start")
+async def start_diagnostics_soak(
+    payload: DiagnosticsSoakRequest,
+    token: Token,
+) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            state.diagnostics.start_soak,
+            diagnostics_soak_sample,
+            duration_seconds=payload.duration_minutes * 60,
+            interval_seconds=payload.interval_seconds,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/diagnostics/soak/stop")
+async def stop_diagnostics_soak(token: Token) -> dict[str, Any]:
+    return await asyncio.to_thread(state.diagnostics.stop_soak)
+
+
+@app.get("/api/diagnostics/soak")
+async def diagnostics_soak_status(token: Token) -> dict[str, Any]:
+    return state.diagnostics.soak_status(include_samples=False)
+
+
+# Plugins
+@app.get("/api/plugins")
+async def list_plugins(token: Token) -> dict[str, Any]:
+    return plugin_payload()
+
+
+@app.put("/api/plugins/{plugin_id}")
+async def update_plugin_state(
+    plugin_id: str,
+    payload: PluginStateUpdate,
+    token: Token,
+) -> dict[str, Any]:
+    try:
+        state.tools.set_plugin_enabled(plugin_id, payload.enabled)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Plugin not found") from exc
+    persist_plugin_state()
+    result = plugin_payload()
+    await state.events.broadcast("plugins_changed", result)
+    return result
+
+
+
+
+@app.post("/api/plugins/reload")
+async def reload_external_plugins(token: Token) -> dict[str, Any]:
+    await state.tools.reload_external_plugins()
+    result = plugin_payload()
+    await state.events.broadcast("plugins_changed", result)
+    return result
+
+
+@app.post("/api/plugins/{plugin_id}/reload")
+async def reload_external_plugin(plugin_id: str, token: Token) -> dict[str, Any]:
+    try:
+        await state.tools.reload_external_plugins(plugin_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="External plugin not found") from exc
+    result = plugin_payload()
+    await state.events.broadcast("plugins_changed", result)
+    return result
+
+@app.post("/api/plugins/reset-metrics")
+async def reset_all_plugin_metrics(token: Token) -> dict[str, Any]:
+    state.tools.reset_plugin_metrics()
+    result = plugin_payload()
+    await state.events.broadcast("plugins_changed", result)
+    return result
+
+
+@app.post("/api/plugins/{plugin_id}/reset-metrics")
+async def reset_one_plugin_metrics(plugin_id: str, token: Token) -> dict[str, Any]:
+    try:
+        state.tools.reset_plugin_metrics(plugin_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Plugin not found") from exc
+    result = plugin_payload()
+    await state.events.broadcast("plugins_changed", result)
+    return result
 
 
 # Agents

@@ -1,5 +1,8 @@
 'use strict';
 
+const FRONTEND_VERSION = '0.6.2';
+const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
+
 const appState = {
   token: sessionStorage.getItem('verbanode_token') || '',
   ws: null,
@@ -7,12 +10,15 @@ const appState = {
   data: null,
   agents: [],
   information: [],
+  plugins: { plugins: [], summary: {} },
   scripts: [],
   queue: [],
   models: [],
   kokoroVoices: [],
   audioDevices: { inputs: [], outputs: [], recommended_input: null, recommended_output: null },
-  version: '0.5.1',
+  version: FRONTEND_VERSION,
+  backendVersion: null,
+  features: {},
   settingsPanel: localStorage.getItem('verbanode_settings_panel') || 'conversation',
   activeAgent: null,
   conversation: null,
@@ -20,6 +26,7 @@ const appState = {
   messages: [],
   mode: 'idle',
   pipeline: { state: 'idle', latency_ms: {}, counters: {} },
+  diagnostics: null,
   queueState: 'paused',
   streaming: new Map(),
   pttToggleActive: false,
@@ -89,7 +96,10 @@ async function api(path, options = {}) {
       const payload = await response.json();
       detail = payload.detail || payload.message || detail;
     } catch (_) {}
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    error.path = path;
+    throw error;
   }
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) return response.json();
@@ -425,11 +435,14 @@ async function loadBootstrap() {
   appState.data = data;
   appState.agents = data.agents || [];
   appState.information = data.information || [];
+  appState.plugins = data.plugins || { plugins: [], summary: {} };
   appState.scripts = data.scripts || [];
   appState.queue = data.queue || [];
   appState.models = data.models || [];
   appState.kokoroVoices = data.kokoro_voices || [];
   appState.audioDevices = data.audio_devices || appState.audioDevices;
+  appState.backendVersion = data.version || null;
+  appState.features = data.features || {};
   appState.version = data.version || appState.version;
   appState.activeAgent = data.active_agent;
   appState.conversation = data.conversation;
@@ -443,12 +456,19 @@ async function loadBootstrap() {
 }
 
 function renderAll() {
-  if ($('#appVersion')) $('#appVersion').textContent = `v${appState.version}`;
+  const versionNode = $('#appVersion');
+  if (versionNode) {
+    const mismatch = Boolean(appState.backendVersion) && appState.backendVersion !== FRONTEND_VERSION;
+    versionNode.textContent = mismatch ? `v${appState.backendVersion} / UI ${FRONTEND_VERSION}` : `v${appState.version}`;
+    versionNode.classList.toggle('version-mismatch', mismatch);
+    versionNode.title = mismatch ? 'The running backend and dashboard files do not match. Restart VerbaNode after updating all files.' : '';
+  }
   renderActiveAgent();
   renderMessages();
   renderConversations();
   renderAgents();
   renderInformation();
+  renderPlugins();
   renderScripts();
   renderQueue();
   renderSettings();
@@ -496,6 +516,52 @@ function applyRejectedTranscriptVisibility() {
   list.classList.toggle('hide-rejected-transcripts', !rejectedTranscriptVisibilityEnabled());
 }
 
+function compareVersions(left = '0.0.0', right = '0.0.0') {
+  const a = String(left).split(/[^0-9]+/).filter(Boolean).slice(0, 3).map(Number);
+  const b = String(right).split(/[^0-9]+/).filter(Boolean).slice(0, 3).map(Number);
+  while (a.length < 3) a.push(0);
+  while (b.length < 3) b.push(0);
+  for (let index = 0; index < 3; index += 1) {
+    if (a[index] > b[index]) return 1;
+    if (a[index] < b[index]) return -1;
+  }
+  return 0;
+}
+
+function diagnosticsBackendSupported() {
+  if (appState.features?.diagnostics === true) return true;
+  return Boolean(appState.backendVersion) && compareVersions(appState.backendVersion, DIAGNOSTICS_MIN_BACKEND_VERSION) >= 0;
+}
+
+function setDiagnosticControlsDisabled(disabled) {
+  [
+    '#runDiagnosticSelfTestBtn', '#startSoakTestBtn', '#stopSoakTestBtn',
+    '#refreshDiagnosticsBtn', '#clearDiagnosticLogsBtn', '#clearLatencyHistoryBtn',
+    '#downloadDiagnosticsBtn', '#diagnosticLogLevel', '#soakDurationSelect', '#soakIntervalSelect',
+  ].forEach(selector => {
+    const node = $(selector);
+    if (node) node.disabled = Boolean(disabled);
+  });
+}
+
+function renderDiagnosticsUnavailable(detail = '') {
+  const backend = appState.backendVersion || 'unknown';
+  const versionMismatch = backend !== 'unknown' && compareVersions(backend, DIAGNOSTICS_MIN_BACKEND_VERSION) < 0;
+  const explanation = versionMismatch
+    ? `The dashboard files are v${FRONTEND_VERSION}, but the running backend is v${backend}. Stop the existing VerbaNode process completely, copy all update files, and start run.bat again.`
+    : (detail || 'The diagnostics API is unavailable in the running backend. Restart VerbaNode after copying the complete update.');
+  const container = $('#diagnosticHealthCards');
+  if (container) {
+    container.innerHTML = `<article class="card diagnostic-compatibility-card">
+      <span class="diagnostic-state warn">!</span>
+      <div><small>BACKEND UPDATE REQUIRED</small><strong>Diagnostics could not connect</strong><p>${escapeHtml(explanation)}</p><div class="diagnostic-card-metrics"><span>Frontend v${escapeHtml(FRONTEND_VERSION)}</span><span>Backend v${escapeHtml(backend)}</span></div></div>
+    </article>`;
+  }
+  const list = $('#diagnosticLogList');
+  if (list) list.innerHTML = '<div class="queue-empty">Diagnostics will load after the backend and dashboard versions match.</div>';
+  setDiagnosticControlsDisabled(true);
+}
+
 function activateSettingsPanel(panelName, remember = true) {
   const available = new Set($$('[data-settings-panel-content]').map(node => node.dataset.settingsPanelContent));
   const resolved = available.has(panelName) ? panelName : 'conversation';
@@ -503,6 +569,10 @@ function activateSettingsPanel(panelName, remember = true) {
   $$('[data-settings-panel]').forEach(button => button.classList.toggle('active', button.dataset.settingsPanel === resolved));
   $$('[data-settings-panel-content]').forEach(panel => panel.classList.toggle('active', panel.dataset.settingsPanelContent === resolved));
   if (remember) localStorage.setItem('verbanode_settings_panel', resolved);
+  if (resolved === 'diagnostics' && appState.token) {
+    if (!diagnosticsBackendSupported()) renderDiagnosticsUnavailable();
+    else loadDiagnostics().catch(error => { if (error.status !== 404) toast(error.message, 'error'); });
+  }
 }
 
 function renderMessages() {
@@ -633,6 +703,189 @@ function renderInformation() {
     <div><div class="enabled-pill ${item.enabled ? '' : 'off'}">● ${item.enabled ? 'Enabled' : 'Disabled'}</div><h3>${escapeHtml(item.title)}</h3><div class="info-preview">${escapeHtml(item.content)}</div></div>
     <div class="item-actions"><button class="btn ghost compact" data-edit-info="${item.id}">Edit</button><button class="btn danger-outline compact" data-delete-info="${item.id}">Delete</button></div>
   </article>`).join('');
+}
+
+function pluginStatusLabel(plugin) {
+  if (plugin.status === 'load_error') return ['Load failed', 'error'];
+  if (!plugin.enabled) return ['Disabled', 'disabled'];
+  if (!plugin.healthy || plugin.status === 'error') return ['Error', 'error'];
+  return ['Healthy', 'healthy'];
+}
+
+function pluginMetric(value, suffix = '') {
+  const number = Number(value || 0);
+  return `${Number.isInteger(number) ? number : number.toFixed(2)}${suffix}`;
+}
+
+function createPluginElement(tagName, className = '', text = '') {
+  const node = document.createElement(tagName);
+  if (className) node.className = className;
+  if (text !== '') node.textContent = String(text);
+  return node;
+}
+
+function createPluginMetricElement(label, value) {
+  const metric = createPluginElement('div', 'plugin-metric');
+  metric.append(
+    createPluginElement('span', '', label),
+    createPluginElement('strong', '', value),
+  );
+  return metric;
+}
+
+function createPluginCard(plugin) {
+  const [statusLabel, statusClass] = pluginStatusLabel(plugin);
+  const failedLoad = plugin.status === 'load_error';
+  const card = createPluginElement('article', `card plugin-card${plugin.enabled ? '' : ' plugin-disabled'}${failedLoad ? ' plugin-load-error' : ''}`);
+  card.dataset.pluginCard = String(plugin.id || '');
+
+  const head = createPluginElement('div', 'plugin-card-head');
+  const title = createPluginElement('div', 'plugin-card-title');
+  const eyebrow = createPluginElement('div', 'plugin-title-meta');
+  eyebrow.append(
+    createPluginElement('span', 'eyebrow', plugin.category || 'General'),
+    createPluginElement('span', `plugin-source ${plugin.external ? 'external' : 'builtin'}`, plugin.external ? 'External' : 'Built-in'),
+  );
+  title.append(
+    eyebrow,
+    createPluginElement('h3', '', plugin.name || plugin.id || 'Plugin'),
+    createPluginElement('small', '', `${plugin.declared_id || plugin.id || 'unknown'} · v${plugin.version || '0.0.0'} · SDK ${plugin.sdk_version || '1'}`),
+  );
+  head.append(title, createPluginElement('span', `plugin-status ${statusClass}`, statusLabel));
+
+  const body = createPluginElement('div', 'plugin-card-body');
+  body.append(createPluginElement('p', 'plugin-description', plugin.description || plugin.tool_description || ''));
+
+  const permissions = createPluginElement('div', 'plugin-permissions');
+  const permissionList = Array.isArray(plugin.permissions) ? plugin.permissions : [];
+  if (permissionList.length) {
+    permissionList.forEach(permission => {
+      permissions.append(createPluginElement('span', 'chip plugin-permission', permission));
+    });
+  } else {
+    permissions.append(createPluginElement('span', 'chip plugin-permission neutral', 'No declared permissions'));
+  }
+  body.append(permissions);
+
+  if (!failedLoad) {
+    const metrics = createPluginElement('div', 'plugin-metrics');
+    metrics.append(
+      createPluginMetricElement('Executions', pluginMetric(plugin.executions)),
+      createPluginMetricElement('Errors', pluginMetric(plugin.errors)),
+      createPluginMetricElement('Average', pluginMetric(plugin.average_latency_ms, ' ms')),
+      createPluginMetricElement('Last run', pluginMetric(plugin.last_latency_ms, ' ms')),
+    );
+    body.append(metrics);
+
+    const assignment = createPluginElement('div', 'plugin-agent-use');
+    assignment.append(
+      createPluginElement('span', '', 'Assigned to agents'),
+      createPluginElement('strong', '', `${Number(plugin.agent_count || 0)} / ${Number(plugin.agent_total || 0)}`),
+    );
+    body.append(assignment);
+  }
+
+  if (plugin.last_error) {
+    const errorBox = createPluginElement('div', 'plugin-error');
+    errorBox.append(
+      createPluginElement('strong', '', failedLoad ? 'Load error' : 'Last error'),
+      createPluginElement('span', '', plugin.last_error),
+    );
+    body.append(errorBox);
+  }
+
+  if (plugin.external && plugin.plugin_path) {
+    const pathBox = createPluginElement('div', 'plugin-path');
+    pathBox.title = plugin.plugin_path;
+    pathBox.append(
+      createPluginElement('span', '', 'Folder'),
+      createPluginElement('code', '', plugin.plugin_path),
+    );
+    body.append(pathBox);
+  }
+
+  const footer = createPluginElement('div', 'plugin-card-footer');
+  footer.append(createPluginElement('span', 'plugin-author', plugin.author || 'Unknown author'));
+
+  const actions = createPluginElement('div', 'plugin-card-actions');
+  if (!failedLoad) {
+    const resetButton = createPluginElement('button', 'plugin-action plugin-action-reset', 'Reset metrics');
+    resetButton.type = 'button';
+    resetButton.dataset.resetPlugin = String(plugin.id || '');
+    resetButton.disabled = !Number(plugin.executions || 0) && !Number(plugin.errors || 0);
+    actions.append(resetButton);
+  }
+
+  if (plugin.external && plugin.reloadable) {
+    const reloadButton = createPluginElement('button', 'plugin-action plugin-action-reload', 'Reload');
+    reloadButton.type = 'button';
+    reloadButton.dataset.reloadPlugin = String(plugin.id || '');
+    actions.append(reloadButton);
+  }
+
+  if (!failedLoad) {
+    const toggleButton = createPluginElement(
+      'button',
+      `plugin-action ${plugin.enabled ? 'plugin-action-disable' : 'plugin-action-enable'}`,
+      plugin.enabled ? 'Disable' : 'Enable',
+    );
+    toggleButton.type = 'button';
+    toggleButton.dataset.togglePlugin = String(plugin.id || '');
+    toggleButton.dataset.enabled = plugin.enabled ? 'true' : 'false';
+    actions.append(toggleButton);
+  }
+
+  footer.append(actions);
+  card.append(head, body, footer);
+  return card;
+}
+
+function renderPlugins() {
+  const payload = appState.plugins || { plugins: [], summary: {} };
+  const plugins = Array.isArray(payload.plugins) ? payload.plugins : [];
+  const summary = payload.summary || {};
+  const summaryNode = $('#pluginSummary');
+  const grid = $('#pluginGrid');
+  if (!summaryNode || !grid) return;
+
+  const healthLabel = Number(summary.errors || 0) > 0
+    ? `${summary.errors} issue${Number(summary.errors) === 1 ? '' : 's'}`
+    : 'All clear';
+
+  const summaryCards = [
+    ['Discovered', Number(summary.total || plugins.length), `${Number(summary.loaded || 0)} loaded`],
+    ['Sources', `${Number(summary.builtin || 0)} + ${Number(summary.external || 0)}`, 'Built-in + external'],
+    ['Executions', Number(summary.executions || 0), `${Number(summary.agent_assignments || 0)} agent assignments`],
+    ['Health', healthLabel, `${Number(summary.failed_loads || 0)} failed to load`],
+  ].map(([label, value, detail]) => {
+    const card = createPluginElement('div', 'card plugin-summary-card');
+    card.append(
+      createPluginElement('span', '', label),
+      createPluginElement('strong', '', value),
+      createPluginElement('small', '', detail),
+    );
+    return card;
+  });
+  summaryNode.replaceChildren(...summaryCards);
+
+  const folder = $('#externalPluginDirectory');
+  if (folder) folder.textContent = payload.external_plugins_directory || 'plugins/';
+
+  if (!plugins.length) {
+    grid.replaceChildren(createPluginElement('div', 'card queue-empty plugin-empty-state', 'No plugins were reported by the backend.'));
+    return;
+  }
+
+  grid.replaceChildren(...plugins.map(createPluginCard));
+}
+
+async function refreshPlugins(showToast = false) {
+  const payload = await api('/api/plugins');
+  appState.plugins = payload;
+  if (appState.data) appState.data.plugins = payload;
+  renderPlugins();
+  if (showToast) toast('Plugin status refreshed.');
+  return payload;
 }
 
 function renderScripts() {
@@ -785,6 +1038,138 @@ function renderRuntimeStatus(data) {
   $('#ttsProviderStatus').textContent = appState.activeAgent?.kokoro_voice_name || appState.activeAgent?.tts_mode || 'TTS';
 }
 
+function durationLabel(seconds = 0) {
+  const total = Math.max(0, Number(seconds) || 0);
+  if (total < 60) return `${Math.round(total)}s`;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = Math.floor(total % 60);
+  if (hours) return `${hours}h ${minutes}m`;
+  return `${minutes}m ${secs}s`;
+}
+
+function metricValue(value, suffix = '') {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return `${Number(value).toFixed(Number(value) >= 100 ? 0 : 1)}${suffix}`;
+}
+
+function diagnosticCard(label, state, title, detail, metrics = '') {
+  const safeState = ['good', 'warn', 'bad', 'neutral'].includes(state) ? state : 'neutral';
+  return `<article class="card diagnostic-health-card">
+    <span class="diagnostic-state ${safeState}">${safeState === 'good' ? '✓' : safeState === 'warn' ? '!' : safeState === 'bad' ? '×' : '…'}</span>
+    <div><small>${escapeHtml(label)}</small><strong>${escapeHtml(title)}</strong><p>${escapeHtml(detail)}</p>${metrics ? `<div class="diagnostic-card-metrics">${metrics}</div>` : ''}</div>
+  </article>`;
+}
+
+function averageLatency(turns, key) {
+  const values = turns.map(turn => Number(turn.latency_ms?.[key])).filter(value => Number.isFinite(value));
+  if (!values.length) return null;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function renderDiagnosticSelfTest(result) {
+  const badge = $('#diagnosticSelfTestBadge');
+  const list = $('#diagnosticSelfTestResults');
+  if (!badge || !list) return;
+  if (!result) {
+    badge.textContent = 'Not run';
+    badge.className = 'chip';
+    list.innerHTML = '<div class="queue-empty">Run the self-test to validate the current installation.</div>';
+    return;
+  }
+  badge.textContent = result.overall === 'pass' ? 'Passed' : result.overall === 'warn' ? 'Warnings' : 'Failed';
+  badge.className = `chip diagnostic-chip-${result.overall}`;
+  list.innerHTML = (result.checks || []).map(check => `<div class="diagnostic-test-item ${escapeHtml(check.status)}">
+    <span>${check.status === 'pass' ? '✓' : check.status === 'warn' ? '!' : '×'}</span>
+    <div><strong>${escapeHtml(check.name)}</strong><small>${escapeHtml(check.detail)} · ${Number(check.duration_ms || 0)} ms</small></div>
+  </div>`).join('') || '<div class="queue-empty">No test results.</div>';
+}
+
+function renderSoakStatus(soak = {}) {
+  const active = Boolean(soak.active);
+  const duration = Number(soak.duration_seconds || 0);
+  const elapsed = Number(soak.elapsed_seconds || 0);
+  const percent = duration > 0 ? Math.min(100, Math.round((elapsed / duration) * 100)) : 0;
+  $('#soakStateBadge').textContent = active ? 'Running' : soak.completed_at ? 'Complete' : 'Idle';
+  $('#soakStateBadge').className = `chip ${active ? 'diagnostic-chip-warn' : soak.completed_at ? 'diagnostic-chip-pass' : ''}`;
+  $('#soakProgressBar').style.width = `${percent}%`;
+  $('#startSoakTestBtn').disabled = active;
+  $('#stopSoakTestBtn').disabled = !active;
+  const summary = soak.summary || {};
+  if (active) {
+    $('#soakStatusText').innerHTML = `<strong>${percent}% complete</strong><br>${durationLabel(elapsed)} elapsed · ${durationLabel(soak.remaining_seconds)} remaining · ${soak.sample_count || 0} samples.`;
+  } else if (soak.completed_at) {
+    $('#soakStatusText').innerHTML = `<strong>${escapeHtml(soak.stop_reason === 'stopped_by_user' ? 'Soak test stopped' : 'Soak test completed')}</strong><br>${soak.sample_count || 0} samples · Audio restarts ${summary.audio_restart_delta ?? 0} · AI restarts ${summary.ai_restart_delta ?? 0} · Pipeline errors ${summary.pipeline_error_delta ?? 0}.`;
+  } else {
+    $('#soakStatusText').textContent = 'No soak test is running.';
+  }
+}
+
+function renderDiagnostics(data) {
+  appState.diagnostics = data;
+  setDiagnosticControlsDisabled(false);
+  const snapshot = data?.snapshot || {};
+  const resources = snapshot.resources || {};
+  const processes = resources.processes || {};
+  const system = resources.system || {};
+  const audio = snapshot.audio || {};
+  const audioEngine = audio.engine || {};
+  const aiEngine = snapshot.ai?.engine || {};
+  const pipeline = snapshot.pipeline || {};
+  const coreProcess = processes.core || {};
+  const audioProcess = processes.audio || {};
+  const aiProcess = processes.ai || {};
+  const audioHeartbeat = audioEngine.seconds_since_heartbeat;
+  const aiHeartbeat = aiEngine.heartbeat_age_seconds;
+  const cards = [
+    diagnosticCard('CORE', coreProcess.available ? 'good' : 'warn', coreProcess.available ? `Process ${coreProcess.pid}` : 'Resource metrics unavailable', `Uptime ${durationLabel(snapshot.environment?.uptime_seconds || 0)} · Pipeline ${pipeline.state || 'unknown'}`, `<span>CPU ${metricValue(coreProcess.cpu_percent, '%')}</span><span>RAM ${metricValue(coreProcess.rss_mb, ' MB')}</span><span>${coreProcess.threads ?? '—'} threads</span>`),
+    diagnosticCard('AUDIO ENGINE', audioEngine.alive ? (audioHeartbeat != null && Number(audioHeartbeat) > 10 ? 'warn' : 'good') : 'bad', audioEngine.alive ? `Process ${audioEngine.pid}` : 'Process unavailable', `${audio.input?.input_locked ? 'Mic locked' : 'Mic released'} · ${audio.output?.output_locked ? 'Speaker locked' : 'Speaker released'} · ${audioEngine.restart_count ?? 0} restarts`, `<span>CPU ${metricValue(audioProcess.cpu_percent, '%')}</span><span>RAM ${metricValue(audioProcess.rss_mb, ' MB')}</span><span>Heartbeat ${audioHeartbeat == null ? '—' : `${audioHeartbeat}s`}</span>`),
+    diagnosticCard('AI ENGINE', aiEngine.alive ? (aiHeartbeat != null && Number(aiHeartbeat) > 10 ? 'warn' : 'good') : 'bad', aiEngine.alive ? `Process ${aiEngine.pid}` : 'Process unavailable', `ASR ${aiEngine.remote?.asr?.state || 'unknown'} · Kokoro ${aiEngine.remote?.kokoro?.state || 'unknown'} · ${aiEngine.restart_count ?? 0} restarts`, `<span>CPU ${metricValue(aiProcess.cpu_percent, '%')}</span><span>RAM ${metricValue(aiProcess.rss_mb, ' MB')}</span><span>Heartbeat ${aiHeartbeat == null ? '—' : `${aiHeartbeat}s`}</span>`),
+    diagnosticCard('SYSTEM', system.available ? (Number(system.ram_percent || 0) > 90 || Number(system.disk_percent || 0) > 90 ? 'warn' : 'good') : 'neutral', system.available ? `${metricValue(system.cpu_percent, '%')} CPU` : 'System metrics unavailable', `${metricValue(system.ram_used_gb, ' GB')} / ${metricValue(system.ram_total_gb, ' GB')} RAM · ${metricValue(system.disk_free_gb, ' GB')} disk free`, `<span>RAM ${metricValue(system.ram_percent, '%')}</span><span>Disk ${metricValue(system.disk_percent, '%')}</span><span>${system.cpu_count ?? '—'} threads</span>`),
+  ];
+  $('#diagnosticHealthCards').innerHTML = cards.join('');
+
+  const turns = data?.recent_turns || [];
+  const summaryItems = [
+    ['STT avg', averageLatency(turns, 'stt_total')],
+    ['LLM avg', averageLatency(turns, 'llm_total')],
+    ['TTS avg', averageLatency(turns, 'tts_total')],
+    ['Total avg', averageLatency(turns, 'turn_total')],
+  ];
+  $('#diagnosticLatencySummary').innerHTML = summaryItems.map(([label, value]) => `<div><small>${label}</small><strong>${value == null ? '—' : `${value} ms`}</strong></div>`).join('');
+  $('#diagnosticLatencyRows').innerHTML = turns.length ? [...turns].reverse().slice(0, 12).map(turn => `<tr class="${turn.cancelled ? 'cancelled' : ''}"><td>${escapeHtml(turn.source || 'unknown')}</td><td>${turn.latency_ms?.stt_total ?? '—'}</td><td>${turn.latency_ms?.llm_total ?? '—'}</td><td>${turn.latency_ms?.tts_total ?? '—'}</td><td>${turn.latency_ms?.turn_total ?? '—'}</td></tr>`).join('') : '<tr><td colspan="5">No completed turns yet.</td></tr>';
+
+  const requestedLevel = $('#diagnosticLogLevel')?.value || '';
+  const logs = (data?.recent_logs || []).filter(entry => {
+    if (!requestedLevel) return true;
+    const ranks = { INFO: 20, WARNING: 30, ERROR: 40, CRITICAL: 50 };
+    return (ranks[entry.level] || 0) >= (ranks[requestedLevel] || 0);
+  });
+  $('#diagnosticLogList').innerHTML = logs.length ? [...logs].reverse().slice(0, 80).map(entry => `<div class="diagnostic-log-entry level-${String(entry.level || '').toLowerCase()}"><span>${escapeHtml(entry.level || 'INFO')}</span><div><strong>${escapeHtml(entry.logger || '')}</strong><p>${escapeHtml(entry.message || '')}</p><small>${escapeHtml(entry.timestamp || '')} · ${escapeHtml(entry.process || '')}</small></div></div>`).join('') : '<div class="queue-empty">No logs match this filter.</div>';
+  renderDiagnosticSelfTest(data?.self_test);
+  renderSoakStatus(data?.soak || {});
+}
+
+async function loadDiagnostics(showToast = false) {
+  if (!diagnosticsBackendSupported()) {
+    renderDiagnosticsUnavailable();
+    return null;
+  }
+  try {
+    const data = await api('/api/diagnostics');
+    setDiagnosticControlsDisabled(false);
+    renderDiagnostics(data);
+    if (showToast) toast('Diagnostics refreshed.');
+    return data;
+  } catch (error) {
+    if (error.status === 404) {
+      renderDiagnosticsUnavailable('The diagnostics API returned 404 Not Found. The running Python backend is older than the dashboard files or was not restarted after the update.');
+      return null;
+    }
+    throw error;
+  }
+}
+
 function setMode(mode) {
   appState.mode = mode || 'idle';
   const active = mode !== 'idle';
@@ -862,6 +1247,7 @@ function handleEvent(message) {
     case 'queue_state': appState.queueState = data.state; appState.queue = data.items || []; renderQueue(); break;
     case 'agents_changed': appState.agents = data || []; renderAgents(); break;
     case 'information_changed': appState.information = data || []; renderInformation(); break;
+    case 'plugins_changed': appState.plugins = data || { plugins: [], summary: {} }; if (appState.data) appState.data.plugins = appState.plugins; renderPlugins(); break;
     case 'scripts_changed': appState.scripts = data || []; renderScripts(); break;
     case 'agent_changed':
       appState.activeAgent = data.agent; appState.conversation = data.conversation;
@@ -902,6 +1288,7 @@ async function refreshAgentWorkspace() {
     appState.conversations = data.conversations;
     appState.messages = data.messages;
     appState.information = data.information;
+    appState.plugins = data.plugins || appState.plugins;
     appState.scripts = data.scripts;
     appState.queue = data.queue;
     appState.models = data.models;
@@ -926,7 +1313,7 @@ async function refreshConversationsAndMessages() {
 function navigate(page) {
   $$('.page').forEach(node => node.classList.toggle('active', node.id === `page-${page}`));
   $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.classList.toggle('active', node.dataset.page === page));
-  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Information'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], settings: ['SYSTEM', 'Settings'] };
+  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Information'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], settings: ['SYSTEM', 'Settings'] };
   $('#pageEyebrow').textContent = titles[page]?.[0] || '';
   $('#pageTitle').textContent = titles[page]?.[1] || page;
   closeMobileNav();
@@ -993,10 +1380,16 @@ function openAgentModal(agentId = null) {
   ];
   voiceSelect.innerHTML = voices.map(voice => `<option value="${voice.id}">${escapeHtml(voice.name)} — ${escapeHtml(voice.category)}</option>`).join('');
   voiceSelect.value = String(agent.kokoro_voice_id ?? 0);
-  const tools = [
-    ['get_current_time','Current time'], ['get_location','Configured location'], ['get_weather','Weather'], ['handle_exit_intent','Stop conversation intent'],
+  const reportedPlugins = appState.plugins?.plugins || [];
+  const fallbackTools = [
+    { id: 'get_current_time', name: 'Current time', enabled: true },
+    { id: 'get_location', name: 'Configured location', enabled: true },
+    { id: 'get_weather', name: 'Weather', enabled: true },
+    { id: 'handle_exit_intent', name: 'Stop conversation intent', enabled: true },
   ];
-  $('#toolCheckboxes').innerHTML = tools.map(([value,label]) => `<label class="check-item"><input type="checkbox" name="tool" value="${value}" ${(agent.tools_enabled || []).includes(value) ? 'checked' : ''}><span><strong>${label}</strong><small>${value}</small></span></label>`).join('');
+  const usablePlugins = reportedPlugins.filter(plugin => plugin.status !== 'load_error');
+  const tools = usablePlugins.length ? usablePlugins : fallbackTools;
+  $('#toolCheckboxes').innerHTML = tools.map(plugin => `<label class="check-item ${plugin.enabled ? '' : 'tool-globally-disabled'}"><input type="checkbox" name="tool" value="${escapeHtml(plugin.id)}" ${(agent.tools_enabled || []).includes(plugin.id) ? 'checked' : ''} ${plugin.enabled ? '' : 'disabled'}><span><strong>${escapeHtml(plugin.name)}</strong><small>${escapeHtml(plugin.id)}${plugin.enabled ? '' : ' · globally disabled'}</small></span></label>`).join('');
   $('#agentInfoCheckboxes').innerHTML = appState.information.map(item => `<label class="check-item"><input type="checkbox" name="info" value="${item.id}" ${(agent.info_ids || []).includes(item.id) ? 'checked' : ''}><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.content.slice(0,130))}</small></span></label>`).join('') || '<div class="queue-empty">Create global information entries first.</div>';
   const conversations = agentId ? appState.conversations.filter(() => agent.id === appState.activeAgent?.id) : [];
   $('#agentMemoryStats').innerHTML = agentId ? `<strong>${conversations.length || 'Saved'} conversation workspace</strong><br>Memory contains complete chat history plus automatic summaries.` : 'Save the agent before managing memory.';
@@ -1185,9 +1578,30 @@ function bindEvents() {
 
   $('#addAgentBtn').onclick = () => openAgentModal(); $('#quickAddAgent').onclick = () => openAgentModal();
   $('#addInfoBtn').onclick = () => openSimpleModal('info'); $('#addScriptBtn').onclick = () => openSimpleModal('script');
+  $('#refreshPluginsBtn').onclick = async () => { try { await refreshPlugins(true); } catch (error) { toast(error.message, 'error'); } };
+  $('#reloadExternalPluginsBtn').onclick = async () => {
+    const button = $('#reloadExternalPluginsBtn');
+    button.disabled = true;
+    try {
+      appState.plugins = await api('/api/plugins/reload', { method: 'POST' });
+      if (appState.data) appState.data.plugins = appState.plugins;
+      renderPlugins();
+      toast('External plugin folders reloaded.', 'success');
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; }
+  };
+  $('#resetAllPluginMetricsBtn').onclick = async () => {
+    if (!confirm('Reset execution, error, and latency metrics for all loaded plugins?')) return;
+    try {
+      appState.plugins = await api('/api/plugins/reset-metrics', { method: 'POST' });
+      if (appState.data) appState.data.plugins = appState.plugins;
+      renderPlugins();
+      toast('All plugin metrics reset.');
+    } catch (error) { toast(error.message, 'error'); }
+  };
 
   document.addEventListener('click', async event => {
-    const target = event.target.closest('[data-edit-agent],[data-activate-agent],[data-delete-agent],[data-edit-info],[data-delete-info],[data-edit-script],[data-run-script],[data-queue-script],[data-remove-queue]');
+    const target = event.target.closest('[data-edit-agent],[data-activate-agent],[data-delete-agent],[data-edit-info],[data-delete-info],[data-edit-script],[data-run-script],[data-queue-script],[data-remove-queue],[data-toggle-plugin],[data-reset-plugin],[data-reload-plugin]');
     if (!target) return;
     if (target.dataset.editAgent) openAgentModal(Number(target.dataset.editAgent));
     else if (target.dataset.activateAgent) {
@@ -1204,6 +1618,34 @@ function bindEvents() {
       try { await api(`/api/information/${target.dataset.deleteInfo}`, { method: 'DELETE' }); appState.information = await api('/api/information'); renderInformation(); }
       catch (error) { toast(error.message, 'error'); }
     } else if (target.dataset.editScript) openSimpleModal('script', appState.scripts.find(item => item.id === Number(target.dataset.editScript)));
+    else if (target.dataset.togglePlugin) {
+      const pluginId = target.dataset.togglePlugin;
+      const currentlyEnabled = target.dataset.enabled === 'true';
+      const verb = currentlyEnabled ? 'disable' : 'enable';
+      if (currentlyEnabled && !confirm(`Disable ${pluginId} globally? Agents assigned to it will not be able to call it until it is enabled again.`)) return;
+      target.disabled = true;
+      try {
+        appState.plugins = await api(`/api/plugins/${encodeURIComponent(pluginId)}`, { method: 'PUT', body: JSON.stringify({ enabled: !currentlyEnabled }) });
+        if (appState.data) appState.data.plugins = appState.plugins;
+        renderPlugins();
+        toast(`Plugin ${verb}d.`, 'success');
+      } catch (error) { toast(error.message, 'error'); target.disabled = false; }
+    } else if (target.dataset.reloadPlugin) {
+      target.disabled = true;
+      try {
+        appState.plugins = await api(`/api/plugins/${encodeURIComponent(target.dataset.reloadPlugin)}/reload`, { method: 'POST' });
+        if (appState.data) appState.data.plugins = appState.plugins;
+        renderPlugins();
+        toast('External plugin reloaded.', 'success');
+      } catch (error) { toast(error.message, 'error'); target.disabled = false; }
+    } else if (target.dataset.resetPlugin) {
+      try {
+        appState.plugins = await api(`/api/plugins/${encodeURIComponent(target.dataset.resetPlugin)}/reset-metrics`, { method: 'POST' });
+        if (appState.data) appState.data.plugins = appState.plugins;
+        renderPlugins();
+        toast('Plugin metrics reset.');
+      } catch (error) { toast(error.message, 'error'); }
+    }
     else if (target.dataset.runScript) runScript(Number(target.dataset.runScript));
     else if (target.dataset.queueScript) queueScript(Number(target.dataset.queueScript));
     else if (target.dataset.removeQueue) { try { await api(`/api/queue/${target.dataset.removeQueue}`, { method: 'DELETE' }); } catch (error) { toast(error.message, 'error'); } }
@@ -1307,6 +1749,44 @@ function bindEvents() {
     catch (error) { toast(error.message, 'error'); }
   };
   $('#refreshStatusBtn').onclick = async () => { try { const status = await api('/api/status'); renderRuntimeStatus(status); toast('Status refreshed.'); } catch (error) { toast(error.message, 'error'); } };
+  $('#refreshDiagnosticsBtn').onclick = async () => { try { await loadDiagnostics(true); } catch (error) { toast(error.message, 'error'); } };
+  $('#diagnosticLogLevel').onchange = () => { if (appState.diagnostics) renderDiagnostics(appState.diagnostics); };
+  $('#runDiagnosticSelfTestBtn').onclick = async () => {
+    const button = $('#runDiagnosticSelfTestBtn');
+    button.disabled = true; button.textContent = 'Running checks…';
+    try {
+      const result = await api('/api/diagnostics/self-test', { method: 'POST' });
+      appState.diagnostics = appState.diagnostics || {};
+      appState.diagnostics.self_test = result;
+      renderDiagnosticSelfTest(result);
+      toast(result.overall === 'pass' ? 'System self-test passed.' : 'System self-test completed with attention required.', result.overall === 'fail' ? 'error' : 'success');
+      await loadDiagnostics(false);
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; button.textContent = 'Run system self-test'; }
+  };
+  $('#startSoakTestBtn').onclick = async () => {
+    const payload = { duration_minutes: Number($('#soakDurationSelect').value), interval_seconds: Number($('#soakIntervalSelect').value) };
+    try {
+      const soak = await api('/api/diagnostics/soak/start', { method: 'POST', body: JSON.stringify(payload) });
+      appState.diagnostics = appState.diagnostics || {}; appState.diagnostics.soak = soak; renderSoakStatus(soak);
+      toast('Diagnostics soak test started.', 'success');
+    } catch (error) { toast(error.message, 'error'); }
+  };
+  $('#stopSoakTestBtn').onclick = async () => {
+    try {
+      const soak = await api('/api/diagnostics/soak/stop', { method: 'POST' });
+      appState.diagnostics = appState.diagnostics || {}; appState.diagnostics.soak = soak; renderSoakStatus(soak);
+      toast('Soak test stopped.');
+    } catch (error) { toast(error.message, 'error'); }
+  };
+  $('#clearDiagnosticLogsBtn').onclick = async () => {
+    if (!confirm('Clear the in-memory diagnostics log view? Terminal logs and saved reports are not deleted.')) return;
+    try { await api('/api/diagnostics/logs', { method: 'DELETE' }); await loadDiagnostics(false); toast('Diagnostics log view cleared.'); } catch (error) { toast(error.message, 'error'); }
+  };
+  $('#clearLatencyHistoryBtn').onclick = async () => {
+    try { await api('/api/diagnostics/turns', { method: 'DELETE' }); await loadDiagnostics(false); toast('Latency history cleared.'); } catch (error) { toast(error.message, 'error'); }
+  };
+  $('#downloadDiagnosticsBtn').onclick = () => downloadAuthenticated('/api/diagnostics/export', 'verbanode-diagnostics.zip');
   $('#restartAudioEngineBtn').onclick = async () => {
     if (!confirm('Restart the isolated Audio Engine? Active conversation and script playback will stop.')) return;
     const button = $('#restartAudioEngineBtn');
@@ -1363,6 +1843,12 @@ function bindEvents() {
     try { await api('/api/restore', { method: 'POST', body }); toast('Backup restored. Reloading…', 'success'); setTimeout(() => location.reload(), 1000); }
     catch (error) { toast(error.message, 'error'); }
   };
+
+  setInterval(() => {
+    if (appState.token && appState.settingsPanel === 'diagnostics' && $('#page-settings')?.classList.contains('active')) {
+      loadDiagnostics(false).catch(() => {});
+    }
+  }, 5000);
 
   setInterval(() => {
     // Use one heartbeat transport at a time. Sending WebSocket and HTTPS
