@@ -1,16 +1,13 @@
 # VerbaNode External Plugins
 
-Each subfolder is one trusted local Python plugin. VerbaNode scans this folder at startup and when **Reload external plugins** is pressed.
+Each non-hidden subfolder is one trusted local Python plugin. VerbaNode scans this folder at startup and when **Reload external** is pressed.
 
-Required files:
+Use `plugins/_template/` as the starting point. The template folder is ignored until copied and renamed.
 
-```text
-plugins/my_plugin/
-├── plugin.json
-├── plugin.py
-└── README.md        # optional
-```
+External plugins execute inside VerbaNode Core. Validation, timeouts, failure thresholds, cancellation, and safe reload protect application reliability, but this is not a security sandbox. Only install code you trust.
 
-External plugins execute inside the VerbaNode Core Python process. Loader and runtime exceptions are isolated and reported in the Plugin Manager, but this is **not a security sandbox**. Only install code you trust.
+See:
 
-See `docs/EXTERNAL_PLUGINS.md` and `plugins/example_echo/` for the supported SDK v1 contract.
+- `docs/EXTERNAL_PLUGINS.md`
+- `docs/PLUGIN_MANIFEST.md`
+- `docs/PLUGIN_SECURITY.md`

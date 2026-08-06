@@ -2,7 +2,20 @@
 
 VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
 
-**Current test release:** v0.6.2 Phase 3 trusted local external plugins.
+**Current test release:** v0.6.7 Beta typed-chat interruption fix.
+
+## v0.6.7 typed-chat interruption fix
+
+- Typed chat can interrupt streamed TTS without wedging the generation lock.
+- TTS cancellation now reliably terminates generator and player workers.
+- No database migration is required.
+
+## v0.6.6 selective short-term memory and Edge voices
+
+- Stores complete conversation history but injects prior context only when the current request explicitly needs it.
+- Limits selected context to a compact summary and recent messages instead of sending the entire conversation.
+- Retries empty Ollama output with a minimal context and never saves a blank assistant response.
+- Adds natural location-routing phrases and an Edge voice dropdown with locale filtering, refresh, and preview.
 
 ## Main features
 
@@ -17,17 +30,16 @@ VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive bro
 
 
 
-## v0.6.2 external plugins Phase 3
+## v0.6.3 plugin hardening
 
-- Scans the top-level `plugins/` folder at startup and on demand.
-- Validates `plugin.json`, SDK compatibility, entry paths, IDs, permissions, and tool schemas before registration.
-- Loads trusted local Python plugins into the same registry as built-in capabilities.
-- Isolates missing files, invalid manifests, import failures, duplicate IDs, and runtime exceptions so VerbaNode remains online.
-- Adds reload-all and per-plugin reload controls, external/built-in labels, plugin paths, and failed-load cards to the Plugins page.
-- Unloads a plugin when its folder is removed and **Reload external** is pressed.
-- Includes `plugins/example_echo/` as a working reference plugin.
+- Validates external manifests, semantic versions, permissions, paths, package sizes, and LLM tool schemas before registration.
+- Applies per-plugin timeouts, bounded concurrency, active-call cancellation, and failure thresholds.
+- Removes unhealthy plugins from routing while leaving VerbaNode and other plugins operational.
+- Keeps the previous working plugin when replacement code fails validation or reload.
+- Adds detailed plugin states and metrics to Plugin Manager and Diagnostics.
+- Includes `plugins/_template/`, manifest/security documentation, and Windows `tzdata` compatibility.
 
-External plugins are trusted local Python code and run inside the VerbaNode Core process. This release does not provide a security sandbox, dependency installer, marketplace, or automatic updater.
+External plugins remain trusted local Python code and are not security-sandboxed.
 
 ## v0.6.1 built-in Plugin Manager Phase 2
 
@@ -222,7 +234,7 @@ See `docs/EXTERNAL_PLUGINS.md` for the manifest, lifecycle, compatibility rules,
 ## Upgrade from v0.2.6
 
 1. Back up the current installation and use the dashboard backup function for the database.
-2. Replace repository files with v0.6.2, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
+2. Replace repository files with v0.6.3, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
 3. Run:
 
 ```bat
@@ -327,11 +339,11 @@ From the existing Git repository:
 ```bat
 git status
 git add .
-git commit -m "feat: add VerbaNode v0.6.2 external plugin loading"
+git commit -m "fix: harden VerbaNode plugin execution and reload"
 git push origin main
 ```
 
-Test this build on the target Windows audio hardware first. After validation, create a GitHub pre-release tagged `v0.6.2-alpha.1` and use `RELEASE_NOTES.md` as the release description.
+Test this build on the target Windows audio hardware first. After validation, create a GitHub pre-release tagged `v0.6.3-beta.1` and use `RELEASE_NOTES.md` as the release description.
 
 ## Reference architecture
 

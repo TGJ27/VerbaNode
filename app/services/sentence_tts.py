@@ -208,40 +208,98 @@ class StreamingTtsSession:
                 if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
                     LOGGER.error("Streaming TTS task failed: %s", result)
 
+    async def _broadcast_stopped_once(self) -> None:
+        if self._stopped_event_sent:
+            return
+        self._stopped_event_sent = True
+        await self.events.broadcast(
+            "tts_stopped",
+            {
+                "source": self.source,
+                "turn_id": self.turn_id,
+                "generation_id": self.generation_id,
+            },
+        )
+
+    @staticmethod
+    def _drain_queue(queue: asyncio.Queue) -> list[Any]:
+        drained: list[Any] = []
+        while True:
+            try:
+                drained.append(queue.get_nowait())
+            except asyncio.QueueEmpty:
+                return drained
+
+    def _signal_worker_end(self, queue: asyncio.Queue) -> None:
+        """Wake a worker even when cancellation removed its existing sentinel."""
+        try:
+            queue.put_nowait(self._END)
+            return
+        except asyncio.QueueFull:
+            pass
+
+        # Cancellation prioritizes termination over queued work. Make one slot
+        # and insert the end marker so a worker can never remain blocked on get().
+        try:
+            dropped = queue.get_nowait()
+            if queue is self._audio_queue and dropped is not self._END:
+                _index, _chunk, generated = dropped
+                self.tts.cleanup_generated(generated)
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(self._END)
+        except asyncio.QueueFull:
+            # Another producer inserted an end marker or terminal item first.
+            pass
+
     def cancel_nowait(self) -> None:
         self.cancelled.set()
         self.tts.stop_current()
 
     async def cancel(self) -> None:
-        """Stop current playback and discard all queued speech immediately."""
+        """Stop playback, unblock both workers, and release the turn promptly."""
         self.cancel_nowait()
         self._input_closed = True
         self.chunker.flush()
 
-        # Remove text that has not started synthesis. This prevents old
-        # sentences from being generated after Stop Conversation.
-        while True:
-            try:
-                self._text_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+        # Remove text that has not started synthesis. The queue may already
+        # contain _END; always insert a fresh sentinel below because removing
+        # the only sentinel would otherwise leave the generator waiting forever.
+        self._drain_queue(self._text_queue)
 
-        # Delete already-generated temporary audio that has not started
-        # playback. The currently playing file is stopped by stop_current().
-        while True:
-            try:
-                queued = self._audio_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+        # Delete generated temporary audio that has not started playback. This
+        # drain can also remove the player's existing _END marker, so a fresh
+        # marker must always be inserted afterwards.
+        for queued in self._drain_queue(self._audio_queue):
             if queued is not self._END:
                 _index, _chunk, generated = queued
                 self.tts.cleanup_generated(generated)
 
-        if self._generator_task:
-            self._text_queue.put_nowait(self._END)
-        else:
-            self.started.set()
-            self.finished.set()
+        self._signal_worker_end(self._text_queue)
+        self._signal_worker_end(self._audio_queue)
+
+        tasks = [
+            task
+            for task in (self._generator_task, self._player_task)
+            if task and not task.done()
+        ]
+        if tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=2.5,
+                )
+            except asyncio.TimeoutError:
+                LOGGER.warning("Streaming TTS workers did not stop in time; cancelling them")
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        self.started.set()
+        self.finished.set()
+        await self._broadcast_stopped_once()
 
     async def _enqueue(self, chunk: str) -> None:
         chunk = clean_assistant_text(chunk)
@@ -333,9 +391,7 @@ class StreamingTtsSession:
         finally:
             self.started.set()
             self.finished.set()
-            if not self._stopped_event_sent:
-                self._stopped_event_sent = True
-                await self.events.broadcast("tts_stopped", {"source": self.source, "turn_id": self.turn_id, "generation_id": self.generation_id})
+            await self._broadcast_stopped_once()
 
 
 def empty_audio() -> np.ndarray:

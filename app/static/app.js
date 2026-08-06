@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.6.2';
+const FRONTEND_VERSION = '0.6.7';
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
 
 const appState = {
@@ -15,6 +15,7 @@ const appState = {
   queue: [],
   models: [],
   kokoroVoices: [],
+  edgeVoices: { voices: [], source: 'built-in-fallback', error: null },
   audioDevices: { inputs: [], outputs: [], recommended_input: null, recommended_output: null },
   version: FRONTEND_VERSION,
   backendVersion: null,
@@ -45,6 +46,53 @@ const appState = {
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+const UI_TEXT_SIZE_KEY = 'verbanode_ui_text_size';
+const UI_TEXT_SIZES = new Set(['small', 'medium', 'large']);
+const EXPLORER_VIEW_MODES = new Set(['cards', 'list', 'details']);
+
+function explorerViewKey(target) { return `verbanode_${target}_view`; }
+
+function getExplorerView(target) {
+  const stored = localStorage.getItem(explorerViewKey(target));
+  return EXPLORER_VIEW_MODES.has(stored) ? stored : 'cards';
+}
+
+function applyExplorerView(target, mode, persist = true) {
+  const resolved = EXPLORER_VIEW_MODES.has(mode) ? mode : 'cards';
+  const content = document.querySelector(`[data-explorer-view="${target}"]`);
+  if (content) {
+    content.classList.remove('view-cards', 'view-list', 'view-details');
+    content.classList.add(`view-${resolved}`);
+  }
+  document.querySelectorAll(`[data-view-target="${target}"]`).forEach(button => {
+    const active = button.dataset.viewMode === resolved;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  const page = content?.closest('.page');
+  page?.classList.toggle('explorer-details-active', resolved === 'details');
+  if (persist) localStorage.setItem(explorerViewKey(target), resolved);
+}
+
+function initializeExplorerViews() {
+  applyExplorerView('information', getExplorerView('information'), false);
+  applyExplorerView('plugins', getExplorerView('plugins'), false);
+}
+
+function getStoredUiTextSize() {
+  const stored = localStorage.getItem(UI_TEXT_SIZE_KEY);
+  return UI_TEXT_SIZES.has(stored) ? stored : 'medium';
+}
+
+function applyUiTextSize(size, persist = true) {
+  const resolved = UI_TEXT_SIZES.has(size) ? size : 'medium';
+  document.documentElement.dataset.uiTextSize = resolved;
+  appState.uiTextSize = resolved;
+  if (persist) localStorage.setItem(UI_TEXT_SIZE_KEY, resolved);
+  const select = $('#uiTextSizeSelect');
+  if (select && select.value !== resolved) select.value = resolved;
+}
 
 function escapeHtml(value = '') {
   return String(value)
@@ -440,6 +488,7 @@ async function loadBootstrap() {
   appState.queue = data.queue || [];
   appState.models = data.models || [];
   appState.kokoroVoices = data.kokoro_voices || [];
+  appState.edgeVoices = data.edge_voices || appState.edgeVoices;
   appState.audioDevices = data.audio_devices || appState.audioDevices;
   appState.backendVersion = data.version || null;
   appState.features = data.features || {};
@@ -700,14 +749,24 @@ function renderInformation() {
     return;
   }
   list.innerHTML = appState.information.map(item => `<article class="card info-item">
-    <div><div class="enabled-pill ${item.enabled ? '' : 'off'}">● ${item.enabled ? 'Enabled' : 'Disabled'}</div><h3>${escapeHtml(item.title)}</h3><div class="info-preview">${escapeHtml(item.content)}</div></div>
+    <div class="info-header">
+      <div class="enabled-pill ${item.enabled ? '' : 'off'}">● ${item.enabled ? 'Enabled' : 'Disabled'}</div>
+      <h3>${escapeHtml(item.title)}</h3>
+    </div>
+    <div class="info-preview">${escapeHtml(item.content)}</div>
     <div class="item-actions"><button class="btn ghost compact" data-edit-info="${item.id}">Edit</button><button class="btn danger-outline compact" data-delete-info="${item.id}">Delete</button></div>
   </article>`).join('');
+  applyExplorerView('information', getExplorerView('information'), false);
 }
 
 function pluginStatusLabel(plugin) {
+  if (plugin.status === 'incompatible') return ['Incompatible', 'error'];
+  if (plugin.status === 'invalid') return ['Invalid package', 'error'];
   if (plugin.status === 'load_error') return ['Load failed', 'error'];
-  if (!plugin.enabled) return ['Disabled', 'disabled'];
+  if (!plugin.enabled || plugin.status === 'disabled') return ['Disabled', 'disabled'];
+  if (plugin.status === 'loading') return ['Loading', 'neutral'];
+  if (plugin.status === 'reloading') return ['Reloading', 'neutral'];
+  if (plugin.status === 'unhealthy') return ['Unhealthy', 'warning'];
   if (!plugin.healthy || plugin.status === 'error') return ['Error', 'error'];
   return ['Healthy', 'healthy'];
 }
@@ -735,7 +794,7 @@ function createPluginMetricElement(label, value) {
 
 function createPluginCard(plugin) {
   const [statusLabel, statusClass] = pluginStatusLabel(plugin);
-  const failedLoad = plugin.status === 'load_error';
+  const failedLoad = ['load_error', 'incompatible', 'invalid'].includes(plugin.status);
   const card = createPluginElement('article', `card plugin-card${plugin.enabled ? '' : ' plugin-disabled'}${failedLoad ? ' plugin-load-error' : ''}`);
   card.dataset.pluginCard = String(plugin.id || '');
 
@@ -772,8 +831,10 @@ function createPluginCard(plugin) {
     metrics.append(
       createPluginMetricElement('Executions', pluginMetric(plugin.executions)),
       createPluginMetricElement('Errors', pluginMetric(plugin.errors)),
+      createPluginMetricElement('Timeouts', pluginMetric(plugin.timeouts)),
+      createPluginMetricElement('Failure streak', `${pluginMetric(plugin.consecutive_failures)} / ${pluginMetric(plugin.failure_threshold)}`),
       createPluginMetricElement('Average', pluginMetric(plugin.average_latency_ms, ' ms')),
-      createPluginMetricElement('Last run', pluginMetric(plugin.last_latency_ms, ' ms')),
+      createPluginMetricElement('Active', pluginMetric(plugin.active_executions)),
     );
     body.append(metrics);
 
@@ -788,10 +849,18 @@ function createPluginCard(plugin) {
   if (plugin.last_error) {
     const errorBox = createPluginElement('div', 'plugin-error');
     errorBox.append(
-      createPluginElement('strong', '', failedLoad ? 'Load error' : 'Last error'),
+      createPluginElement('strong', '', failedLoad ? 'Package error' : 'Last execution error'),
       createPluginElement('span', '', plugin.last_error),
     );
     body.append(errorBox);
+  }
+  if (plugin.last_reload_error) {
+    const reloadErrorBox = createPluginElement('div', 'plugin-error plugin-reload-error');
+    reloadErrorBox.append(
+      createPluginElement('strong', '', 'Last reload kept the previous version'),
+      createPluginElement('span', '', plugin.last_reload_error),
+    );
+    body.append(reloadErrorBox);
   }
 
   if (plugin.external && plugin.plugin_path) {
@@ -817,10 +886,15 @@ function createPluginCard(plugin) {
   }
 
   if (plugin.external && plugin.reloadable) {
-    const reloadButton = createPluginElement('button', 'plugin-action plugin-action-reload', 'Reload');
+    const reloadButton = createPluginElement('button', 'plugin-action plugin-action-reload', failedLoad || plugin.status === 'unhealthy' ? 'Repair / reload' : 'Reload');
     reloadButton.type = 'button';
     reloadButton.dataset.reloadPlugin = String(plugin.id || '');
     actions.append(reloadButton);
+  } else if (plugin.status === 'unhealthy') {
+    const recoverButton = createPluginElement('button', 'plugin-action plugin-action-reload', 'Recover');
+    recoverButton.type = 'button';
+    recoverButton.dataset.recoverPlugin = String(plugin.id || '');
+    actions.append(recoverButton);
   }
 
   if (!failedLoad) {
@@ -877,6 +951,7 @@ function renderPlugins() {
   }
 
   grid.replaceChildren(...plugins.map(createPluginCard));
+  applyExplorerView('plugins', getExplorerView('plugins'), false);
 }
 
 async function refreshPlugins(showToast = false) {
@@ -919,6 +994,7 @@ function renderSettings() {
   $('#sttConfidenceFilterToggle').checked = settings.stt_confidence_filter_enabled !== false;
   $('#sttConfidenceThresholdInput').value = Math.round(Number(settings.stt_confidence_threshold ?? 0.70) * 100);
   $('#showRejectedSttToggle').checked = settings.show_rejected_stt_transcripts !== false;
+  applyUiTextSize(appState.uiTextSize || getStoredUiTextSize(), false);
   renderAudioDevices();
   applyRejectedTranscriptVisibility();
   activateSettingsPanel(appState.settingsPanel, false);
@@ -1346,6 +1422,45 @@ async function respondTakeover(requestId, approve) {
   } catch (error) { toast(error.message, 'error'); closeModal(); }
 }
 
+function edgeVoiceLabel(voice) {
+  const name = voice.name || voice.short_name || 'Voice';
+  const locale = voice.locale || 'unknown locale';
+  const gender = voice.gender || 'Unknown';
+  return `${name} — ${locale} · ${gender}`;
+}
+
+function renderEdgeVoiceOptions(selectedVoice = '') {
+  const select = $('#edgeVoiceSelect');
+  const localeFilter = $('#edgeVoiceLocaleFilter');
+  if (!select || !localeFilter) return;
+  const voices = appState.edgeVoices?.voices || [];
+  const locales = [...new Set(voices.map(voice => voice.locale).filter(Boolean))].sort();
+  const currentLocale = localeFilter.value;
+  localeFilter.innerHTML = `<option value="">All locales</option>${locales.map(locale => `<option value="${escapeHtml(locale)}">${escapeHtml(locale)}</option>`).join('')}`;
+  localeFilter.value = locales.includes(currentLocale) ? currentLocale : '';
+  const filtered = localeFilter.value ? voices.filter(voice => voice.locale === localeFilter.value) : voices;
+  const available = [...filtered];
+  if (selectedVoice && !available.some(voice => voice.short_name === selectedVoice)) {
+    const selected = voices.find(voice => voice.short_name === selectedVoice);
+    available.unshift(selected || { short_name: selectedVoice, name: selectedVoice, locale: 'custom', gender: 'Unknown' });
+  }
+  select.innerHTML = available.map(voice => `<option value="${escapeHtml(voice.short_name)}">${escapeHtml(edgeVoiceLabel(voice))}</option>`).join('');
+  if (!available.length) select.innerHTML = `<option value="en-US-AriaNeural">Aria — en-US · Female</option>`;
+  select.value = selectedVoice || available[0]?.short_name || 'en-US-AriaNeural';
+  const status = $('#edgeVoiceStatus');
+  if (status) {
+    const source = appState.edgeVoices?.source === 'live' || appState.edgeVoices?.source === 'live-cache' ? 'online catalogue' : 'bundled fallback list';
+    status.textContent = `${voices.length || 1} voices loaded from the ${source}.${appState.edgeVoices?.error ? ` Last refresh: ${appState.edgeVoices.error}` : ''}`;
+  }
+}
+
+async function loadEdgeVoices(refresh = false, selectedVoice = '') {
+  const payload = await api(`/api/tts/edge-voices?refresh=${refresh ? 'true' : 'false'}`);
+  appState.edgeVoices = payload || appState.edgeVoices;
+  renderEdgeVoiceOptions(selectedVoice || $('#edgeVoiceSelect')?.value || '');
+  return payload;
+}
+
 function agentDefaults() {
   return {
     name: 'New Agent', color: '#6c63ff', avatar: 'NA', role: 'General voice assistant',
@@ -1372,6 +1487,35 @@ function openAgentModal(agentId = null) {
   const modelNames = [...new Set([agent.llm_model, ...appState.models.map(model => model.name || model.model)].filter(Boolean))];
   modelSelect.innerHTML = modelNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   modelSelect.value = agent.llm_model;
+  renderEdgeVoiceOptions(agent.edge_voice || 'en-US-AriaNeural');
+  $('#edgeVoiceLocaleFilter').onchange = () => renderEdgeVoiceOptions($('#edgeVoiceSelect').value);
+  $('#refreshEdgeVoicesBtn').onclick = async () => {
+    const button = $('#refreshEdgeVoicesBtn');
+    button.disabled = true; button.textContent = 'Refreshing…';
+    try {
+      const payload = await loadEdgeVoices(true, $('#edgeVoiceSelect').value);
+      toast(payload.source === 'live' ? 'Edge voice catalogue refreshed.' : 'Using the bundled Edge voice list.', payload.error ? 'error' : 'success');
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; button.textContent = '↻ Refresh Edge voices'; }
+  };
+  $('#previewEdgeVoiceBtn').onclick = async () => {
+    const button = $('#previewEdgeVoiceBtn');
+    button.disabled = true; button.textContent = 'Playing…';
+    try {
+      await api('/api/tts/edge-voice-preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          voice: $('#edgeVoiceSelect').value,
+          rate: Number(form.elements.namedItem('tts_rate').value || 1),
+          volume: Number(form.elements.namedItem('tts_volume').value || 1),
+          text: `Hello. This is ${agent.name || 'VerbaNode'} using the selected Edge voice.`,
+        }),
+      });
+      toast('Edge voice preview completed.', 'success');
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; button.textContent = '▶ Preview selected voice'; }
+  };
+  loadEdgeVoices(false, agent.edge_voice || 'en-US-AriaNeural').catch(() => {});
   const voiceSelect = form.elements.namedItem('kokoro_voice_id');
   const voices = appState.kokoroVoices.length ? appState.kokoroVoices : [
     { id: 0, name: 'af_maple', category: 'American female' },
@@ -1392,7 +1536,7 @@ function openAgentModal(agentId = null) {
   $('#toolCheckboxes').innerHTML = tools.map(plugin => `<label class="check-item ${plugin.enabled ? '' : 'tool-globally-disabled'}"><input type="checkbox" name="tool" value="${escapeHtml(plugin.id)}" ${(agent.tools_enabled || []).includes(plugin.id) ? 'checked' : ''} ${plugin.enabled ? '' : 'disabled'}><span><strong>${escapeHtml(plugin.name)}</strong><small>${escapeHtml(plugin.id)}${plugin.enabled ? '' : ' · globally disabled'}</small></span></label>`).join('');
   $('#agentInfoCheckboxes').innerHTML = appState.information.map(item => `<label class="check-item"><input type="checkbox" name="info" value="${item.id}" ${(agent.info_ids || []).includes(item.id) ? 'checked' : ''}><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.content.slice(0,130))}</small></span></label>`).join('') || '<div class="queue-empty">Create global information entries first.</div>';
   const conversations = agentId ? appState.conversations.filter(() => agent.id === appState.activeAgent?.id) : [];
-  $('#agentMemoryStats').innerHTML = agentId ? `<strong>${conversations.length || 'Saved'} conversation workspace</strong><br>Memory contains complete chat history plus automatic summaries.` : 'Save the agent before managing memory.';
+  $('#agentMemoryStats').innerHTML = agentId ? `<strong>${conversations.length || 'Saved'} conversation workspace</strong><br>Complete history is stored, but VerbaNode only sends a short recent selection and summary when the request explicitly needs prior context.` : 'Save the agent before managing memory.';
   $('#backupAgentBtn').disabled = !agentId;
   $('#clearAgentMemoryBtn').disabled = !agentId;
   wireModalBasics();
@@ -1523,7 +1667,9 @@ function bindEvents() {
   $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.onclick = () => navigate(node.dataset.page));
   $$('[data-nav]').forEach(node => node.onclick = () => navigate(node.dataset.nav));
   $$('[data-settings-panel]').forEach(node => node.onclick = () => activateSettingsPanel(node.dataset.settingsPanel));
+  $$('[data-view-target]').forEach(node => node.onclick = () => applyExplorerView(node.dataset.viewTarget, node.dataset.viewMode));
   $('#showRejectedSttToggle').onchange = applyRejectedTranscriptVisibility;
+  $('#uiTextSizeSelect').onchange = event => applyUiTextSize(event.currentTarget.value);
   $('#mobileMenuBtn').onclick = openMobileNav; $('#mobileCloseNav').onclick = closeMobileNav; $('#sidebarBackdrop').onclick = closeMobileNav;
   $('#queueQuickBtn').onclick = openQueueDrawer; $$('[data-close-drawer]').forEach(node => node.onclick = closeQueueDrawer);
   $('#drawerPlayQueue').onclick = () => queueAction('play'); $('#drawerClearQueue').onclick = () => queueAction('clear');
@@ -1601,7 +1747,7 @@ function bindEvents() {
   };
 
   document.addEventListener('click', async event => {
-    const target = event.target.closest('[data-edit-agent],[data-activate-agent],[data-delete-agent],[data-edit-info],[data-delete-info],[data-edit-script],[data-run-script],[data-queue-script],[data-remove-queue],[data-toggle-plugin],[data-reset-plugin],[data-reload-plugin]');
+    const target = event.target.closest('[data-edit-agent],[data-activate-agent],[data-delete-agent],[data-edit-info],[data-delete-info],[data-edit-script],[data-run-script],[data-queue-script],[data-remove-queue],[data-toggle-plugin],[data-reset-plugin],[data-reload-plugin],[data-recover-plugin]');
     if (!target) return;
     if (target.dataset.editAgent) openAgentModal(Number(target.dataset.editAgent));
     else if (target.dataset.activateAgent) {
@@ -1637,6 +1783,14 @@ function bindEvents() {
         if (appState.data) appState.data.plugins = appState.plugins;
         renderPlugins();
         toast('External plugin reloaded.', 'success');
+      } catch (error) { toast(error.message, 'error'); target.disabled = false; }
+    } else if (target.dataset.recoverPlugin) {
+      target.disabled = true;
+      try {
+        appState.plugins = await api(`/api/plugins/${encodeURIComponent(target.dataset.recoverPlugin)}/recover`, { method: 'POST' });
+        if (appState.data) appState.data.plugins = appState.plugins;
+        renderPlugins();
+        toast('Plugin recovered.', 'success');
       } catch (error) { toast(error.message, 'error'); target.disabled = false; }
     } else if (target.dataset.resetPlugin) {
       try {
@@ -1731,6 +1885,7 @@ function bindEvents() {
       input_device: selectedAudioDeviceId('#inputDeviceSelect'),
       output_device: selectedAudioDeviceId('#outputDeviceSelect'),
     };
+    applyUiTextSize($('#uiTextSizeSelect').value);
     try {
       appState.data.runtime_settings = await api('/api/conversation/settings', { method: 'PUT', body: JSON.stringify(payload) });
       renderSettings();
@@ -1870,6 +2025,8 @@ window.addEventListener('beforeunload', () => {
   try { appState.browserPttStream?.getTracks().forEach(track => track.stop()); } catch (_) {}
 });
 
+applyUiTextSize(getStoredUiTextSize(), false);
+initializeExplorerViews();
 bindEvents();
 updateBrowserMicSupport();
 if (appState.token) {

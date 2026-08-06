@@ -101,6 +101,17 @@ class AudioDeviceTestRequest(BaseModel):
     output_device: int | None = None
 
 
+class EdgeVoicePreviewRequest(BaseModel):
+    voice: str = Field(min_length=3, max_length=120)
+    text: str = Field(
+        default="Hello. This is a preview of the selected VerbaNode voice.",
+        min_length=1,
+        max_length=500,
+    )
+    rate: float = Field(default=1.0, ge=0.5, le=2.0)
+    volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class DiagnosticsSoakRequest(BaseModel):
     duration_minutes: int = Field(default=30, ge=1, le=480)
     interval_seconds: int = Field(default=5, ge=2, le=60)

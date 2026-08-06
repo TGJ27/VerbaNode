@@ -1,6 +1,6 @@
 # Example Echo
 
-This is the reference external plugin included with VerbaNode v0.6.2.
+This is the reference external plugin included with VerbaNode v0.6.3.
 
 1. Open **Agents** and enable `example_echo` for the active agent.
 2. Open **Plugins** and confirm the plugin is globally enabled.

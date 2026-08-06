@@ -1,6 +1,6 @@
-# VerbaNode internal plugin architecture
+# VerbaNode plugin architecture
 
-Version 0.6.1 Phase 2 keeps capabilities internal and statically registered, then exposes them through a persistent Plugin Manager.
+VerbaNode uses one registry for built-in capabilities and trusted local external plugins.
 
 ```text
 Conversation / LLM
@@ -9,21 +9,14 @@ Conversation / LLM
 ToolService compatibility facade
         |
         v
-PluginManager -> PluginRegistry -> built-in capability plugin
-        |
-        v
-Authenticated Plugin Manager API and dashboard
+PluginManager -> PluginRegistry
+        |                 |
+        v                 v
+built-in plugins     external plugins/
 ```
 
-Each capability owns its schema, deterministic matching, execution, direct spoken fallback, metadata, permissions, and runtime metrics. The existing `ToolService` public API remains compatible.
+Each plugin owns its schema, optional deterministic matcher, execution, spoken fallback, metadata, permissions, and lifecycle hook. `ToolService` preserves the original conversation and LLM interface.
 
-Built-in capabilities currently included:
+Built-in plugins live under `app/plugins/builtin/` and external packages live under the top-level `plugins/` folder.
 
-- `get_current_time`
-- `get_location`
-- `get_weather`
-- `handle_exit_intent`
-
-Global plugin state is stored as a list of disabled IDs in the existing SQLite settings table. Per-agent tool assignments are preserved independently.
-
-External discovery, installation, manifests, dependencies, third-party execution, and hot reload are deliberately reserved for Phase 3.
+v0.6.3 hardening adds validation, execution timeout, bounded concurrency, cancellation, failure thresholds, health states, safe replacement reload, and detailed metrics. These are reliability boundaries, not a Python security sandbox.

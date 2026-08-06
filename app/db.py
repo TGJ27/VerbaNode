@@ -799,6 +799,38 @@ class Database:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_recent_messages(
+        self,
+        conversation_id: int,
+        limit: int = 20,
+        before_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the newest messages in chronological order.
+
+        ``list_messages`` intentionally preserves its older API semantics. This
+        helper avoids sending the first messages of a long conversation when
+        only recent short-term context is required.
+        """
+        limit = max(1, int(limit))
+        with self.connect() as conn:
+            if before_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM messages WHERE conversation_id=?
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (conversation_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM messages WHERE conversation_id=? AND id<?
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (conversation_id, int(before_id), limit),
+                ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
     def message_count(self, conversation_id: int) -> int:
         with self.connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM messages WHERE conversation_id=?", (conversation_id,)).fetchone()[0])

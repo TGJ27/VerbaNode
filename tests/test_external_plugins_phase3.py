@@ -76,7 +76,7 @@ async def test_external_plugin_failure_is_isolated_and_recoverable(tmp_path: Pat
     result = manager.discover_external(plugins_dir)
     assert result["loaded"] == 0
     assert result["failed"] == 1
-    failure = next(item for item in manager.health() if item["status"] == "load_error")
+    failure = next(item for item in manager.health() if item["status"] == "incompatible")
     assert failure["source"] == "external"
     assert "Unsupported SDK version" in failure["last_error"]
     assert manager.registry.get("get_current_time") is not None
@@ -87,7 +87,7 @@ async def test_external_plugin_failure_is_isolated_and_recoverable(tmp_path: Pat
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     await manager.reload_external(failure["id"])
     assert manager.registry.get("sample_echo") is not None
-    assert not any(item["status"] == "load_error" for item in manager.health())
+    assert not any(item["status"] in {"load_error", "incompatible", "invalid"} for item in manager.health())
 
 
 def test_duplicate_external_id_does_not_replace_builtin(tmp_path: Path) -> None:

@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     ai_engine_preload_kokoro: bool = True
     ai_engine_kokoro_timeout_seconds: float = Field(default=60.0, ge=10.0, le=300.0)
     external_plugins_path: Path = ROOT_DIR / "plugins"
+    plugin_execution_timeout_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
+    plugin_failure_threshold: int = Field(default=3, ge=1, le=20)
+    plugin_max_concurrent_executions: int = Field(default=4, ge=1, le=32)
+    plugin_shutdown_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
+    plugin_manifest_max_bytes: int = Field(default=65536, ge=1024, le=1048576)
+    plugin_entry_max_bytes: int = Field(default=2097152, ge=4096, le=16777216)
 
     @property
     def external_plugins_dir(self) -> Path:

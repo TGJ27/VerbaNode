@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#eef4ff">
   <title>VerbaNode Standalone</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=0.6.2">
+  <link rel="stylesheet" href="/static/styles.css?v=0.6.7">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
@@ -147,8 +147,21 @@
       </section>
 
       <section id="page-information" class="page">
-        <div class="page-actions"><div><p class="muted">Global text entries can be selectively enabled inside each agent.</p></div><button id="addInfoBtn" class="btn primary">＋ Add information</button></div>
-        <div id="informationList" class="list-stack"></div>
+        <div class="page-actions explorer-page-actions">
+          <div><p class="muted">Global text entries can be selectively enabled inside each agent.</p></div>
+          <div class="explorer-page-tools">
+            <div class="view-switcher" role="group" aria-label="Information view">
+              <button type="button" class="view-switch-button" data-view-target="information" data-view-mode="cards" title="Large cards" aria-label="Large cards">▦</button>
+              <button type="button" class="view-switch-button" data-view-target="information" data-view-mode="list" title="List" aria-label="List">☰</button>
+              <button type="button" class="view-switch-button" data-view-target="information" data-view-mode="details" title="Details" aria-label="Details">≣</button>
+            </div>
+            <button id="addInfoBtn" class="btn primary">＋ Add information</button>
+          </div>
+        </div>
+        <div class="explorer-details-head information-details-head" aria-hidden="true">
+          <span>Status</span><span>Name</span><span>Content</span><span>Actions</span>
+        </div>
+        <div id="informationList" class="list-stack explorer-content" data-explorer-view="information"></div>
       </section>
 
       <section id="page-plugins" class="page">
@@ -157,7 +170,12 @@
             <p class="eyebrow">PLUGIN MANAGER</p>
             <p class="muted">Manage built-in capabilities and trusted local plugins loaded from <code id="externalPluginDirectory">plugins/</code>. External Python plugins run inside the VerbaNode Core process, so install only code you trust.</p>
           </div>
-          <div class="plugin-page-buttons">
+          <div class="plugin-page-buttons explorer-page-tools">
+            <div class="view-switcher" role="group" aria-label="Plugin view">
+              <button type="button" class="view-switch-button" data-view-target="plugins" data-view-mode="cards" title="Large cards" aria-label="Large cards">▦</button>
+              <button type="button" class="view-switch-button" data-view-target="plugins" data-view-mode="list" title="List" aria-label="List">☰</button>
+              <button type="button" class="view-switch-button" data-view-target="plugins" data-view-mode="details" title="Details" aria-label="Details">≣</button>
+            </div>
             <button id="refreshPluginsBtn" class="btn ghost">↻ Refresh status</button>
             <button id="reloadExternalPluginsBtn" class="btn primary">↻ Reload external</button>
             <button id="resetAllPluginMetricsBtn" class="btn secondary">Reset all metrics</button>
@@ -171,12 +189,15 @@
           <article class="card plugin-summary-card"><span>Health</span><strong>–</strong><small>Runtime status</small></article>
         </div>
 
-        <div id="pluginGrid" class="plugin-grid">
+        <div class="explorer-details-head plugin-details-head" aria-hidden="true">
+          <span>Name</span><span>Source</span><span>Status</span><span>Usage</span><span>Actions</span>
+        </div>
+        <div id="pluginGrid" class="plugin-grid explorer-content" data-explorer-view="plugins">
           <article class="card plugin-card plugin-card-loading"><div class="plugin-card-head"><div><p class="eyebrow">PLUGIN MANAGER</p><h3>Loading plugins</h3></div><span class="plugin-status neutral">…</span></div><p class="muted">Waiting for the backend registry and external plugin discovery.</p></article>
         </div>
 
         <section class="card plugin-phase-note">
-          <div><p class="eyebrow">PHASE 3</p><h3>Trusted local external plugins</h3><p class="muted">Add one folder per plugin under <code>plugins/</code>, then reload. Missing, invalid, incompatible, and duplicate plugins are isolated and reported without stopping VerbaNode. Dependency installation and an untrusted-code sandbox are not included.</p></div>
+          <div><p class="eyebrow">PLUGIN HARDENING</p><h3>Validated and failure-isolated plugins</h3><p class="muted">Plugin packages are size-limited, schema-validated, timeout-protected, concurrency-bounded, and marked unhealthy after repeated failures. Reload keeps the previous working version when an update is invalid. External Python plugins are still trusted local code, not a security sandbox.</p></div>
           <span class="chip">verbanode-plugins/1</span>
         </section>
       </section>
@@ -236,6 +257,18 @@
                   <label>Minimum estimated STT confidence (%)<input id="sttConfidenceThresholdInput" type="number" min="0" max="100" step="1"></label>
                   <label class="toggle-row"><span><strong>Show rejected STT transcripts</strong><small>Display filtered speech in the chat as muted diagnostic messages. Turn this off for a cleaner conversation view.</small></span><input id="showRejectedSttToggle" type="checkbox"><i></i></label>
                   <p class="tiny muted">SenseVoice does not always return a calibrated confidence value, so VerbaNode labels this as an estimate. Rejected transcripts are never sent to the agent and never trigger apology audio.</p>
+                </section>
+
+                <section class="card settings-card">
+                  <p class="eyebrow">READABILITY</p><h3>Interface text size</h3>
+                  <label>Display text size
+                    <select id="uiTextSizeSelect">
+                      <option value="small">Small</option>
+                      <option value="medium">Medium</option>
+                      <option value="large">Large</option>
+                    </select>
+                  </label>
+                  <p class="tiny muted">This changes card copy, helper text, labels and chips so the dashboard is easier to read. The preference is stored in this browser.</p>
                 </section>
               </div>
               <div class="settings-panel-actions"><button id="saveRuntimeSettingsBtn" class="btn primary">Save conversation settings</button></div>
@@ -432,7 +465,9 @@
             <label>Max response tokens<input name="max_tokens" type="number" min="32" max="8192" step="16"><small class="field-help">224 is recommended for concise spoken answers.</small></label>
             <label>Context size<input name="context_size" type="number" min="512" step="512"></label>
             <label>TTS mode<select name="tts_mode"><option value="edge">Edge only</option><option value="kokoro">Kokoro local only</option><option value="edge_fallback">Edge → Kokoro fallback</option><option value="kokoro_fallback">Kokoro → Edge fallback</option></select></label>
-            <label>Edge voice<input name="edge_voice"></label>
+            <label>Edge locale<select id="edgeVoiceLocaleFilter"><option value="">All locales</option></select><small class="field-help">Filter the online Edge voice catalogue by locale.</small></label>
+            <label>Edge voice<select name="edge_voice" id="edgeVoiceSelect"></select><small id="edgeVoiceStatus" class="field-help">The bundled fallback list is available offline. Refresh to load the current online catalogue.</small></label>
+            <div class="edge-voice-actions"><button id="refreshEdgeVoicesBtn" type="button" class="btn ghost compact">↻ Refresh Edge voices</button><button id="previewEdgeVoiceBtn" type="button" class="btn secondary compact">▶ Preview selected voice</button></div>
             <label>Kokoro voice<select name="kokoro_voice_id" id="kokoroVoiceSelect"></select><small class="field-help">Voice names are shown; the numeric speaker ID is handled internally.</small></label>
             <label>Speech rate<input name="tts_rate" type="number" min="0.5" max="2" step="0.05"></label>
             <label>Volume<input name="tts_volume" type="number" min="0" max="1" step="0.05"></label>
@@ -453,6 +488,6 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/app.js?v=0.6.2" defer></script>
+  <script src="/static/app.js?v=0.6.7" defer></script>
 </body>
 </html>

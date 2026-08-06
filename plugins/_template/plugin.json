@@ -1,0 +1,12 @@
+{
+  "id": "replace_with_plugin_id",
+  "name": "Plugin Name",
+  "version": "1.0.0",
+  "author": "Your Name or Organization",
+  "description": "Describe the capability provided by this plugin.",
+  "entry": "plugin.py",
+  "sdk_version": "1.0",
+  "category": "External",
+  "priority": 200,
+  "permissions": []
+}

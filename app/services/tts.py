@@ -34,9 +34,87 @@ class GeneratedSpeech:
     persistent: bool = False
 
 
+DEFAULT_EDGE_VOICES: list[dict[str, str]] = [
+    {"short_name": "en-US-AriaNeural", "name": "Aria", "locale": "en-US", "gender": "Female"},
+    {"short_name": "en-US-JennyNeural", "name": "Jenny", "locale": "en-US", "gender": "Female"},
+    {"short_name": "en-US-GuyNeural", "name": "Guy", "locale": "en-US", "gender": "Male"},
+    {"short_name": "en-GB-SoniaNeural", "name": "Sonia", "locale": "en-GB", "gender": "Female"},
+    {"short_name": "en-GB-RyanNeural", "name": "Ryan", "locale": "en-GB", "gender": "Male"},
+    {"short_name": "id-ID-GadisNeural", "name": "Gadis", "locale": "id-ID", "gender": "Female"},
+    {"short_name": "id-ID-ArdiNeural", "name": "Ardi", "locale": "id-ID", "gender": "Male"},
+    {"short_name": "zh-CN-XiaoxiaoNeural", "name": "Xiaoxiao", "locale": "zh-CN", "gender": "Female"},
+    {"short_name": "zh-CN-YunxiNeural", "name": "Yunxi", "locale": "zh-CN", "gender": "Male"},
+]
+
+
 class EdgeTtsProvider:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._voice_lock = threading.RLock()
+        self._voice_cache: list[dict[str, str]] = []
+        self._voice_cache_at = 0.0
+        self._voice_cache_error: str | None = None
+
+    @staticmethod
+    def _normalize_voice(item: dict[str, Any]) -> dict[str, str] | None:
+        short_name = str(item.get("ShortName") or item.get("short_name") or "").strip()
+        if not short_name:
+            return None
+        locale = str(item.get("Locale") or item.get("locale") or short_name[:5]).strip()
+        gender = str(item.get("Gender") or item.get("gender") or "Unknown").strip().title()
+        friendly = str(item.get("FriendlyName") or item.get("name") or "").strip()
+        base_name = short_name
+        if "-" in short_name:
+            base_name = short_name.split("-", 2)[-1]
+        if base_name.endswith("Neural"):
+            base_name = base_name[:-6]
+        return {
+            "short_name": short_name,
+            "name": base_name or friendly or short_name,
+            "friendly_name": friendly,
+            "locale": locale,
+            "gender": gender,
+        }
+
+    def cached_voice_payload(self) -> dict[str, Any]:
+        with self._voice_lock:
+            voices = list(self._voice_cache or DEFAULT_EDGE_VOICES)
+            return {
+                "voices": voices,
+                "source": "live-cache" if self._voice_cache else "built-in-fallback",
+                "error": self._voice_cache_error,
+            }
+
+    async def list_voices(self, *, refresh: bool = False) -> dict[str, Any]:
+        with self._voice_lock:
+            fresh = self._voice_cache and (time.monotonic() - self._voice_cache_at) < 3600
+            if fresh and not refresh:
+                return self.cached_voice_payload()
+        try:
+            import edge_tts
+
+            raw_voices = await asyncio.wait_for(
+                edge_tts.list_voices(),
+                timeout=float(self.settings.tts_edge_timeout_seconds),
+            )
+            normalized = [
+                voice
+                for item in raw_voices
+                if (voice := self._normalize_voice(item)) is not None
+            ]
+            normalized.sort(key=lambda voice: (voice["locale"], voice["gender"], voice["name"]))
+            if not normalized:
+                raise TtsUnavailable("Edge TTS returned an empty voice catalogue")
+            with self._voice_lock:
+                self._voice_cache = normalized
+                self._voice_cache_at = time.monotonic()
+                self._voice_cache_error = None
+            return {"voices": normalized, "source": "live", "error": None}
+        except Exception as exc:
+            LOGGER.warning("Could not refresh Edge voice catalogue: %s", exc)
+            with self._voice_lock:
+                self._voice_cache_error = str(exc)
+            return self.cached_voice_payload()
 
     def generate(self, text: str, voice: str, rate: float) -> Path:
         try:
@@ -443,6 +521,33 @@ class TtsService:
         if generated is None:
             return False
         return self.play_generated_blocking(generated, agent, speech_id)
+
+    async def edge_voice_catalog(self, *, refresh: bool = False) -> dict[str, Any]:
+        return await self.edge.list_voices(refresh=refresh)
+
+    def preview_edge_voice_blocking(
+        self,
+        *,
+        voice: str,
+        text: str,
+        rate: float = 1.0,
+        volume: float = 1.0,
+    ) -> bool:
+        agent = {
+            "tts_mode": "edge",
+            "edge_voice": voice,
+            "tts_rate": rate,
+            "tts_volume": volume,
+            "kokoro_voice_id": 0,
+        }
+        speech_id = self.begin_speech()
+        return self.speak_blocking(
+            text,
+            agent,
+            speech_id,
+            use_cache=False,
+            cache_namespace="edge-preview",
+        )
 
     def status(self) -> dict[str, Any]:
         try:

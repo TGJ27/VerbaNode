@@ -73,12 +73,19 @@ class OllamaService:
         agent: dict[str, Any],
         information: list[dict[str, Any]],
         summary: str | None,
+        *,
+        tool_schemas: list[dict[str, Any]] | None = None,
     ) -> str:
+        schemas = (
+            self.tools.schemas(agent.get("tools_enabled") or [])
+            if tool_schemas is None
+            else tool_schemas
+        )
         return self.prompts.compose(
             agent=agent,
             information=information,
             summary=summary,
-            tool_schemas=self.tools.schemas(agent.get("tools_enabled") or []),
+            tool_schemas=schemas,
         )
 
     @staticmethod
@@ -168,6 +175,7 @@ class OllamaService:
         *,
         agent: dict[str, Any],
         messages: list[dict[str, Any]],
+        recovery_messages: list[dict[str, Any]] | None = None,
         on_token: TokenCallback,
         on_tool: ToolCallback | None = None,
     ) -> tuple[str, bool]:
@@ -259,8 +267,38 @@ class OllamaService:
                     LOGGER.warning("Ollama tool flow returned no visible content; using direct result fallback")
                     await on_token(fallback)
                     full_text = fallback
+            if not full_text and not last_executed:
+                LOGGER.warning(
+                    "Ollama completed without visible response text; retrying once with reduced context and no tools"
+                )
+                retry_messages = self._repair_tool_history(
+                    list(recovery_messages or messages[-2:])
+                )
+                async with httpx.AsyncClient(timeout=self._timeout()) as retry_client:
+                    retry_text, retry_calls = await self._stream_round(
+                        client=retry_client,
+                        agent=agent,
+                        messages=retry_messages,
+                        options=options,
+                        tools=[],
+                        on_token=on_token,
+                    )
+                if retry_calls:
+                    LOGGER.warning(
+                        "Reduced-context Ollama retry unexpectedly returned tool calls; ignoring them"
+                    )
+                full_text = clean_assistant_text(retry_text)
+                if full_text:
+                    if self.monitor:
+                        self.monitor.increment("llm_empty_recoveries")
+                    LOGGER.info("Reduced-context Ollama retry produced visible output")
+
             if not full_text:
-                LOGGER.warning("Ollama completed without visible response text")
+                full_text = "I could not generate a response just now. Please try again."
+                LOGGER.warning("Ollama returned no visible text after recovery; using controlled fallback")
+                await on_token(full_text)
+                if self.monitor:
+                    self.monitor.increment("llm_empty_fallbacks")
             return full_text, exit_requested
         except OllamaUnavailable:
             raise

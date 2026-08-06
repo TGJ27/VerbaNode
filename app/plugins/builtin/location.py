@@ -24,10 +24,12 @@ class LocationPlugin(BuiltinPlugin):
         },
     }
     _patterns = (
-        r"^(?:where are we|where am i|what(?:'s| is) (?:our|the current) location)$",
-        r"^(?:where is this robot|where are you located)$",
-        r"^(?:sekarang )?kita di ?mana$",
-        r"^(?:sekarang )?saya di ?mana$",
+        r"^(?:where are we|where are we at|where are we currently|where are we currently at|where are we right now)$",
+        r"^(?:where am i|where am i at|where am i currently|where am i right now)$",
+        r"^(?:what(?:'s| is) (?:our|the current) location|what location are we at|what is this location)$",
+        r"^(?:where is this robot|where are you located|where is this place)$",
+        r"^(?:sekarang )?kita (?:ada )?di ?mana$",
+        r"^(?:sekarang )?saya (?:ada )?di ?mana$",
         r"^(?:apa|dimana) lokasi(?: kita| saat ini)?$",
     )
 

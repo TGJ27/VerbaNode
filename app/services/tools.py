@@ -34,6 +34,12 @@ class ToolService:
     async def shutdown_plugins(self) -> None:
         await self.manager.shutdown()
 
+    async def cancel_active_plugins(self, plugin_id: str | None = None) -> int:
+        return await self.manager.cancel_active(plugin_id)
+
+    async def recover_plugin(self, plugin_id: str) -> dict[str, Any]:
+        return await self.manager.recover(plugin_id)
+
     def external_plugins_directory(self) -> Path:
         return self.manager.external_directory()
 

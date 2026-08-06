@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.6.7
+
+- Fixed a typed-chat interruption deadlock that could occur when a new text message was submitted while streamed TTS was still playing.
+- Streaming TTS cancellation now always restores terminal queue markers after draining pending work, so generator and player workers cannot remain blocked indefinitely.
+- Added bounded cancellation cleanup that force-cancels unresponsive TTS workers after 2.5 seconds while preserving idempotent stop events.
+- Added regression tests for the exact removed-sentinel race and repeated cancellation; 100 automated tests pass.
+
+## 0.6.6
+
+- Changed conversation memory to selective short-term context: complete history remains stored, but prior messages and summaries are only injected for explicit recall requests and clear follow-up references.
+- Added bounded memory selection with at most eight recent messages plus a compact summary under a conservative context budget.
+- Added reduced-context Ollama recovery: an empty HTTP 200 response retries once without memory, knowledge, or tool schemas, then returns a controlled visible fallback instead of saving a blank assistant message.
+- Expanded deterministic location matching for natural phrases such as `Where are we currently at?` and `Where are we right now?`.
+- Added a real Edge voice dropdown, locale filter, online voice-catalogue refresh, bundled offline fallback voices, and voice preview playback.
+- Updated the Agent Memory panel to explain selective context behavior.
+- Added selective-memory, empty-response recovery, location-routing, Edge voice, and frontend regression tests; 98 automated tests pass.
+
+## 0.6.3
+
+- Added strict external plugin package validation for manifest size, entry size, semantic versions, supported permission labels, safe folder names, symbolic links, and reserved IDs.
+- Added recursive LLM tool-schema validation before registration.
+- Added bounded plugin execution with per-call timeout, active execution tracking, and cancellation when a conversation stops.
+- Added consecutive-failure tracking and automatic `unhealthy` isolation after a configurable threshold.
+- Added recovery controls for unhealthy built-in plugins and repair/reload controls for external plugins.
+- Changed external reload to validate replacement code before stopping the working version; failed updates now keep the previous version available and report a reload error.
+- Added shutdown-hook timeouts, reload/error counters, timeout/cancellation metrics, registry generation, and hardening settings to diagnostics and Plugin Manager payloads.
+- Added Windows `tzdata` dependency plus a fixed UTC+7 fallback for `Asia/Jakarta`.
+- Added plugin manifest/security documentation and an ignored `plugins/_template/` starter package.
+- Added plugin hardening regression tests; 90 automated tests pass.
+
 ## 0.6.2
 
 - Added startup and on-demand discovery of trusted local Python plugins from the top-level `plugins/` folder.

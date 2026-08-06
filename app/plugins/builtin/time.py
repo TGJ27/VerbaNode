@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone as fixed_timezone
 import re
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.plugins.base import BuiltinPlugin
 from app.plugins.context import PluginContext
@@ -72,13 +72,17 @@ class CurrentTimePlugin(BuiltinPlugin):
         return {} if matched else None
 
     async def execute(self, context: PluginContext) -> PluginResult:
+        configured_name = context.settings.default_timezone
         try:
-            timezone = ZoneInfo(context.settings.default_timezone)
-        except Exception:
-            timezone = ZoneInfo("Asia/Jakarta")
+            timezone = ZoneInfo(configured_name)
+        except ZoneInfoNotFoundError:
+            if configured_name == "Asia/Jakarta":
+                timezone = fixed_timezone(timedelta(hours=7), name="Asia/Jakarta")
+            else:
+                timezone = datetime.now().astimezone().tzinfo or fixed_timezone.utc
         now = datetime.now(timezone)
         return PluginResult(data={
-            "timezone": getattr(timezone, "key", context.settings.default_timezone),
+            "timezone": getattr(timezone, "key", configured_name),
             "iso": now.isoformat(timespec="seconds"),
             "spoken": now.strftime("%A, %B %d, %Y at %I:%M %p"),
         })

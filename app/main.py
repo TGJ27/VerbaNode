@@ -34,6 +34,7 @@ from app.schemas import (
     ConversationCreate,
     ConversationSettingsUpdate,
     DiagnosticsSoakRequest,
+    EdgeVoicePreviewRequest,
     InfoCreate,
     LoginRequest,
     PluginStateUpdate,
@@ -298,6 +299,7 @@ async def bootstrap(token: Token) -> dict[str, Any]:
             "external_plugins": True,
         },
         "kokoro_voices": KOKORO_VOICES,
+        "edge_voices": state.tts.edge.cached_voice_payload(),
         "agents": state.db.list_agents(),
         "active_agent": agent,
         "conversation": conversation,
@@ -354,6 +356,7 @@ def plugin_payload() -> dict[str, Any]:
     summary["agent_assignments"] = sum(usage.values())
     return {
         "sdk": "verbanode-plugins/1",
+        "hardening": True,
         "external_plugins_supported": True,
         "external_plugins_directory": str(state.tools.external_plugins_directory()),
         "plugins": plugins,
@@ -563,7 +566,7 @@ async def run_diagnostics_self_test() -> dict[str, Any]:
         failed = [
             item["name"]
             for item in payload["plugins"]
-            if item["status"] in {"error", "load_error"}
+            if item["status"] in {"error", "load_error", "invalid", "incompatible", "unhealthy"}
         ]
         if failed:
             raise RuntimeError("Plugin errors: " + ", ".join(failed))
@@ -762,6 +765,16 @@ async def reload_external_plugin(plugin_id: str, token: Token) -> dict[str, Any]
         await state.tools.reload_external_plugins(plugin_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="External plugin not found") from exc
+    result = plugin_payload()
+    await state.events.broadcast("plugins_changed", result)
+    return result
+
+@app.post("/api/plugins/{plugin_id}/recover")
+async def recover_plugin(plugin_id: str, token: Token) -> dict[str, Any]:
+    try:
+        await state.tools.recover_plugin(plugin_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Plugin not found") from exc
     result = plugin_payload()
     await state.events.broadcast("plugins_changed", result)
     return result
@@ -1193,6 +1206,32 @@ async def reload_ai_kokoro(token: Token) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     await state.events.broadcast("ai_model_reloaded", {"provider": "kokoro", "status": result})
     return {"ok": True, "provider": "kokoro", "status": result, "engine": state.ai_engine.health()}
+
+
+@app.get("/api/tts/edge-voices")
+async def list_edge_voices(token: Token, refresh: bool = False) -> dict[str, Any]:
+    return await state.tts.edge_voice_catalog(refresh=refresh)
+
+
+@app.post("/api/tts/edge-voice-preview")
+async def preview_edge_voice(
+    payload: EdgeVoicePreviewRequest,
+    token: Token,
+) -> dict[str, Any]:
+    await state.conversation.stop_conversation(stop_tts=True)
+    try:
+        played = await asyncio.to_thread(
+            state.tts.preview_edge_voice_blocking,
+            voice=payload.voice,
+            text=payload.text,
+            rate=payload.rate,
+            volume=payload.volume,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Edge voice preview failed: {exc}") from exc
+    if not played:
+        raise HTTPException(status_code=503, detail="Edge voice preview was cancelled")
+    return {"ok": True, "voice": payload.voice}
 
 
 @app.post("/api/audio/test-input")

@@ -12,3 +12,11 @@ class PluginLoadError(PluginError):
 
 class PluginCompatibilityError(PluginError):
     """Raised when a plugin targets an unsupported SDK version."""
+
+
+class PluginSchemaError(PluginError):
+    """Raised when a plugin exposes an invalid LLM tool schema."""
+
+
+class PluginUnavailableError(PluginError):
+    """Raised when a plugin is disabled, unhealthy, or reloading."""

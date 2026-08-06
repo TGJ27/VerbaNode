@@ -13,6 +13,7 @@ from app.db import Database
 from app.services.audio import AudioUnavailable, HostAudioRecorder
 from app.services.events import EventHub
 from app.services.llm import OllamaService, OllamaUnavailable
+from app.services.memory_context import select_memory_context
 from app.services.pipeline import PipelineMonitor, TurnContext
 from app.services.script_queue import ScriptQueueManager
 from app.services.sentence_tts import StreamingTtsSession, empty_audio
@@ -166,6 +167,14 @@ class ConversationManager:
                 "output_locked": self.tts.player.output_locked,
             },
         )
+        # Cancel any plugin call that is still waiting on network, hardware, or
+        # user code. The plugin manager tracks active executions and propagates
+        # cancellation into the plugin coroutine without stopping VerbaNode Core.
+        llm = getattr(self, "llm", None)
+        tools = getattr(llm, "tools", None)
+        cancel_plugins = getattr(tools, "cancel_active_plugins", None)
+        if callable(cancel_plugins):
+            await cancel_plugins()
         if task and task is not asyncio.current_task():
             task.cancel()
             try:
@@ -363,15 +372,48 @@ class ConversationManager:
 
             information = self.db.enabled_information_for_agent(int(agent["id"]))
             summary_row = self.db.get_summary(int(agent["id"]), conversation_id)
-            summary = summary_row["content"] if summary_row else None
-            history = self.db.list_messages(conversation_id, limit=40)
-            system_prompt = self.llm.build_system_prompt(agent, information, summary)
-            messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(
-                {"role": row["role"], "content": row["content"]}
-                for row in history
-                if row["role"] in {"user", "assistant"}
+            stored_summary = summary_row["content"] if summary_row else None
+            prior_history = self.db.list_recent_messages(
+                conversation_id,
+                limit=12,
+                before_id=int(user_message["id"]),
             )
+            memory_context = select_memory_context(
+                text=text,
+                summary=stored_summary,
+                prior_messages=prior_history,
+                context_size=int(agent.get("context_size", 4096)),
+            )
+            LOGGER.info(
+                "Selective memory context: required=%s reason=%s messages=%d summary=%s",
+                memory_context.required,
+                memory_context.reason,
+                len(memory_context.messages),
+                bool(memory_context.summary),
+            )
+            system_prompt = self.llm.build_system_prompt(
+                agent,
+                information,
+                memory_context.summary,
+            )
+            messages = [{"role": "system", "content": system_prompt}]
+            messages.extend(memory_context.messages)
+            messages.append({"role": "user", "content": text})
+
+            # The recovery request is intentionally minimal. It is used only if
+            # Ollama returns HTTP 200 with no visible content and no tool call.
+            try:
+                recovery_prompt = self.llm.build_system_prompt(
+                    agent, [], None, tool_schemas=[]
+                )
+            except TypeError:
+                # Compatibility with lightweight test doubles and older custom
+                # LLM adapters that implement the original three-argument API.
+                recovery_prompt = self.llm.build_system_prompt(agent, [], None)
+            recovery_messages = [
+                {"role": "system", "content": recovery_prompt},
+                {"role": "user", "content": text},
+            ]
 
             speech_stream: StreamingTtsSession | None = None
             if speak:
@@ -487,6 +529,7 @@ class ConversationManager:
                         self.llm.chat_stream(
                             agent=agent,
                             messages=messages,
+                            recovery_messages=recovery_messages,
                             on_token=token_callback,
                             on_tool=tool_callback,
                         ),
@@ -526,6 +569,10 @@ class ConversationManager:
             else:
                 self.monitor.mark("llm_completed")
                 self.monitor.duration("llm_total", "llm_started", "llm_completed")
+            reply = str(reply or "").strip()
+            if not reply:
+                reply = "I could not generate a response just now. Please try again."
+                await token_callback(reply)
             assistant_message = self.db.add_message(
                 conversation_id,
                 "assistant",

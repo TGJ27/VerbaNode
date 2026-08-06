@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import logging
@@ -11,8 +12,17 @@ from typing import Any, Iterable
 from app.config import Settings
 from app.plugins.base import Plugin
 from app.plugins.context import PluginContext
-from app.plugins.loader import ExternalPluginLoader, LoadedExternalPlugin
-from app.plugins.models import ExternalPluginFailure
+from app.plugins.exceptions import (
+    PluginCompatibilityError,
+    PluginManifestError,
+    PluginSchemaError,
+)
+from app.plugins.loader import (
+    ExternalPluginLoader,
+    LoadedExternalPlugin,
+    validate_tool_schema,
+)
+from app.plugins.models import ExternalPluginFailure, PluginRuntimeState
 from app.plugins.registry import PluginRegistry
 
 LOGGER = logging.getLogger(__name__)
@@ -21,10 +31,16 @@ LOGGER = logging.getLogger(__name__)
 @dataclass(slots=True)
 class PluginMetrics:
     executions: int = 0
+    successes: int = 0
     errors: int = 0
+    timeouts: int = 0
+    cancellations: int = 0
+    consecutive_failures: int = 0
     total_latency_ms: float = 0.0
     last_latency_ms: float = 0.0
     last_error: str | None = None
+    last_success_at: float | None = None
+    last_failure_at: float | None = None
 
     @property
     def average_latency_ms(self) -> float:
@@ -34,49 +50,82 @@ class PluginMetrics:
 
     def reset(self) -> None:
         self.executions = 0
+        self.successes = 0
         self.errors = 0
+        self.timeouts = 0
+        self.cancellations = 0
+        self.consecutive_failures = 0
         self.total_latency_ms = 0.0
         self.last_latency_ms = 0.0
         self.last_error = None
+        self.last_success_at = None
+        self.last_failure_at = None
 
 
 class PluginManager:
-    """Coordinates built-in and trusted local external plugins."""
+    """Coordinates built-in and trusted local external plugins.
+
+    The manager provides lifecycle isolation, bounded execution, timeouts,
+    health transitions, safe reload, and metrics. External plugins remain
+    trusted local Python code; this is reliability hardening, not a security
+    sandbox.
+    """
 
     def __init__(self, settings: Settings, registry: PluginRegistry | None = None) -> None:
         self.settings = settings
         self.registry = registry or PluginRegistry()
         self._metrics: dict[str, PluginMetrics] = {}
+        self._runtime: dict[str, PluginRuntimeState] = {}
         self._disabled_ids: set[str] = set()
         self._external_dir: Path | None = None
         self._external_loaded: dict[str, LoadedExternalPlugin] = {}
         self._external_failures: dict[str, ExternalPluginFailure] = {}
-        self._loader = ExternalPluginLoader()
+        self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
+        self._reload_locks: dict[str, asyncio.Lock] = {}
+        self._execution_semaphore = asyncio.Semaphore(
+            int(self.settings.plugin_max_concurrent_executions)
+        )
+        self._loader = ExternalPluginLoader(
+            manifest_max_bytes=self.settings.plugin_manifest_max_bytes,
+            entry_max_bytes=self.settings.plugin_entry_max_bytes,
+        )
 
     def register(self, plugin: Plugin) -> None:
+        validate_tool_schema(plugin.schema, plugin.id)
         plugin.enabled = plugin.id not in self._disabled_ids
         self.registry.register(plugin)
         self._metrics.setdefault(plugin.id, PluginMetrics())
+        self._runtime[plugin.id] = PluginRuntimeState(
+            status="healthy" if plugin.enabled else "disabled",
+            state_changed_at=time.time(),
+        )
 
     def configure_disabled(self, plugin_ids: Iterable[str]) -> None:
         self._disabled_ids = {str(plugin_id) for plugin_id in plugin_ids}
         for plugin in self.registry.list():
             plugin.enabled = plugin.id not in self._disabled_ids
+            runtime = self._runtime_for(plugin.id)
+            runtime.status = "healthy" if plugin.enabled else "disabled"
+            runtime.state_changed_at = time.time()
 
     def disabled_ids(self) -> list[str]:
-        return sorted(
-            plugin.id for plugin in self.registry.list() if not plugin.enabled
-        )
+        return sorted(plugin.id for plugin in self.registry.list() if not plugin.enabled)
 
     def set_enabled(self, plugin_id: str, enabled: bool) -> dict[str, Any]:
         plugin = self.registry.get(plugin_id)
         if plugin is None:
             raise KeyError(plugin_id)
         plugin.enabled = bool(enabled)
+        runtime = self._runtime_for(plugin_id)
+        metric = self._metrics.setdefault(plugin_id, PluginMetrics())
         if plugin.enabled:
             self._disabled_ids.discard(plugin_id)
+            metric.consecutive_failures = 0
+            runtime.status = "healthy"
         else:
             self._disabled_ids.add(plugin_id)
+            runtime.status = "disabled"
+        runtime.state_changed_at = time.time()
         LOGGER.info(
             "%s plugin %s is now %s",
             plugin.source.capitalize(),
@@ -95,7 +144,12 @@ class PluginManager:
             self._metrics.setdefault(plugin.id, PluginMetrics()).reset()
 
     def schemas(self, enabled: list[str]) -> list[dict[str, Any]]:
-        return self.registry.schemas(enabled)
+        enabled_set = set(enabled or [])
+        return [
+            plugin.schema
+            for plugin in self.registry.list()
+            if plugin.id in enabled_set and self._is_available(plugin.id)
+        ]
 
     def match_core_intent(
         self,
@@ -104,17 +158,21 @@ class PluginManager:
     ) -> tuple[str, dict[str, Any]] | None:
         enabled_set = set(enabled or [])
         for plugin in self.registry.list():
-            if not plugin.enabled or plugin.id not in enabled_set:
+            if plugin.id not in enabled_set or not self._is_available(plugin.id):
                 continue
             try:
-                arguments = plugin.match(
-                    PluginContext(settings=self.settings, text=text)
-                )
+                arguments = plugin.match(PluginContext(settings=self.settings, text=text))
             except Exception as exc:
-                metric = self._metrics.setdefault(plugin.id, PluginMetrics())
-                metric.errors += 1
-                metric.last_error = f"Intent matching failed: {exc}"
-                LOGGER.exception("%s plugin '%s' intent matching failed", plugin.source.capitalize(), plugin.id)
+                self._record_failure(
+                    plugin.id,
+                    f"Intent matching failed: {exc}",
+                    count_execution=False,
+                )
+                LOGGER.exception(
+                    "%s plugin '%s' intent matching failed",
+                    plugin.source.capitalize(),
+                    plugin.id,
+                )
                 continue
             if arguments is not None:
                 return plugin.id, arguments
@@ -131,42 +189,127 @@ class PluginManager:
         if not plugin.enabled:
             return {"error": f"Tool '{plugin_id}' is disabled"}
 
+        runtime = self._runtime_for(plugin_id)
+        if runtime.status == "unhealthy":
+            return {
+                "error": (
+                    f"Tool '{plugin_id}' is unhealthy after repeated failures. "
+                    "Reload it or disable and re-enable it from Plugin Manager."
+                )
+            }
+        if runtime.status in {"loading", "reloading"}:
+            return {"error": f"Tool '{plugin_id}' is currently {runtime.status}"}
+
         metric = self._metrics.setdefault(plugin_id, PluginMetrics())
         started = time.perf_counter()
+        task = asyncio.current_task()
+        if task is not None:
+            self._active_tasks.setdefault(plugin_id, set()).add(task)
+        runtime.active_executions += 1
+
         try:
-            result = await plugin.execute(
-                PluginContext(
-                    settings=self.settings,
-                    arguments=dict(arguments or {}),
-                )
+            result = await asyncio.wait_for(
+                self._execute_bounded(plugin, arguments),
+                timeout=float(self.settings.plugin_execution_timeout_seconds),
             )
+            metric.successes += 1
+            metric.consecutive_failures = 0
             metric.last_error = None
+            metric.last_success_at = time.time()
+            if plugin.enabled:
+                runtime.status = "healthy"
             return result.as_tool_result()
+        except asyncio.TimeoutError:
+            message = (
+                f"Tool '{plugin_id}' timed out after "
+                f"{self.settings.plugin_execution_timeout_seconds:g} seconds"
+            )
+            metric.timeouts += 1
+            self._record_failure(plugin_id, message, increment_error=True)
+            LOGGER.error(message)
+            return {"error": message}
+        except asyncio.CancelledError:
+            metric.cancellations += 1
+            raise
         except Exception as exc:
-            metric.errors += 1
-            metric.last_error = str(exc)
+            message = f"Tool '{plugin_id}' failed: {exc}"
+            self._record_failure(plugin_id, str(exc), increment_error=True)
             LOGGER.exception("%s plugin '%s' failed", plugin.source.capitalize(), plugin_id)
-            return {"error": f"Tool '{plugin_id}' failed: {exc}"}
+            return {"error": message}
         finally:
             latency_ms = (time.perf_counter() - started) * 1000.0
             metric.executions += 1
             metric.last_latency_ms = latency_ms
             metric.total_latency_ms += latency_ms
+            runtime.active_executions = max(0, runtime.active_executions - 1)
+            if task is not None:
+                tasks = self._active_tasks.get(plugin_id)
+                if tasks is not None:
+                    tasks.discard(task)
+                    if not tasks:
+                        self._active_tasks.pop(plugin_id, None)
+
+    async def _execute_bounded(
+        self,
+        plugin: Plugin,
+        arguments: dict[str, Any] | None,
+    ):
+        async with self._execution_semaphore:
+            return await plugin.execute(
+                PluginContext(
+                    settings=self.settings,
+                    arguments=dict(arguments or {}),
+                )
+            )
+
+    async def cancel_active(self, plugin_id: str | None = None) -> int:
+        current = asyncio.current_task()
+        selected: list[asyncio.Task[Any]] = []
+        plugin_ids = [plugin_id] if plugin_id else list(self._active_tasks)
+        for selected_id in plugin_ids:
+            for task in list(self._active_tasks.get(selected_id, set())):
+                if task is not current and not task.done():
+                    task.cancel()
+                    selected.append(task)
+        if selected:
+            await asyncio.gather(*selected, return_exceptions=True)
+        return len(selected)
+
+    async def recover(self, plugin_id: str) -> dict[str, Any]:
+        plugin = self.registry.get(plugin_id)
+        if plugin is None:
+            if plugin_id in self._external_failures:
+                await self.reload_external(plugin_id)
+                return self.plugin_health(plugin_id)
+            raise KeyError(plugin_id)
+        if plugin.source == "external" and plugin.reloadable:
+            await self.reload_external(plugin_id)
+            return self.plugin_health(plugin_id)
+        metric = self._metrics.setdefault(plugin_id, PluginMetrics())
+        metric.consecutive_failures = 0
+        metric.last_error = None
+        runtime = self._runtime_for(plugin_id)
+        runtime.status = "healthy" if plugin.enabled else "disabled"
+        runtime.state_changed_at = time.time()
+        return self.plugin_health(plugin_id)
 
     def format_result(self, plugin_id: str, result: dict[str, Any]) -> str:
         plugin = self.registry.get(plugin_id)
         if plugin is None:
             return str(result.get("error") or result.get("message") or result)
         try:
-            return plugin.format_result(
-                result,
-                PluginContext(settings=self.settings),
-            )
+            return plugin.format_result(result, PluginContext(settings=self.settings))
         except Exception as exc:
-            metric = self._metrics.setdefault(plugin.id, PluginMetrics())
-            metric.errors += 1
-            metric.last_error = f"Result formatting failed: {exc}"
-            LOGGER.exception("%s plugin '%s' result formatting failed", plugin.source.capitalize(), plugin.id)
+            self._record_failure(
+                plugin.id,
+                f"Result formatting failed: {exc}",
+                count_execution=False,
+            )
+            LOGGER.exception(
+                "%s plugin '%s' result formatting failed",
+                plugin.source.capitalize(),
+                plugin.id,
+            )
             return str(result.get("error") or result.get("message") or result)
 
     def discover_external(self, directory: Path) -> dict[str, Any]:
@@ -179,11 +322,17 @@ class PluginManager:
             try:
                 record = self._loader.load(folder)
                 if self.registry.get(record.plugin.id) is not None:
-                    raise ValueError(f"Plugin id '{record.plugin.id}' is already registered")
+                    raise PluginManifestError(
+                        f"Plugin id '{record.plugin.id}' is reserved or already registered"
+                    )
                 record.plugin.enabled = record.plugin.id not in self._disabled_ids
                 self.registry.register(record.plugin)
                 self._external_loaded[record.plugin.id] = record
                 self._metrics.setdefault(record.plugin.id, PluginMetrics())
+                self._runtime[record.plugin.id] = PluginRuntimeState(
+                    status="healthy" if record.plugin.enabled else "disabled",
+                    state_changed_at=time.time(),
+                )
                 loaded += 1
             except Exception as exc:
                 failure = self._failure_from_folder(folder, exc)
@@ -207,6 +356,7 @@ class PluginManager:
         return self.summary()
 
     async def shutdown(self) -> None:
+        await self.cancel_active()
         for plugin_id in list(self._external_loaded):
             await self._unload_external(plugin_id)
 
@@ -221,8 +371,9 @@ class PluginManager:
                 return self._failure_health(failure)
             raise KeyError(plugin_id)
         metric = self._metrics.setdefault(plugin.id, PluginMetrics())
-        healthy = metric.last_error is None
-        status = "disabled" if not plugin.enabled else "healthy" if healthy else "error"
+        runtime = self._runtime_for(plugin.id)
+        status = "disabled" if not plugin.enabled else runtime.status
+        healthy = status == "healthy"
         function = plugin.schema.get("function", {}) if plugin.schema else {}
         return {
             "id": plugin.id,
@@ -245,10 +396,22 @@ class PluginManager:
             "tool_name": function.get("name") or plugin.id,
             "tool_description": function.get("description") or plugin.description,
             "executions": metric.executions,
+            "successes": metric.successes,
             "errors": metric.errors,
+            "timeouts": metric.timeouts,
+            "cancellations": metric.cancellations,
+            "consecutive_failures": metric.consecutive_failures,
+            "failure_threshold": int(self.settings.plugin_failure_threshold),
+            "active_executions": runtime.active_executions,
             "average_latency_ms": round(metric.average_latency_ms, 2),
             "last_latency_ms": round(metric.last_latency_ms, 2),
             "last_error": metric.last_error,
+            "last_success_at": metric.last_success_at,
+            "last_failure_at": metric.last_failure_at,
+            "reloads": runtime.reloads,
+            "reload_errors": runtime.reload_errors,
+            "last_reload_error": runtime.last_reload_error,
+            "state_changed_at": runtime.state_changed_at,
         }
 
     def health(self) -> list[dict[str, Any]]:
@@ -265,25 +428,56 @@ class PluginManager:
 
     def summary(self) -> dict[str, Any]:
         items = self.health()
-        loaded_items = [item for item in items if item.get("status") != "load_error"]
+        loaded_items = [
+            item
+            for item in items
+            if item.get("status") not in {"load_error", "incompatible", "invalid"}
+        ]
         return {
             "total": len(items),
             "loaded": len(loaded_items),
             "builtin": sum(1 for item in loaded_items if item.get("source") == "builtin"),
             "external": sum(1 for item in loaded_items if item.get("source") == "external"),
-            "failed_loads": sum(1 for item in items if item.get("status") == "load_error"),
+            "failed_loads": sum(
+                1
+                for item in items
+                if item.get("status") in {"load_error", "incompatible", "invalid"}
+            ),
+            "incompatible": sum(1 for item in items if item.get("status") == "incompatible"),
+            "unhealthy": sum(1 for item in loaded_items if item.get("status") == "unhealthy"),
             "enabled": sum(1 for item in loaded_items if item["enabled"]),
             "disabled": sum(1 for item in loaded_items if not item["enabled"]),
             "healthy": sum(
                 1 for item in loaded_items if item["enabled"] and item["healthy"]
             ),
             "errors": sum(int(item["errors"]) for item in loaded_items)
-            + sum(1 for item in items if item.get("status") == "load_error"),
+            + sum(
+                1
+                for item in items
+                if item.get("status") in {"load_error", "incompatible", "invalid"}
+            ),
+            "timeouts": sum(int(item.get("timeouts", 0)) for item in loaded_items),
             "executions": sum(int(item["executions"]) for item in loaded_items),
+            "active_executions": sum(
+                int(item.get("active_executions", 0)) for item in loaded_items
+            ),
+            "reloads": sum(int(item.get("reloads", 0)) for item in loaded_items),
+            "reload_errors": sum(
+                int(item.get("reload_errors", 0)) for item in loaded_items
+            ),
+            "registry_generation": self.registry.generation,
+            "execution_timeout_seconds": float(
+                self.settings.plugin_execution_timeout_seconds
+            ),
+            "failure_threshold": int(self.settings.plugin_failure_threshold),
+            "max_concurrent_executions": int(
+                self.settings.plugin_max_concurrent_executions
+            ),
         }
 
     async def _reload_all_external(self) -> None:
-        folders = self._candidate_folders(self._external_dir or self.settings.external_plugins_dir)
+        directory = self._external_dir or self.settings.external_plugins_dir
+        folders = self._candidate_folders(directory)
         folder_set = {folder.resolve() for folder in folders}
 
         for plugin_id, record in list(self._external_loaded.items()):
@@ -317,35 +511,70 @@ class PluginManager:
                 if loaded_record.folder.resolve() == folder.resolve():
                     expected_id = loaded_id
                     break
-        try:
-            candidate = self._loader.load(folder)
-            if expected_id is not None and candidate.plugin.id != expected_id:
-                raise ValueError(
-                    f"Reload changed plugin id from '{expected_id}' to '{candidate.plugin.id}'"
+
+        lock_key = expected_id or f"folder:{folder.resolve()}"
+        lock = self._reload_locks.setdefault(lock_key, asyncio.Lock())
+        async with lock:
+            existing = self.registry.get(expected_id) if expected_id else None
+            existing_runtime = self._runtime.get(expected_id) if expected_id else None
+            if existing_runtime is not None:
+                existing_runtime.status = "reloading"
+                existing_runtime.state_changed_at = time.time()
+            try:
+                candidate = self._loader.load(folder)
+                if expected_id is not None and candidate.plugin.id != expected_id:
+                    raise PluginManifestError(
+                        f"Reload changed plugin id from '{expected_id}' to '{candidate.plugin.id}'"
+                    )
+                registered = self.registry.get(candidate.plugin.id)
+                if registered is not None:
+                    old_record = self._external_loaded.get(candidate.plugin.id)
+                    if old_record is None or old_record.folder.resolve() != folder.resolve():
+                        raise PluginManifestError(
+                            f"Plugin id '{candidate.plugin.id}' is reserved or already registered"
+                        )
+                    await self.cancel_active(candidate.plugin.id)
+                    candidate.plugin.enabled = registered.enabled
+                    self.registry.replace(candidate.plugin)
+                    self._external_loaded[candidate.plugin.id] = candidate
+                    await self._shutdown_plugin(registered)
+                    self._loader.unload_module(old_record.module_name)
+                    runtime = self._runtime_for(candidate.plugin.id)
+                    runtime.reloads += 1
+                    runtime.last_reload_error = None
+                    runtime.status = "healthy" if candidate.plugin.enabled else "disabled"
+                    runtime.state_changed_at = time.time()
+                    metric = self._metrics.setdefault(candidate.plugin.id, PluginMetrics())
+                    metric.consecutive_failures = 0
+                else:
+                    candidate.plugin.enabled = candidate.plugin.id not in self._disabled_ids
+                    self.registry.register(candidate.plugin)
+                    self._external_loaded[candidate.plugin.id] = candidate
+                    self._metrics.setdefault(candidate.plugin.id, PluginMetrics())
+                    self._runtime[candidate.plugin.id] = PluginRuntimeState(
+                        status="healthy" if candidate.plugin.enabled else "disabled",
+                        reloads=1,
+                        state_changed_at=time.time(),
+                    )
+                self._remove_failures_for_folder(folder)
+                LOGGER.info(
+                    "External plugin loaded: %s v%s",
+                    candidate.plugin.id,
+                    candidate.plugin.version,
                 )
-            existing = self.registry.get(candidate.plugin.id)
-            if existing is not None:
-                old_record = self._external_loaded.get(candidate.plugin.id)
-                if old_record is None or old_record.folder.resolve() != folder.resolve():
-                    raise ValueError(f"Plugin id '{candidate.plugin.id}' is already registered")
-                candidate.plugin.enabled = existing.enabled
-                self.registry.replace(candidate.plugin)
-                self._external_loaded[candidate.plugin.id] = candidate
-                await self._shutdown_plugin(existing)
-                self._loader.unload_module(old_record.module_name)
-            else:
-                candidate.plugin.enabled = candidate.plugin.id not in self._disabled_ids
-                self.registry.register(candidate.plugin)
-                self._external_loaded[candidate.plugin.id] = candidate
-                self._metrics.setdefault(candidate.plugin.id, PluginMetrics())
-            self._remove_failures_for_folder(folder)
-            LOGGER.info("External plugin loaded: %s v%s", candidate.plugin.id, candidate.plugin.version)
-        except Exception as exc:
-            failure = self._failure_from_folder(folder, exc)
-            self._external_failures[failure.key] = failure
-            LOGGER.exception("External plugin in '%s' could not be reloaded", folder.name)
+            except Exception as exc:
+                if existing is not None and existing_runtime is not None:
+                    existing_runtime.reload_errors += 1
+                    existing_runtime.last_reload_error = str(exc)
+                    existing_runtime.status = "healthy" if existing.enabled else "disabled"
+                    existing_runtime.state_changed_at = time.time()
+                else:
+                    failure = self._failure_from_folder(folder, exc)
+                    self._external_failures[failure.key] = failure
+                LOGGER.exception("External plugin in '%s' could not be reloaded", folder.name)
 
     async def _unload_external(self, plugin_id: str) -> None:
+        await self.cancel_active(plugin_id)
         record = self._external_loaded.pop(plugin_id, None)
         plugin = self.registry.unregister(plugin_id)
         if plugin is not None:
@@ -353,13 +582,23 @@ class PluginManager:
         if record is not None:
             self._loader.unload_module(record.module_name)
         self._metrics.pop(plugin_id, None)
+        self._runtime.pop(plugin_id, None)
+        self._active_tasks.pop(plugin_id, None)
 
-    @staticmethod
-    async def _shutdown_plugin(plugin: Plugin) -> None:
+    async def _shutdown_plugin(self, plugin: Plugin) -> None:
         try:
             value = plugin.shutdown()
             if inspect.isawaitable(value):
-                await value
+                await asyncio.wait_for(
+                    value,
+                    timeout=float(self.settings.plugin_shutdown_timeout_seconds),
+                )
+        except asyncio.TimeoutError:
+            LOGGER.error(
+                "Plugin '%s' shutdown hook timed out after %s seconds",
+                plugin.id,
+                self.settings.plugin_shutdown_timeout_seconds,
+            )
         except Exception:
             LOGGER.exception("Plugin '%s' shutdown hook failed", plugin.id)
 
@@ -381,9 +620,10 @@ class PluginManager:
         manifest_path = folder / "plugin.json"
         if manifest_path.is_file():
             try:
-                parsed = json.loads(manifest_path.read_text(encoding="utf-8"))
-                if isinstance(parsed, dict):
-                    raw = parsed
+                if manifest_path.stat().st_size <= self.settings.plugin_manifest_max_bytes:
+                    parsed = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    if isinstance(parsed, dict):
+                        raw = parsed
             except Exception:
                 raw = {}
         declared_id = str(raw.get("id") or "").strip() or None
@@ -391,6 +631,11 @@ class PluginManager:
         if self.registry.get(key) is not None:
             key = f"external_failed__{folder.name}"
         permissions = raw.get("permissions") if isinstance(raw.get("permissions"), list) else []
+        status = "load_error"
+        if isinstance(exc, PluginCompatibilityError):
+            status = "incompatible"
+        elif isinstance(exc, (PluginManifestError, PluginSchemaError)):
+            status = "invalid"
         return ExternalPluginFailure(
             key=key,
             folder=folder.resolve(),
@@ -398,6 +643,7 @@ class PluginManager:
             name=str(raw.get("name") or folder.name),
             plugin_id=declared_id,
             error=str(exc),
+            status=status,
             category=str(raw.get("category") or "External"),
             version=str(raw.get("version") or "unknown"),
             author=str(raw.get("author") or "Unknown"),
@@ -414,13 +660,13 @@ class PluginManager:
             "name": failure.name,
             "version": failure.version,
             "author": failure.author,
-            "description": "External plugin failed during discovery or reload.",
+            "description": "External plugin failed validation, compatibility checks, or loading.",
             "category": failure.category,
             "permissions": list(failure.permissions),
             "priority": 10000,
             "enabled": False,
             "healthy": False,
-            "status": "load_error",
+            "status": failure.status,
             "source": "external",
             "external": True,
             "reloadable": True,
@@ -428,12 +674,24 @@ class PluginManager:
             "plugin_path": str(failure.folder),
             "manifest_path": str(failure.manifest_path) if failure.manifest_path else None,
             "tool_name": failure.plugin_id or failure.key,
-            "tool_description": "Plugin is unavailable until its load error is fixed.",
+            "tool_description": "Plugin is unavailable until the package error is fixed.",
             "executions": 0,
+            "successes": 0,
             "errors": 1,
+            "timeouts": 0,
+            "cancellations": 0,
+            "consecutive_failures": 0,
+            "failure_threshold": 0,
+            "active_executions": 0,
             "average_latency_ms": 0.0,
             "last_latency_ms": 0.0,
             "last_error": failure.error,
+            "last_success_at": None,
+            "last_failure_at": None,
+            "reloads": 0,
+            "reload_errors": 0,
+            "last_reload_error": None,
+            "state_changed_at": None,
         }
 
     def _remove_failures_for_folder(self, folder: Path) -> None:
@@ -441,3 +699,45 @@ class PluginManager:
         for key, failure in list(self._external_failures.items()):
             if failure.folder.resolve() == target:
                 self._external_failures.pop(key, None)
+
+    def _runtime_for(self, plugin_id: str) -> PluginRuntimeState:
+        runtime = self._runtime.get(plugin_id)
+        if runtime is None:
+            runtime = PluginRuntimeState(status="healthy", state_changed_at=time.time())
+            self._runtime[plugin_id] = runtime
+        return runtime
+
+    def _is_available(self, plugin_id: str) -> bool:
+        plugin = self.registry.get(plugin_id)
+        if plugin is None or not plugin.enabled:
+            return False
+        return self._runtime_for(plugin_id).status == "healthy"
+
+    def _record_failure(
+        self,
+        plugin_id: str,
+        message: str,
+        *,
+        increment_error: bool = True,
+        count_execution: bool = True,
+    ) -> None:
+        metric = self._metrics.setdefault(plugin_id, PluginMetrics())
+        if increment_error:
+            metric.errors += 1
+        metric.consecutive_failures += 1
+        metric.last_error = message
+        metric.last_failure_at = time.time()
+        plugin = self.registry.get(plugin_id)
+        runtime = self._runtime_for(plugin_id)
+        if (
+            plugin is not None
+            and plugin.enabled
+            and metric.consecutive_failures >= int(self.settings.plugin_failure_threshold)
+        ):
+            runtime.status = "unhealthy"
+            runtime.state_changed_at = time.time()
+            LOGGER.error(
+                "Plugin '%s' marked unhealthy after %s consecutive failures",
+                plugin_id,
+                metric.consecutive_failures,
+            )

@@ -27,6 +27,7 @@ class ExternalPluginFailure:
     name: str
     plugin_id: str | None
     error: str
+    status: str = "load_error"
     category: str = "External"
     version: str = "unknown"
     author: str = "Unknown"
@@ -34,3 +35,13 @@ class ExternalPluginFailure:
     sdk_version: str = "unknown"
     entry: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class PluginRuntimeState:
+    status: str = "healthy"
+    active_executions: int = 0
+    reloads: int = 0
+    reload_errors: int = 0
+    last_reload_error: str | None = None
+    state_changed_at: float = 0.0
