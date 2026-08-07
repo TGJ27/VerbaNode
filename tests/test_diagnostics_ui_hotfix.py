@@ -25,5 +25,5 @@ def test_diagnostics_cards_use_consistent_alignment() -> None:
     assert ".diagnostics-control-grid,.diagnostics-detail-grid" in css
     assert "align-items:stretch" in css
     assert ".diagnostic-compatibility-card" in css
-    assert APP_VERSION == "0.7.0"
-    assert BUILD_LABEL == "bilingual-agents-and-script-voices-beta"
+    assert APP_VERSION == "0.7.1"
+    assert BUILD_LABEL == "bilingual-routing-persistence-beta"

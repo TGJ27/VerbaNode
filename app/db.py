@@ -445,11 +445,29 @@ class Database:
                     (now,),
                 )
 
-            agent_id = conn.execute("SELECT id FROM agents ORDER BY id LIMIT 1").fetchone()[0]
-            conn.execute(
-                "UPDATE settings SET value=?, updated_at=? WHERE key='active_agent_id'",
-                (str(agent_id), now),
-            )
+            # Preserve the operator's last selected agent across application restarts.
+            # Older builds reset active_agent_id to the first agent on every startup.
+            first_agent_row = conn.execute("SELECT id FROM agents ORDER BY id LIMIT 1").fetchone()
+            if first_agent_row is None:
+                raise RuntimeError("No agents configured after database seed")
+            first_agent_id = int(first_agent_row[0])
+            active_row = conn.execute(
+                "SELECT value FROM settings WHERE key='active_agent_id'"
+            ).fetchone()
+            try:
+                active_agent_id = int(active_row[0]) if active_row else first_agent_id
+            except (TypeError, ValueError):
+                active_agent_id = first_agent_id
+            active_exists = conn.execute(
+                "SELECT 1 FROM agents WHERE id=?", (active_agent_id,)
+            ).fetchone()
+            if not active_exists:
+                active_agent_id = first_agent_id
+                conn.execute(
+                    "UPDATE settings SET value=?, updated_at=? WHERE key='active_agent_id'",
+                    (str(active_agent_id), now),
+                )
+            agent_id = active_agent_id
             conv_count = conn.execute(
                 "SELECT COUNT(*) FROM conversations WHERE agent_id=?", (agent_id,)
             ).fetchone()[0]
@@ -598,8 +616,15 @@ class Database:
             total = conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
             if total <= 1:
                 raise ValueError("At least one agent must remain")
+            active_row = conn.execute(
+                "SELECT value FROM settings WHERE key='active_agent_id'"
+            ).fetchone()
+            try:
+                active_id = int(active_row[0]) if active_row else None
+            except (TypeError, ValueError):
+                active_id = None
             cur = conn.execute("DELETE FROM agents WHERE id=?", (agent_id,))
-            if cur.rowcount:
+            if cur.rowcount and active_id == agent_id:
                 next_id = conn.execute("SELECT id FROM agents ORDER BY id LIMIT 1").fetchone()[0]
                 conn.execute(
                     "UPDATE settings SET value=?,updated_at=? WHERE key='active_agent_id'",

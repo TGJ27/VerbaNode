@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#eef4ff">
   <title>VerbaNode Standalone</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=0.7.0">
+  <link rel="stylesheet" href="/static/styles.css?v=0.7.1">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
@@ -459,8 +459,8 @@
         <div class="tab-panel" data-panel="models">
           <div class="form-grid two">
             <label>Ollama model<select name="llm_model"></select></label>
-            <label>Agent language<select name="language"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select><small class="field-help">Only one language profile is active at a time. English uses SenseVoiceSmall; Indonesian uses Whisper Base.</small></label>
-            <label>Speech recognition model<input name="stt_model" readonly><small class="field-help">Selected automatically from the agent language.</small></label>
+            <label>Agent language<select name="language"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select><small class="field-help">Only one language profile is active at a time. English uses SenseVoiceSmall; Indonesian can use Whisper Base or Whisper Small.</small></label>
+            <label>Speech recognition model<select name="stt_model" id="agentSttModelSelect"></select><small id="agentSttModelHint" class="field-help">SenseVoiceSmall is used for English. Indonesian offers Whisper Base for speed or Whisper Small for better recognition.</small></label>
             <label>Temperature<input name="temperature" type="number" min="0" max="2" step="0.1"></label>
             <label>Top P<input name="top_p" type="number" min="0" max="1" step="0.05"></label>
             <label>Max response tokens<input name="max_tokens" type="number" min="32" max="8192" step="16"><small class="field-help">224 is recommended for concise spoken answers.</small></label>
@@ -489,6 +489,6 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/app.js?v=0.7.0" defer></script>
+  <script src="/static/app.js?v=0.7.1" defer></script>
 </body>
 </html>

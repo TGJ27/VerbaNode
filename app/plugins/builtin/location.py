@@ -28,9 +28,14 @@ class LocationPlugin(BuiltinPlugin):
         r"^(?:where am i|where am i at|where am i currently|where am i right now)$",
         r"^(?:what(?:'s| is) (?:our|the current) location|what location are we at|what is this location)$",
         r"^(?:where is this robot|where are you located|where is this place)$",
-        r"^(?:sekarang )?kita (?:ada )?di ?mana$",
-        r"^(?:sekarang )?saya (?:ada )?di ?mana$",
-        r"^(?:apa|dimana) lokasi(?: kita| saat ini)?$",
+        r"^(?:sekarang |saat ini )?(?:kita|kami) (?:ada|berada)? ?di ?mana$",
+        r"^(?:sekarang |saat ini )?saya (?:ada|berada)? ?di ?mana$",
+        r"^lokasi (?:kita|kami)(?: sekarang| saat ini)?(?: ada| berada)? ?(?:di ?mana|dimana)$",
+        r"^(?:di ?mana|dimana) lokasi (?:kita|kami)(?: sekarang| saat ini)?$",
+        r"^(?:kita|kami) (?:ada|berada) di kota ?mana$",
+        r"^(?:kita|kami) (?:ada|berada) di kotaman$",
+        r"^(?:kota ?mana|kotaman) (?:kita|kami) (?:sekarang |saat ini )?(?:ada|berada)$",
+        r"^(?:apa|di ?mana|dimana) lokasi(?: kita| kami| saat ini)?$",
     )
 
     def match(self, context: PluginContext) -> dict[str, Any] | None:

@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.7.0';
+const FRONTEND_VERSION = '0.7.1';
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
 
 const appState = {
@@ -1424,8 +1424,25 @@ async function respondTakeover(requestId, approve) {
 }
 
 const AGENT_LANGUAGE_PROFILES = {
-  en: { label: 'English', sttModel: 'iic/SenseVoiceSmall', localePrefix: 'en-', defaultVoice: 'en-US-AriaNeural', preview: 'Hello. This is a preview of the selected English voice.' },
-  id: { label: 'Bahasa Indonesia', sttModel: 'Whisper-base', localePrefix: 'id-', defaultVoice: 'id-ID-GadisNeural', preview: 'Halo. Ini adalah contoh suara Bahasa Indonesia yang dipilih.' },
+  en: {
+    label: 'English',
+    sttModel: 'iic/SenseVoiceSmall',
+    sttModels: [{ value: 'iic/SenseVoiceSmall', label: 'SenseVoiceSmall — fastest English' }],
+    localePrefix: 'en-',
+    defaultVoice: 'en-US-AriaNeural',
+    preview: 'Hello. This is a preview of the selected English voice.',
+  },
+  id: {
+    label: 'Bahasa Indonesia',
+    sttModel: 'Whisper-base',
+    sttModels: [
+      { value: 'Whisper-base', label: 'Whisper Base — faster CPU' },
+      { value: 'Whisper-small', label: 'Whisper Small — better accuracy' },
+    ],
+    localePrefix: 'id-',
+    defaultVoice: 'id-ID-GadisNeural',
+    preview: 'Halo. Ini adalah contoh suara Bahasa Indonesia yang dipilih.',
+  },
 };
 
 function languageProfile(language = 'en') {
@@ -1535,12 +1552,20 @@ function openAgentModal(agentId = null) {
   modelSelect.innerHTML = modelNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   modelSelect.value = agent.llm_model;
   const languageSelect = form.elements.namedItem('language');
-  const sttModelInput = form.elements.namedItem('stt_model');
-  const applyAgentLanguage = (forceDefaultVoice = false) => {
+  const sttModelSelect = form.elements.namedItem('stt_model');
+  const applyAgentLanguage = (forceDefaults = false) => {
     const language = languageSelect.value || 'en';
     const profile = languageProfile(language);
-    sttModelInput.value = profile.sttModel;
-    const currentVoice = forceDefaultVoice ? profile.defaultVoice : (form.elements.namedItem('edge_voice').value || profile.defaultVoice);
+    const currentStt = forceDefaults ? profile.sttModel : (sttModelSelect.value || agent.stt_model || profile.sttModel);
+    sttModelSelect.innerHTML = (profile.sttModels || [{ value: profile.sttModel, label: profile.sttModel }])
+      .map(model => `<option value="${escapeHtml(model.value)}">${escapeHtml(model.label)}</option>`).join('');
+    sttModelSelect.value = [...sttModelSelect.options].some(option => option.value === currentStt) ? currentStt : profile.sttModel;
+    sttModelSelect.disabled = false;
+    const hint = $('#agentSttModelHint');
+    if (hint) hint.textContent = language === 'id'
+      ? 'Whisper Base is faster on CPU. Whisper Small is heavier but usually more accurate for Indonesian and code-switching.'
+      : 'SenseVoiceSmall is the fixed fast English recognizer.';
+    const currentVoice = forceDefaults ? profile.defaultVoice : (form.elements.namedItem('edge_voice').value || profile.defaultVoice);
     renderEdgeVoiceOptions(currentVoice, language);
     applyLanguageTtsAvailability(form.elements.namedItem('tts_mode'), language);
   };

@@ -116,6 +116,7 @@ def test_frontend_contains_agent_language_and_script_tts_controls() -> None:
     javascript = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
     assert 'name="language"' in html
     assert "Whisper-base" in javascript
+    assert "Whisper-small" in javascript
     assert "scriptEdgeVoiceSelect" in javascript
     assert "previewScriptVoiceBtn" in javascript
 
@@ -186,3 +187,64 @@ def test_agent_and_script_language_validators_select_safe_profiles() -> None:
     )
     assert script.tts_mode == "edge"
     assert script.edge_voice == "id-ID-GadisNeural"
+
+
+def test_indonesian_agent_can_select_whisper_small() -> None:
+    from app.schemas import AgentCreate
+
+    agent = AgentCreate(
+        language="id",
+        stt_model="Whisper-small",
+        edge_voice="id-ID-GadisNeural",
+    )
+    assert agent.stt_model == "Whisper-small"
+    assert agent.tts_mode == "edge"
+
+
+def test_active_agent_persists_across_database_reinitialize(tmp_path: Path) -> None:
+    settings = Settings(db_path=tmp_path / "persist-agent.db", open_browser=False)
+    db = Database(settings)
+    db.initialize()
+    indonesian = next(agent for agent in db.list_agents() if agent["language"] == "id")
+    db.set_setting("active_agent_id", str(indonesian["id"]))
+
+    # Re-running initialize mirrors an application restart and must not reset
+    # the operator's active agent back to the first seeded agent.
+    Database(settings).initialize()
+    assert int(Database(settings).get_setting("active_agent_id", "0")) == indonesian["id"]
+
+
+def test_indonesian_location_phrases_route_deterministically() -> None:
+    from app.services.tools import ToolService
+
+    tools = ToolService(Settings(open_browser=False))
+    enabled = ["get_location"]
+    phrases = [
+        "lokasi kita sekarang di mana",
+        "lokasi kita dimana",
+        "kita ada di kota mana",
+        "kita ada di kotaman",
+        "sekarang kita berada dimana",
+    ]
+    for phrase in phrases:
+        assert tools.match_core_intent(phrase, enabled) == ("get_location", {})
+
+
+def test_assistant_text_strips_markdown_bold_but_keeps_content() -> None:
+    from app.services.text import clean_assistant_text
+
+    assert clean_assistant_text("Lokasi ini adalah **Jakarta, Indonesia**.") == (
+        "Lokasi ini adalah Jakarta, Indonesia."
+    )
+
+
+def test_deleting_inactive_agent_does_not_change_active_agent(tmp_path: Path) -> None:
+    settings = Settings(db_path=tmp_path / "delete-inactive.db", open_browser=False)
+    db = Database(settings)
+    db.initialize()
+    agents = db.list_agents()
+    indonesian = next(agent for agent in agents if agent["language"] == "id")
+    english = next(agent for agent in agents if agent["language"] == "en")
+    db.set_setting("active_agent_id", str(indonesian["id"]))
+    assert db.delete_agent(english["id"]) is True
+    assert int(db.get_setting("active_agent_id", "0")) == indonesian["id"]

@@ -58,7 +58,8 @@ class AgentCreate(BaseModel):
     @model_validator(mode="after")
     def apply_language_profile(self) -> "AgentCreate":
         if self.language == "id":
-            self.stt_model = "Whisper-base"
+            if self.stt_model not in {"Whisper-base", "Whisper-small"}:
+                self.stt_model = "Whisper-base"
             self.tts_mode = "edge"
             if not self.edge_voice.startswith("id-"):
                 self.edge_voice = "id-ID-GadisNeural"

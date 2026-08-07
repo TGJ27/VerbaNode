@@ -17,11 +17,14 @@ if errorlevel 1 (
 )
 
 :conda_ready
-echo Downloading Whisper Base for Indonesian speech recognition...
-echo This model is downloaded once and reused by the isolated AI Engine.
-call conda run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\download_whisper.py
+set "WHISPER_MODEL=%~1"
+if "%WHISPER_MODEL%"=="" set "WHISPER_MODEL=base"
+
+echo Preparing Whisper %WHISPER_MODEL% for Indonesian speech recognition...
+echo Usage: download_whisper.bat [base^|small^|both]
+call conda run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\download_whisper.py --model "%WHISPER_MODEL%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo.
-echo Whisper Base setup completed.
+echo Whisper setup completed.
 pause

@@ -31,6 +31,7 @@ _EMOTICON_RE = re.compile(
 _SPACE_BEFORE_PUNCTUATION_RE = re.compile(r"\s+([,.;:!?])")
 _HORIZONTAL_SPACE_RE = re.compile(r"[ \t]{2,}")
 _EXCESS_BLANK_LINES_RE = re.compile(r"\n{3,}")
+_MARKDOWN_BOLD_RE = re.compile(r"(?:\*\*|__)([^\n]+?)(?:\*\*|__)")
 
 
 def strip_emoji(text: str) -> str:
@@ -49,6 +50,7 @@ def clean_assistant_text(text: str) -> str:
     """Return stable user-visible and TTS-safe assistant text."""
 
     value = strip_emoji(text).replace("\r\n", "\n").replace("\r", "\n")
+    value = _MARKDOWN_BOLD_RE.sub(r"\1", value)
     value = _SPACE_BEFORE_PUNCTUATION_RE.sub(r"\1", value)
     value = _HORIZONTAL_SPACE_RE.sub(" ", value)
     value = _EXCESS_BLANK_LINES_RE.sub("\n\n", value)
