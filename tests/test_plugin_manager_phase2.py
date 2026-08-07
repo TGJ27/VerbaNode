@@ -85,5 +85,5 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     assert '.get("/api/plugins")' in main
     assert '.put("/api/plugins/{plugin_id}")' in main
     assert '"plugin_manager": True' in main
-    assert APP_VERSION == "0.7.1"
-    assert BUILD_LABEL == "bilingual-routing-persistence-beta"
+    assert APP_VERSION == "0.7.2"
+    assert BUILD_LABEL == "bilingual-hardening-beta"

@@ -308,7 +308,24 @@
                 <div><p class="eyebrow">AI MODELS</p><h3>Ollama model manager</h3></div>
                 <p>View locally installed language models or download another model.</p>
               </div>
+              <div class="settings-panel-grid two">
+                <section class="card settings-card">
+                  <p class="eyebrow">SPEECH RECOGNITION</p><h3>Active ASR model</h3>
+                  <div id="asrModelStatusBox" class="status-box">Loading ASR status…</div>
+                  <div id="asrModelStatusList" class="definition-list"></div>
+                  <button id="refreshAsrStatusBtn" type="button" class="btn ghost">Refresh ASR status</button>
+                </section>
+                <section class="card settings-card">
+                  <p class="eyebrow">INDONESIAN BENCHMARK</p><h3>Whisper Base vs Small</h3>
+                  <p class="muted">Upload a real PCM WAV sample from the target microphone. VerbaNode loads and transcribes it with both Indonesian models, then restores the active agent's ASR model.</p>
+                  <label class="file-drop compact-file-drop">WAV sample<input id="asrBenchmarkFile" type="file" accept="audio/wav,.wav"></label>
+                  <button id="runAsrBenchmarkBtn" type="button" class="btn secondary">Benchmark Base vs Small</button>
+                  <div id="asrBenchmarkStatus" class="status-box">No benchmark has been run.</div>
+                  <div class="diagnostic-table-wrap"><table class="diagnostic-table"><thead><tr><th>Model</th><th>Load</th><th>ASR</th><th>RTF</th><th>Confidence</th></tr></thead><tbody id="asrBenchmarkRows"><tr><td colspan="5">Upload a WAV sample to compare models.</td></tr></tbody></table></div>
+                </section>
+              </div>
               <section class="card settings-card settings-card-wide">
+                <p class="eyebrow">LANGUAGE MODEL</p><h3>Ollama model manager</h3>
                 <div id="ollamaStatusBox" class="status-box"></div>
                 <div id="modelList" class="model-list model-list-tall"></div>
                 <form id="pullModelForm" class="inline-form"><input id="pullModelInput" placeholder="Example: qwen3.5:0.8b"><button class="btn secondary" type="submit">Pull model</button></form>

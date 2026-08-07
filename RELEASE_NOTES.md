@@ -1,46 +1,67 @@
-# VerbaNode v0.7.0 Beta — English and Indonesian Agents
+# VerbaNode v0.7.2 Beta — Bilingual ASR Hardening
 
-This release adds first-class Bahasa Indonesia support while preserving the existing low-latency English pipeline.
+This release stabilizes the English and Bahasa Indonesia pipeline introduced in v0.7.0 and refined in v0.7.1.
 
-## Bilingual agent profiles
+## Indonesian ASR reliability
 
-- Adds an explicit **English / Bahasa Indonesia** language setting to every agent.
-- English agents use `iic/SenseVoiceSmall` through FunASR.
-- Indonesian agents use multilingual `Whisper-base` through FunASR with decoding forced to Indonesian.
-- Only one language/ASR profile is active at a time, based on the active agent.
-- Adds a default **Ropi Indonesia** agent with Indonesian identity instructions, greeting, Whisper Base STT, Edge-only TTS, and `id-ID-GadisNeural`.
-- Existing English Ropi configurations remain available.
+- Indonesian agents can use **Whisper Base** or **Whisper Small** through FunASR.
+- Whisper Small remains the accuracy-first option. If it fails or times out during a real transcription, VerbaNode retries once with Whisper Base instead of losing the turn.
+- English agents remain pinned to SenseVoiceSmall and never silently change ASR models.
+- The active-agent ASR choice continues to persist across restarts.
 
-## Indonesian output
+## Indonesian deterministic routing
 
-- Adds a hidden language policy so the active agent responds consistently in its configured language.
-- Localizes deterministic time, date, location, weather, and stop-conversation responses.
-- Filters the Edge voice catalogue to the active agent language.
+Expanded direct routing for natural Indonesian requests including:
 
-## Per-script TTS
+- `hari apa sekarang?`
+- `tanggal berapa sekarang?`
+- `jam sekarang berapa?`
+- `cuaca di Bandung hari ini`
+- `bagaimana cuaca di Jakarta sekarang?`
+- `kita dimana?`
+- `berhenti bicara`
+- `diam dulu`
 
-- Scripts no longer depend on the active agent voice.
-- Every Script now stores its own language, TTS mode, Edge voice, Kokoro voice, rate, and volume.
-- Adds a Script voice preview that uses the selected provider configuration.
-- Existing scripts migrate to English Edge TTS with Aria by default.
+These requests bypass the LLM when the corresponding capability is enabled.
 
-## Setup and compatibility
+## ASR model status
 
-- Adds the `openai-whisper` dependency.
-- Adds `download_whisper.bat` and `scripts/download_whisper.py`.
-- Existing SQLite databases migrate automatically and receive Ropi Indonesia once.
-- The isolated AI Engine switches ASR models when the active agent language changes.
-- Includes 107 passing automated tests.
+Settings → AI Models now shows:
+
+- model selected by the active agent
+- model actually loaded in the AI Engine
+- model load latency
+- latest transcription latency
+- completed ASR jobs
+- fallback state
+- latest ASR error
+
+## Base vs Small benchmark
+
+A new Indonesian benchmark accepts a real PCM WAV recording and runs the same sample through both Whisper Base and Whisper Small on the target machine. It reports:
+
+- model load time
+- transcription time
+- real-time factor (RTF)
+- estimated/provider confidence
+- transcript result
+
+After the benchmark, VerbaNode restores the active agent's configured ASR model automatically. The first benchmark can take substantially longer if Whisper weights still need to be downloaded.
+
+## Compatibility
+
+- No database migration is required beyond the existing v0.7.x migrations.
+- Existing English and Indonesian agents remain compatible.
+- Existing per-script TTS configuration remains unchanged.
+- 115 automated tests pass.
 
 ## Upgrade
 
-Keep `.git`, `.env`, `data/`, `models/`, and `certs/`. Replace the updated files, then run:
+Keep `.git`, `.env`, `data/`, `models/`, and `certs/`, then replace the updated files and run:
 
 ```bat
-setup_windows.bat
 setup_database.bat
-download_whisper.bat
 run.bat
 ```
 
-The first Indonesian transcription can be slower while Whisper Base loads.
+Use `download_whisper.bat base`, `download_whisper.bat small`, or `download_whisper.bat both` if the desired models are not already cached.

@@ -606,6 +606,7 @@ async def system_status(token: Token) -> dict[str, Any]:
         "mode": state.conversation.mode,
         "tts": state.tts.status(),
         "stt": state.stt.status(),
+        "active_agent": state.conversation.active_agent(),
         "queue_state": state.script_queue.state,
         "controller": state.controller.active_info(),
         "hardware": hardware_status(),
@@ -1197,6 +1198,76 @@ async def reload_ai_asr(token: Token) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     await state.events.broadcast("ai_model_reloaded", {"provider": "asr", "status": result})
     return {"ok": True, "provider": "asr", "status": result, "engine": state.ai_engine.health()}
+
+
+@app.post("/api/ai/benchmark-asr")
+async def benchmark_ai_asr(
+    token: Token,
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Compare Indonesian Whisper Base and Small using one real WAV sample.
+
+    This intentionally runs only on an uploaded sample so the benchmark reflects
+    the user's actual microphone, CPU and speech rather than synthetic audio.
+    The active agent's selected ASR model is restored afterward.
+    """
+    if state.ai_engine is None:
+        raise HTTPException(status_code=400, detail="AI Engine process isolation is disabled")
+    payload = await file.read()
+    if len(payload) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="ASR benchmark WAV is too large")
+    try:
+        samples = decode_pcm_wav(payload, state.settings.sample_rate)
+    except AudioUnavailable as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if samples.size < int(state.settings.sample_rate * 0.25):
+        raise HTTPException(status_code=400, detail="ASR benchmark audio is too short")
+
+    await state.conversation.stop_conversation(stop_tts=True)
+    await state.script_queue.stop()
+    active_agent = state.conversation.active_agent()
+    restore_model = str(active_agent.get("stt_model") or state.settings.funasr_model)
+    duration_seconds = samples.size / float(state.settings.sample_rate)
+    results: list[dict[str, Any]] = []
+    try:
+        for model_name in ("Whisper-base", "Whisper-small"):
+            item: dict[str, Any] = {"model": model_name}
+            try:
+                load_status = await asyncio.to_thread(state.ai_engine.reload_asr, model_name)
+                transcription = await asyncio.to_thread(
+                    state.ai_engine.call,
+                    "asr.transcribe",
+                    samples,
+                    model_name,
+                    "id",
+                    timeout=max(float(state.settings.stt_timeout_seconds), 180.0),
+                )
+                latency_ms = int(dict(transcription).get("latency_ms") or 0)
+                item.update({
+                    "ok": True,
+                    "load_ms": int(load_status.get("model_load_ms") or 0),
+                    "transcription_ms": latency_ms,
+                    "rtf": round((latency_ms / 1000.0) / max(duration_seconds, 0.001), 3),
+                    "text": str(dict(transcription).get("text") or ""),
+                    "confidence": float(dict(transcription).get("confidence") or 0.0),
+                    "confidence_source": str(dict(transcription).get("confidence_source") or "estimated"),
+                })
+            except Exception as exc:
+                item.update({"ok": False, "error": str(exc)})
+            results.append(item)
+    finally:
+        try:
+            await asyncio.to_thread(state.ai_engine.reload_asr, restore_model)
+        except Exception as exc:
+            LOGGER.warning("Could not restore active ASR model %s after benchmark: %s", restore_model, exc)
+
+    return {
+        "language": "id",
+        "audio_seconds": round(duration_seconds, 2),
+        "sample_rate": state.settings.sample_rate,
+        "restored_model": restore_model,
+        "results": results,
+    }
 
 
 @app.post("/api/ai/reload-kokoro")

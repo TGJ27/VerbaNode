@@ -26,8 +26,10 @@ class StopConversationPlugin(BuiltinPlugin):
     _patterns = (
         r"^(?:stop|end|exit|leave) (?:the )?(?:conversation|conversation mode|listening)$",
         r"^(?:stop talking|that'?s all|goodbye|bye ropi)$",
-        r"^(?:hentikan|akhiri) (?:percakapan|mode percakapan)$",
-        r"^(?:sudah cukup|selesai ropi)$",
+        r"^(?:hentikan|akhiri|stop) (?:percakapan|mode percakapan)$",
+        r"^(?:berhenti|stop) (?:bicara|ngomong|mendengarkan)$",
+        r"^(?:diam|diam dulu|cukup dulu)$",
+        r"^(?:sudah cukup|sudah dulu|selesai ropi)$",
     )
 
     def match(self, context: PluginContext) -> dict[str, Any] | None:

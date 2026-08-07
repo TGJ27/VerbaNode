@@ -46,8 +46,13 @@ class CurrentTimePlugin(BuiltinPlugin):
         r"^(?:what(?:'s| is) )?(?:today'?s |the current )?date(?: today)?$",
         r"^(?:what day is it|what date is it|what day is today|what date is today|today'?s date)$",
         r"^(?:sekarang )?jam berapa(?: sekarang)?$",
-        r"^(?:sekarang )?pukul berapa(?: sekarang)?$",
+        r"^jam sekarang berapa$",
+        r"^(?:sekarang |saat ini )?pukul berapa(?: sekarang| saat ini)?$",
         r"^(?:hari ini )?(?:hari apa|tanggal berapa)$",
+        r"^(?:sekarang )?hari apa(?: sekarang)?$",
+        r"^(?:sekarang )?tanggal berapa(?: sekarang)?$",
+        r"^hari apa hari ini$",
+        r"^tanggal hari ini berapa$",
     )
     _fuzzy_time_allowed = {
         "what", "whats", "is", "it", "its", "the", "current", "local",

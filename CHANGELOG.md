@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.2
+
+- Hardened the bilingual ASR path with automatic Indonesian Whisper Small to Whisper Base fallback when the accuracy-first model fails or times out.
+- Expanded deterministic Indonesian time, date, weather, location, and stop-conversation routing for more natural phrases and common STT variations.
+- Added an ASR status card showing the active agent model, actually loaded model, load latency, last transcription latency, completed jobs, fallback state, and last error.
+- Added a real-audio Indonesian ASR benchmark that compares Whisper Base and Whisper Small on the target machine and reports load time, transcription latency, RTF, confidence, and transcript before restoring the active model.
+- Preserved active-agent ASR selection after benchmarking and exposed active-agent data in the runtime status API.
+- Added bilingual hardening regression tests; 115 automated tests pass.
+
+## 0.7.1
+
+- Persisted the active agent across VerbaNode restarts instead of resetting to the default English agent.
+- Improved Indonesian location routing and common Whisper transcription variants.
+- Added Whisper Small as an optional higher-accuracy Indonesian ASR model alongside Whisper Base.
+- Improved Whisper model preparation for Base, Small, or both models.
+- Normalized accidental Markdown emphasis before chat display and TTS playback.
+- 112 automated tests pass.
+
 ## 0.7.0
 
 - Added per-agent English and Bahasa Indonesia language profiles.

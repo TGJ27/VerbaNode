@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.7.1';
+const FRONTEND_VERSION = '0.7.2';
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
 
 const appState = {
@@ -1059,6 +1059,28 @@ function renderModels() {
   $('#modelList').innerHTML = appState.models.map(model => `<div class="model-item"><div><strong>${escapeHtml(model.name || model.model)}</strong><small>${escapeHtml(model.details?.parameter_size || '')} ${escapeHtml(model.details?.quantization_level || '')}</small></div><span class="chip">${bytesLabel(model.size)}</span></div>`).join('') || '<div class="queue-empty">No local models reported.</div>';
 }
 
+function renderAsrModelStatus(data) {
+  const box = $('#asrModelStatusBox');
+  const list = $('#asrModelStatusList');
+  if (!box || !list) return;
+  const stt = data?.stt || {};
+  const agent = data?.active_agent || appState.activeAgent || {};
+  const aiAsr = data?.ai?.engine?.remote?.asr || {};
+  const selected = agent.stt_model || stt.requested_model || stt.model || 'Unknown';
+  const loaded = aiAsr.model || stt.model || 'Not loaded';
+  const language = agent.language === 'id' ? 'Bahasa Indonesia' : 'English';
+  const fallback = stt.fallback_model;
+  box.innerHTML = `<strong>${escapeHtml(String(selected))}</strong><br><span class="muted">${escapeHtml(language)} · ${escapeHtml(String(aiAsr.state || stt.state || 'unknown'))}${fallback ? ` · fallback active: ${escapeHtml(String(fallback))}` : ''}</span>`;
+  list.innerHTML = `
+    <dt>Selected by agent</dt><dd>${escapeHtml(String(selected))}</dd>
+    <dt>Actually loaded</dt><dd>${escapeHtml(String(loaded))}</dd>
+    <dt>Model load</dt><dd>${aiAsr.model_load_ms != null ? `${aiAsr.model_load_ms} ms` : '—'}</dd>
+    <dt>Last transcription</dt><dd>${aiAsr.last_latency_ms != null ? `${aiAsr.last_latency_ms} ms` : '—'}</dd>
+    <dt>Completed jobs</dt><dd>${aiAsr.jobs_completed ?? 0}</dd>
+    <dt>Fallback</dt><dd>${fallback ? `${escapeHtml(String(stt.requested_model || selected))} → ${escapeHtml(String(fallback))}` : 'Not used'}</dd>
+    <dt>Last error</dt><dd>${escapeHtml(String(aiAsr.last_error || stt.last_error || stt.fallback_reason || 'None'))}</dd>`;
+}
+
 function renderRuntimeStatus(data) {
   const tts = data.tts || {};
   const stt = data.stt || {};
@@ -1113,6 +1135,7 @@ function renderRuntimeStatus(data) {
     <dt>STT timeouts</dt><dd>${counters.stt_timeouts ?? 0}</dd>
     <dt>Provider failures</dt><dd>${counters.tts_provider_failures ?? 0}</dd>`;
   $('#ttsProviderStatus').textContent = appState.activeAgent?.kokoro_voice_name || appState.activeAgent?.tts_mode || 'TTS';
+  renderAsrModelStatus(data);
 }
 
 function durationLabel(seconds = 0) {
@@ -2038,6 +2061,37 @@ function bindEvents() {
   };
   $('#saveRuntimeSettingsBtn').onclick = saveRuntimeSettings;
   $('#saveAudioDevicesBtn').onclick = saveRuntimeSettings;
+  $('#refreshAsrStatusBtn').onclick = async () => {
+    try {
+      const status = await api('/api/status');
+      renderRuntimeStatus(status);
+      toast('ASR status refreshed.', 'success');
+    } catch (error) { toast(error.message, 'error'); }
+  };
+  $('#runAsrBenchmarkBtn').onclick = async () => {
+    const file = $('#asrBenchmarkFile').files?.[0];
+    if (!file) { toast('Choose a PCM WAV sample first.', 'error'); return; }
+    const button = $('#runAsrBenchmarkBtn');
+    const status = $('#asrBenchmarkStatus');
+    button.disabled = true; button.textContent = 'Benchmarking…';
+    status.textContent = 'Loading and testing Whisper Base and Whisper Small. The first run can take longer if a model must be downloaded.';
+    const body = new FormData(); body.append('file', file);
+    try {
+      const result = await api('/api/ai/benchmark-asr', { method: 'POST', body });
+      const rows = result.results || [];
+      $('#asrBenchmarkRows').innerHTML = rows.map(item => item.ok
+        ? `<tr><td>${escapeHtml(item.model)}</td><td>${item.load_ms} ms</td><td>${item.transcription_ms} ms</td><td>${item.rtf}</td><td>${Math.round(Number(item.confidence || 0) * 100)}%</td></tr>`
+        : `<tr><td>${escapeHtml(item.model)}</td><td colspan="4">${escapeHtml(item.error || 'Failed')}</td></tr>`).join('') || '<tr><td colspan="5">No result.</td></tr>';
+      const fastest = rows.filter(item => item.ok).sort((a,b) => Number(a.transcription_ms) - Number(b.transcription_ms))[0];
+      status.textContent = `${result.audio_seconds}s Indonesian sample tested.${fastest ? ` Fastest transcription: ${fastest.model} at ${fastest.transcription_ms} ms (RTF ${fastest.rtf}).` : ''} Active model restored to ${result.restored_model}.`;
+      renderRuntimeStatus(await api('/api/status'));
+    } catch (error) {
+      status.textContent = error.message;
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false; button.textContent = 'Benchmark Base vs Small';
+    }
+  };
   $('#pullModelForm').onsubmit = async event => {
     event.preventDefault(); const model = $('#pullModelInput').value.trim(); if (!model) return;
     try { await api(`/api/models/pull/${encodeURIComponent(model)}`, { method: 'POST' }); toast(`Started pulling ${model}.`); }

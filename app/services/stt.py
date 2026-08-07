@@ -50,6 +50,20 @@ class FunASRService:
     def _is_whisper_model(model_name: str) -> bool:
         return str(model_name or "").strip().lower().startswith("whisper")
 
+    @staticmethod
+    def fallback_model(model_name: str | None, language: str | None) -> str | None:
+        """Return a conservative fallback for optional multilingual ASR models.
+
+        Whisper Small is the accuracy-first Indonesian option. If it cannot be
+        loaded or times out in the isolated AI Engine, Whisper Base is the only
+        automatic fallback. English SenseVoice never silently changes models.
+        """
+        normalized = str(model_name or "").strip().lower()
+        lang = str(language or "").strip().lower()
+        if lang.startswith("id") and normalized == "whisper-small":
+            return "Whisper-base"
+        return None
+
     def _load(self, model_name: str) -> Any:
         with self._lock:
             if self._model is not None and self._model_name == model_name:

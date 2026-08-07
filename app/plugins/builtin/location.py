@@ -36,6 +36,9 @@ class LocationPlugin(BuiltinPlugin):
         r"^(?:kita|kami) (?:ada|berada) di kotaman$",
         r"^(?:kota ?mana|kotaman) (?:kita|kami) (?:sekarang |saat ini )?(?:ada|berada)$",
         r"^(?:apa|di ?mana|dimana) lokasi(?: kita| kami| saat ini)?$",
+        r"^(?:kita|kami) (?:di ?mana|dimana)$",
+        r"^(?:sekarang |saat ini )?(?:di ?mana|dimana)$",
+        r"^lokasi sekarang(?: di ?mana| dimana)?$",
     )
 
     def match(self, context: PluginContext) -> dict[str, Any] | None:

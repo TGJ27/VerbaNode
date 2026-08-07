@@ -768,6 +768,9 @@ class AiSttProxy:
     def __init__(self, engine: AiEngineSupervisor, settings: Settings):
         self.engine = engine
         self.settings = settings
+        self._last_requested_model: str | None = None
+        self._last_fallback_model: str | None = None
+        self._last_fallback_reason: str | None = None
 
     def transcribe_with_confidence(
         self,
@@ -776,18 +779,49 @@ class AiSttProxy:
         language: str | None = None,
     ) -> TranscriptionResult:
         timeout = max(2.0, float(self.settings.stt_timeout_seconds) - 1.0)
+        requested_model = model_name or self.settings.funasr_model
+        requested_language = language or "en"
+        self._last_requested_model = requested_model
+        self._last_fallback_model = None
+        self._last_fallback_reason = None
+        audio = np.asarray(samples, dtype=np.float32).reshape(-1).copy()
         try:
             result = dict(
                 self.engine.call(
                     "asr.transcribe",
-                    np.asarray(samples, dtype=np.float32).reshape(-1).copy(),
-                    model_name or self.settings.funasr_model,
-                    language or "en",
+                    audio,
+                    requested_model,
+                    requested_language,
                     timeout=timeout,
                 )
             )
         except AiEngineUnavailable as exc:
-            raise SttUnavailable(f"AI Engine speech recognition failed: {exc}") from exc
+            fallback = FunASRService.fallback_model(requested_model, requested_language)
+            if fallback is None:
+                raise SttUnavailable(f"AI Engine speech recognition failed: {exc}") from exc
+            LOGGER.warning(
+                "ASR model %s failed for %s; retrying once with %s: %s",
+                requested_model,
+                requested_language,
+                fallback,
+                exc,
+            )
+            self._last_fallback_model = fallback
+            self._last_fallback_reason = str(exc)
+            try:
+                result = dict(
+                    self.engine.call(
+                        "asr.transcribe",
+                        audio,
+                        fallback,
+                        requested_language,
+                        timeout=timeout,
+                    )
+                )
+            except AiEngineUnavailable as fallback_exc:
+                raise SttUnavailable(
+                    f"AI Engine speech recognition failed with {requested_model} and fallback {fallback}: {fallback_exc}"
+                ) from fallback_exc
         return TranscriptionResult(
             str(result.get("text") or ""),
             float(result.get("confidence") or 0.0),
@@ -814,6 +848,9 @@ class AiSttProxy:
             "model_load_ms": asr.get("model_load_ms"),
             "last_error": asr.get("last_error"),
             "engine_pid": health.get("pid"),
+            "requested_model": self._last_requested_model,
+            "fallback_model": self._last_fallback_model,
+            "fallback_reason": self._last_fallback_reason,
         }
 
 

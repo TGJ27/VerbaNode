@@ -61,6 +61,8 @@ class WeatherPlugin(BuiltinPlugin):
         r"^(?:current )?weather forecast$",
         r"^(?:bagaimana )?cuaca(?: hari ini| sekarang)?$",
         r"^cuaca(?: hari ini| sekarang)? bagaimana$",
+        r"^bagaimana cuaca(?: hari ini| sekarang)?$",
+        r"^cuaca sekarang seperti apa$",
     )
 
     def match(self, context: PluginContext) -> dict[str, Any] | None:
@@ -73,6 +75,16 @@ class WeatherPlugin(BuiltinPlugin):
         )
         if city_match:
             return {"location": city_match.group(1).strip()}
+        id_city_match = re.fullmatch(
+            r"(?:bagaimana )?cuaca(?: hari ini| sekarang)? di (.+?)(?: hari ini| sekarang)?",
+            core,
+        )
+        if not id_city_match:
+            id_city_match = re.fullmatch(r"cuaca (.+?)(?: hari ini| sekarang)?", core)
+        if id_city_match:
+            location = id_city_match.group(1).strip()
+            if location not in {"hari ini", "sekarang", "bagaimana"}:
+                return {"location": location}
         return None
 
     async def execute(self, context: PluginContext) -> PluginResult:
