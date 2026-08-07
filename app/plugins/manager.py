@@ -293,12 +293,21 @@ class PluginManager:
         runtime.state_changed_at = time.time()
         return self.plugin_health(plugin_id)
 
-    def format_result(self, plugin_id: str, result: dict[str, Any]) -> str:
+    def format_result(
+        self,
+        plugin_id: str,
+        result: dict[str, Any],
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
         plugin = self.registry.get(plugin_id)
         if plugin is None:
             return str(result.get("error") or result.get("message") or result)
         try:
-            return plugin.format_result(result, PluginContext(settings=self.settings))
+            return plugin.format_result(
+                result,
+                PluginContext(settings=self.settings, metadata=dict(metadata or {})),
+            )
         except Exception as exc:
             self._record_failure(
                 plugin.id,

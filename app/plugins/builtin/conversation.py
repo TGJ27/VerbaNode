@@ -43,4 +43,6 @@ class StopConversationPlugin(BuiltinPlugin):
     def format_result(self, result: dict[str, Any], context: PluginContext) -> str:
         if result.get("error"):
             return str(result["error"])
+        if str(context.metadata.get("language") or "en") == "id":
+            return "Mode percakapan akan dihentikan."
         return str(result.get("message") or "Conversation mode will stop.")

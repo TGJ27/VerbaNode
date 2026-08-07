@@ -42,7 +42,7 @@ def _ai_engine_worker(
     preload_asr: bool,
     preload_kokoro: bool,
 ) -> None:
-    """Own SenseVoice and Kokoro native model objects in one child process."""
+    """Own the active FunASR-compatible ASR model and Kokoro in one child process."""
 
     logging.basicConfig(
         level=logging.INFO,
@@ -196,9 +196,9 @@ def _ai_engine_worker(
         if preload_asr and not closing.is_set():
             try:
                 warm_asr()
-                LOGGER.info("SenseVoice model is ready in the isolated AI Engine")
+                LOGGER.info("Default ASR model is ready in the isolated AI Engine")
             except Exception as exc:
-                LOGGER.warning("AI Engine could not preload SenseVoice: %s", exc)
+                LOGGER.warning("AI Engine could not preload the default ASR model: %s", exc)
         if preload_kokoro and not closing.is_set() and kokoro.model_ready():
             try:
                 warm_kokoro()
@@ -231,11 +231,12 @@ def _ai_engine_worker(
             elif operation == "asr.transcribe":
                 audio = np.asarray(args[0], dtype=np.float32).reshape(-1).copy()
                 model_name = str(args[1]) if len(args) > 1 and args[1] else settings.funasr_model
+                language = str(args[2]) if len(args) > 2 and args[2] else "en"
                 started = time.monotonic()
                 with asr_lock:
                     if stt.status().get("model") != model_name or not stt.status().get("loaded"):
                         warm_asr(model_name=model_name)
-                    transcription = stt.transcribe_with_confidence(audio, model_name)
+                    transcription = stt.transcribe_with_confidence(audio, model_name, language)
                 latency = round((time.monotonic() - started) * 1000)
                 with state_lock:
                     state["asr"].update(
@@ -252,6 +253,7 @@ def _ai_engine_worker(
                     "text": transcription.text,
                     "confidence": transcription.confidence,
                     "confidence_source": transcription.confidence_source,
+                    "language": language,
                     "latency_ms": latency,
                 }
             elif operation == "asr.reload":
@@ -771,6 +773,7 @@ class AiSttProxy:
         self,
         samples: np.ndarray,
         model_name: str | None = None,
+        language: str | None = None,
     ) -> TranscriptionResult:
         timeout = max(2.0, float(self.settings.stt_timeout_seconds) - 1.0)
         try:
@@ -779,6 +782,7 @@ class AiSttProxy:
                     "asr.transcribe",
                     np.asarray(samples, dtype=np.float32).reshape(-1).copy(),
                     model_name or self.settings.funasr_model,
+                    language or "en",
                     timeout=timeout,
                 )
             )
@@ -790,8 +794,10 @@ class AiSttProxy:
             str(result.get("confidence_source") or "estimated"),
         )
 
-    def transcribe(self, samples: np.ndarray, model_name: str | None = None) -> str:
-        return self.transcribe_with_confidence(samples, model_name).text
+    def transcribe(
+        self, samples: np.ndarray, model_name: str | None = None, language: str | None = None
+    ) -> str:
+        return self.transcribe_with_confidence(samples, model_name, language).text
 
     def status(self) -> dict[str, Any]:
         health = self.engine.health()

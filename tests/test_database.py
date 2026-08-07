@@ -13,18 +13,22 @@ def test_seed_and_agent_isolation(tmp_path: Path) -> None:
     db = Database(settings)
     db.initialize()
     agents = db.list_agents()
-    assert len(agents) == 1
-    assert agents[0]["name"] == "Ropi"
-    assert agents[0]["llm_model"] == "qwen3.5:0.8b"
-    assert agents[0]["temperature"] == 0.2
-    assert agents[0]["top_p"] == 0.8
-    assert agents[0]["max_tokens"] == 224
-    assert "You are Ropi" in agents[0]["system_prompt"]
-    assert "get_current_time" not in agents[0]["system_prompt"]
-    assert "Mandatory live-data" not in agents[0]["system_prompt"]
+    assert len(agents) == 2
+    english = next(agent for agent in agents if agent["language"] == "en")
+    indonesian = next(agent for agent in agents if agent["language"] == "id")
+    assert english["name"] == "Ropi"
+    assert english["llm_model"] == "qwen3.5:0.8b"
+    assert english["temperature"] == 0.2
+    assert english["top_p"] == 0.8
+    assert english["max_tokens"] == 224
+    assert "You are Ropi" in english["system_prompt"]
+    assert "get_current_time" not in english["system_prompt"]
+    assert "Mandatory live-data" not in english["system_prompt"]
+    assert indonesian["stt_model"] == "Whisper-base"
+    assert indonesian["edge_voice"] == "id-ID-GadisNeural"
 
     info = db.create_information({"title": "Company", "content": "We build robots.", "enabled": True})
-    payload = dict(agents[0])
+    payload = dict(english)
     for key in ("id", "created_at", "updated_at"):
         payload.pop(key, None)
     payload["name"] = "Receptionist"
@@ -32,7 +36,7 @@ def test_seed_and_agent_isolation(tmp_path: Path) -> None:
     created = db.create_agent(payload)
     assert created["info_ids"] == [info["id"]]
     assert len(db.enabled_information_for_agent(created["id"])) == 1
-    assert db.enabled_information_for_agent(agents[0]["id"]) == []
+    assert db.enabled_information_for_agent(english["id"]) == []
 
 
 def test_script_queue_order(tmp_path: Path) -> None:

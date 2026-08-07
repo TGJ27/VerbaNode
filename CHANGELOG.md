@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0
+
+- Added per-agent English and Bahasa Indonesia language profiles.
+- Kept SenseVoiceSmall as the English low-latency ASR model.
+- Added Whisper Base through FunASR for Indonesian-only decoding.
+- Added a default Ropi Indonesia agent with Indonesian character instructions, greeting, Edge TTS, and Gadis voice.
+- Added hidden active-language prompt enforcement and localized deterministic tool responses.
+- Added per-script language, provider, Edge voice, Kokoro voice, speech rate, volume, and provider-aware preview.
+- Added automatic SQLite migrations for agent language and Script TTS fields.
+- Added `openai-whisper`, `download_whisper.bat`, setup documentation, and regression tests.
+- 107 automated tests pass.
+
 ## 0.6.7
 
 - Fixed a typed-chat interruption deadlock that could occur when a new text message was submitted while streamed TTS was still playing.

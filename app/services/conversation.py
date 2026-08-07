@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import threading
 import uuid
@@ -516,7 +517,11 @@ class ConversationManager:
                     except Exception as exc:
                         tool_result = {"error": f"Tool '{tool_name}' failed: {exc}"}
                     await tool_callback(tool_name, tool_arguments, tool_result)
-                    reply = self.llm.tools.format_result(tool_name, tool_result).strip()
+                    reply = self.llm.tools.format_result(
+                        tool_name,
+                        tool_result,
+                        metadata={"language": str(agent.get("language") or "en")},
+                    ).strip()
                     await token_callback(reply)
                     exit_requested = bool(
                         tool_name == "handle_exit_intent"
@@ -816,22 +821,22 @@ class ConversationManager:
         self.monitor.mark("stt_started")
         await self.events.broadcast("stt_started", {"source": source, "turn_id": turn_context.turn_id, "capture_id": turn_context.capture_id})
         try:
+            model_name = str(agent.get("stt_model") or self.settings.funasr_model)
+            language = str(agent.get("language") or "en")
             if hasattr(self.stt, "transcribe_with_confidence"):
+                transcribe_fn = self.stt.transcribe_with_confidence
+                parameters = inspect.signature(transcribe_fn).parameters
+                call_args = (samples.copy(), model_name, language) if "language" in parameters else (samples.copy(), model_name)
                 transcription = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.stt.transcribe_with_confidence,
-                        samples.copy(),
-                        str(agent.get("stt_model") or self.settings.funasr_model),
-                    ),
+                    asyncio.to_thread(transcribe_fn, *call_args),
                     timeout=float(getattr(self.settings, "stt_timeout_seconds", 30.0)),
                 )
             else:
+                transcribe_fn = self.stt.transcribe
+                parameters = inspect.signature(transcribe_fn).parameters
+                call_args = (samples.copy(), model_name, language) if "language" in parameters else (samples.copy(), model_name)
                 text_only = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.stt.transcribe,
-                        samples.copy(),
-                        str(agent.get("stt_model") or self.settings.funasr_model),
-                    ),
+                    asyncio.to_thread(transcribe_fn, *call_args),
                     timeout=float(getattr(self.settings, "stt_timeout_seconds", 30.0)),
                 )
                 transcription = TranscriptionResult(str(text_only), 1.0, "unavailable")

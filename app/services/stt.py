@@ -46,6 +46,10 @@ class FunASRService:
         self._model_name: str | None = None
         self._lock = threading.RLock()
 
+    @staticmethod
+    def _is_whisper_model(model_name: str) -> bool:
+        return str(model_name or "").strip().lower().startswith("whisper")
+
     def _load(self, model_name: str) -> Any:
         with self._lock:
             if self._model is not None and self._model_name == model_name:
@@ -54,19 +58,40 @@ class FunASRService:
                 from funasr import AutoModel
             except ImportError as exc:
                 raise SttUnavailable("FunASR is not installed. Run setup_windows.bat.") from exc
+
+            is_whisper = self._is_whisper_model(model_name)
+            if is_whisper:
+                try:
+                    import whisper  # noqa: F401
+                except ImportError as exc:
+                    raise SttUnavailable(
+                        "OpenAI Whisper support is not installed. Run setup_windows.bat again."
+                    ) from exc
             try:
-                LOGGER.info("Loading FunASR model %s", model_name)
-                self._model = AutoModel(
-                    model=model_name,
-                    trust_remote_code=True,
-                    disable_update=True,
-                    device="cpu",
-                    ncpu=2,
+                LOGGER.info(
+                    "Loading %s ASR model %s",
+                    "OpenAI Whisper through FunASR" if is_whisper else "FunASR",
+                    model_name,
                 )
+                options: dict[str, Any] = {
+                    "model": model_name,
+                    "device": "cpu",
+                    "ncpu": 2,
+                }
+                if is_whisper:
+                    options["hub"] = "openai"
+                else:
+                    options.update({"trust_remote_code": True, "disable_update": True})
+                try:
+                    self._model = AutoModel(**options)
+                except TypeError:
+                    # Older FunASR versions may not accept ncpu for the OpenAI hub.
+                    options.pop("ncpu", None)
+                    self._model = AutoModel(**options)
                 self._model_name = model_name
                 return self._model
             except Exception as exc:
-                raise SttUnavailable(f"Unable to load FunASR model '{model_name}': {exc}") from exc
+                raise SttUnavailable(f"Unable to load ASR model '{model_name}': {exc}") from exc
 
     @staticmethod
     def _clean_text(text: str) -> str:
@@ -194,6 +219,7 @@ class FunASRService:
         self,
         samples: np.ndarray,
         model_name: str | None = None,
+        language: str | None = None,
     ) -> TranscriptionResult:
         """Transcribe one immutable PCM snapshot with one transient retry.
 
@@ -206,35 +232,54 @@ class FunASRService:
         if audio.size == 0:
             return TranscriptionResult("", 0.0, "empty")
         model_name = model_name or self.settings.funasr_model
+        language = "id" if str(language or "").lower().startswith("id") else "en"
         model = self._load(model_name)
+        is_whisper = self._is_whisper_model(model_name)
         attempts = max(1, int(getattr(self.settings, "stt_retry_count", 1)) + 1)
         errors: list[str] = []
 
         for attempt in range(attempts):
             output_path = self.settings.runtime_audio_dir / f"stt-{uuid.uuid4().hex}.wav"
             try:
-                try:
-                    result = model.generate(
-                        input=audio,
-                        cache={},
-                        language="en",
-                        use_itn=True,
-                        batch_size_s=60,
-                    )
-                except (TypeError, ValueError, AttributeError) as direct_exc:
-                    # Compatibility with FunASR/provider builds that only accept
-                    # a file path as input.
+                if is_whisper:
                     import soundfile as sf
-
                     sf.write(output_path, audio, self.settings.sample_rate, subtype="PCM_16")
-                    LOGGER.debug("Direct PCM ASR unsupported; using WAV fallback: %s", direct_exc)
+                    decoding_options = {
+                        "task": "transcribe",
+                        "language": language,
+                        "beam_size": None,
+                        "fp16": False,
+                        "without_timestamps": True,
+                        "prompt": None,
+                    }
                     result = model.generate(
                         input=str(output_path),
-                        cache={},
-                        language="en",
-                        use_itn=True,
-                        batch_size_s=60,
+                        DecodingOptions=decoding_options,
+                        batch_size_s=0,
                     )
+                else:
+                    try:
+                        result = model.generate(
+                            input=audio,
+                            cache={},
+                            language="en",
+                            use_itn=True,
+                            batch_size_s=60,
+                        )
+                    except (TypeError, ValueError, AttributeError) as direct_exc:
+                        # Compatibility with FunASR/provider builds that only accept
+                        # a file path as input.
+                        import soundfile as sf
+
+                        sf.write(output_path, audio, self.settings.sample_rate, subtype="PCM_16")
+                        LOGGER.debug("Direct PCM ASR unsupported; using WAV fallback: %s", direct_exc)
+                        result = model.generate(
+                            input=str(output_path),
+                            cache={},
+                            language="en",
+                            use_itn=True,
+                            batch_size_s=60,
+                        )
                 if not result:
                     return TranscriptionResult("", 0.0, "empty")
                 first = result[0] if isinstance(result, list) else result
@@ -251,7 +296,8 @@ class FunASRService:
                     confidence = self._estimated_confidence(audio, text)
                     source = "estimated"
                 LOGGER.info(
-                    "STT result confidence=%d%% source=%s attempt=%d text=%r",
+                    "STT result language=%s confidence=%d%% source=%s attempt=%d text=%r",
+                    language,
                     round(confidence * 100),
                     source,
                     attempt + 1,
@@ -299,9 +345,11 @@ class FunASRService:
             return self.warmup(model_name)
         return self.status()
 
-    def transcribe(self, samples: np.ndarray, model_name: str | None = None) -> str:
+    def transcribe(
+        self, samples: np.ndarray, model_name: str | None = None, language: str | None = None
+    ) -> str:
         """Backward-compatible text-only interface."""
-        return self.transcribe_with_confidence(samples, model_name).text
+        return self.transcribe_with_confidence(samples, model_name, language).text
 
     def status(self) -> dict[str, Any]:
         try:
@@ -311,7 +359,7 @@ class FunASRService:
         except Exception:
             installed = False
         return {
-            "provider": "FunASR",
+            "provider": "OpenAI Whisper via FunASR" if self._is_whisper_model(self._model_name or self.settings.funasr_model) else "FunASR",
             "installed": installed,
             "loaded": self._model is not None,
             "model": self._model_name or self.settings.funasr_model,

@@ -44,6 +44,20 @@ class ScriptQueueManager:
         await self.notify()
         return item
 
+    @staticmethod
+    def _script_tts_config(script: dict[str, Any]) -> dict[str, Any]:
+        """Return an agent-shaped TTS configuration owned by the script itself."""
+        language = str(script.get("language") or "en")
+        default_voice = "id-ID-GadisNeural" if language == "id" else "en-US-AriaNeural"
+        return {
+            "language": language,
+            "tts_mode": str(script.get("tts_mode") or "edge"),
+            "edge_voice": str(script.get("edge_voice") or default_voice),
+            "kokoro_voice_id": int(script.get("kokoro_voice_id") or 0),
+            "tts_rate": float(script.get("tts_rate") or 1.0),
+            "tts_volume": float(1.0 if script.get("tts_volume") is None else script.get("tts_volume")),
+        }
+
     async def _speak_cached_script(
         self,
         *,
@@ -84,8 +98,16 @@ class ScriptQueueManager:
         self._paused = True
         speech_id = self.tts.begin_speech()
         await self.notify()
-        agent = self.get_active_agent()
-        await self.events.broadcast("tts_started", {"source": "script", "text": script["text"]})
+        agent = self._script_tts_config(script)
+        await self.events.broadcast(
+            "tts_started",
+            {
+                "source": "script",
+                "text": script["text"],
+                "language": script.get("language") or "en",
+                "voice": agent.get("edge_voice"),
+            },
+        )
         try:
             played = await self._speak_cached_script(
                 text=script["text"],
@@ -145,7 +167,7 @@ class ScriptQueueManager:
             if not item.get("enabled"):
                 self.db.finish_queue_item(int(item["id"]), remove=True)
                 continue
-            agent = self.get_active_agent()
+            agent = self._script_tts_config(item)
             speech_id = self.tts.begin_speech()
             await self.events.broadcast(
                 "tts_started",

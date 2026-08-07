@@ -85,5 +85,5 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     assert '.get("/api/plugins")' in main
     assert '.put("/api/plugins/{plugin_id}")' in main
     assert '"plugin_manager": True' in main
-    assert APP_VERSION == "0.6.7"
-    assert BUILD_LABEL == "typed-chat-interrupt-fix"
+    assert APP_VERSION == "0.7.0"
+    assert BUILD_LABEL == "bilingual-agents-and-script-voices-beta"

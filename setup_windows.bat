@@ -72,9 +72,11 @@ echo 2. Create or migrate the SQLite database:
 echo    setup_database.bat
 echo 3. Download the local Kokoro model:
 echo    download_kokoro.bat
-echo 4. Pre-download the FunASR speech model:
+echo 4. Pre-download the English SenseVoice model:
 echo    download_funasr.bat
-echo 5. Start VerbaNode with run.bat
+echo 5. Pre-download Whisper Base for Indonesian agents:
+echo    download_whisper.bat
+echo 6. Start VerbaNode with run.bat
 echo.
 pause
 exit /b 0

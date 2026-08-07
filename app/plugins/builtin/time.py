@@ -90,6 +90,22 @@ class CurrentTimePlugin(BuiltinPlugin):
     def format_result(self, result: dict[str, Any], context: PluginContext) -> str:
         if result.get("error"):
             return str(result["error"])
+        language = str(context.metadata.get("language") or "en")
+        timezone_name = result.get("timezone") or "Asia/Jakarta"
+        if language == "id":
+            try:
+                value = datetime.fromisoformat(str(result.get("iso") or ""))
+                weekdays = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+                months = [
+                    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+                    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+                ]
+                return (
+                    f"Sekarang hari {weekdays[value.weekday()]}, {value.day} "
+                    f"{months[value.month - 1]} {value.year}, pukul {value:%H:%M} "
+                    f"di zona waktu {timezone_name}."
+                )
+            except (TypeError, ValueError):
+                return f"Waktu saat ini adalah {result.get('spoken') or result.get('iso')}."
         spoken = result.get("spoken") or result.get("iso") or "the current time"
-        timezone = result.get("timezone") or "the configured timezone"
-        return f"It is currently {spoken} in the {timezone} timezone."
+        return f"It is currently {spoken} in the {timezone_name} timezone."

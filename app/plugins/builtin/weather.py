@@ -21,6 +21,17 @@ WEATHER_DESCRIPTIONS: dict[int, str] = {
     82: "heavy rain showers", 95: "a thunderstorm",
     96: "a thunderstorm with light hail", 99: "a thunderstorm with heavy hail",
 }
+WEATHER_DESCRIPTIONS_ID: dict[int, str] = {
+    0: "cerah", 1: "sebagian besar cerah", 2: "berawan sebagian",
+    3: "mendung", 45: "berkabut", 48: "kabut beku",
+    51: "gerimis ringan", 53: "gerimis sedang", 55: "gerimis lebat",
+    61: "hujan ringan", 63: "hujan sedang", 65: "hujan lebat",
+    71: "salju ringan", 73: "salju sedang", 75: "salju lebat",
+    80: "hujan lokal ringan", 81: "hujan lokal sedang",
+    82: "hujan lokal lebat", 95: "badai petir",
+    96: "badai petir dengan hujan es ringan", 99: "badai petir dengan hujan es lebat",
+}
+
 
 
 class WeatherPlugin(BuiltinPlugin):
@@ -105,6 +116,7 @@ class WeatherPlugin(BuiltinPlugin):
     def format_result(self, result: dict[str, Any], context: PluginContext) -> str:
         if result.get("error"):
             return str(result["error"])
+        language = str(context.metadata.get("language") or "en")
         location = result.get("location") or context.settings.default_location
         country = result.get("country") or ""
         place = f"{location}, {country}" if country else str(location)
@@ -112,6 +124,24 @@ class WeatherPlugin(BuiltinPlugin):
         feels_like = result.get("feels_like_c")
         humidity = result.get("humidity_percent")
         wind = result.get("wind_kmh")
+        if language == "id":
+            description = WEATHER_DESCRIPTIONS_ID.get(
+                result.get("weather_code"), "kondisi cuaca saat ini"
+            )
+            sentence = f"Cuaca di {place} saat ini {description}"
+            if temperature is not None:
+                sentence += f", dengan suhu {temperature} derajat Celsius"
+            if feels_like is not None:
+                sentence += f" dan terasa seperti {feels_like} derajat"
+            sentence += "."
+            extras: list[str] = []
+            if humidity is not None:
+                extras.append(f"Kelembapan {humidity} persen")
+            if wind is not None:
+                extras.append(f"kecepatan angin {wind} kilometer per jam")
+            if extras:
+                sentence += " " + ", dan ".join(extras).capitalize() + "."
+            return sentence
         description = WEATHER_DESCRIPTIONS.get(
             result.get("weather_code"), "current weather conditions"
         )

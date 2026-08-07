@@ -1,2 +1,2 @@
-APP_VERSION = "0.6.7"
-BUILD_LABEL = "typed-chat-interrupt-fix"
+APP_VERSION = "0.7.0"
+BUILD_LABEL = "bilingual-agents-and-script-voices-beta"

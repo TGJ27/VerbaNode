@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.defaults import (
     ROPI_CONTEXT_SIZE,
@@ -38,6 +38,7 @@ class AgentCreate(BaseModel):
     top_p: float = Field(default=ROPI_TOP_P, ge=0, le=1)
     max_tokens: int = Field(default=ROPI_MAX_TOKENS, ge=32, le=8192)
     context_size: int = Field(default=ROPI_CONTEXT_SIZE, ge=512, le=131072)
+    language: Literal["en", "id"] = "en"
     tts_mode: Literal["edge", "kokoro", "edge_fallback", "kokoro_fallback"] = "edge_fallback"
     edge_voice: str = "en-US-AriaNeural"
     kokoro_voice_id: int = Field(default=0, ge=0, le=102)
@@ -53,6 +54,19 @@ class AgentCreate(BaseModel):
         ]
     )
     info_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def apply_language_profile(self) -> "AgentCreate":
+        if self.language == "id":
+            self.stt_model = "Whisper-base"
+            self.tts_mode = "edge"
+            if not self.edge_voice.startswith("id-"):
+                self.edge_voice = "id-ID-GadisNeural"
+        else:
+            self.stt_model = "iic/SenseVoiceSmall"
+            if self.edge_voice.startswith("id-"):
+                self.edge_voice = "en-US-AriaNeural"
+        return self
 
 
 class AgentUpdate(AgentCreate):
@@ -74,6 +88,22 @@ class ScriptCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     text: str = Field(min_length=1, max_length=20000)
     enabled: bool = True
+    language: Literal["en", "id"] = "en"
+    tts_mode: Literal["edge", "kokoro", "edge_fallback", "kokoro_fallback"] = "edge"
+    edge_voice: str = "en-US-AriaNeural"
+    kokoro_voice_id: int = Field(default=0, ge=0, le=102)
+    tts_rate: float = Field(default=1.0, ge=0.5, le=2.0)
+    tts_volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def apply_script_language_profile(self) -> "ScriptCreate":
+        if self.language == "id":
+            self.tts_mode = "edge"
+            if not self.edge_voice.startswith("id-"):
+                self.edge_voice = "id-ID-GadisNeural"
+        elif self.edge_voice.startswith("id-"):
+            self.edge_voice = "en-US-AriaNeural"
+        return self
 
 
 class TextMessageRequest(BaseModel):
@@ -110,6 +140,26 @@ class EdgeVoicePreviewRequest(BaseModel):
     )
     rate: float = Field(default=1.0, ge=0.5, le=2.0)
     volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class ScriptTtsPreviewRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    language: Literal["en", "id"] = "en"
+    tts_mode: Literal["edge", "kokoro", "edge_fallback", "kokoro_fallback"] = "edge"
+    edge_voice: str = "en-US-AriaNeural"
+    kokoro_voice_id: int = Field(default=0, ge=0, le=102)
+    tts_rate: float = Field(default=1.0, ge=0.5, le=2.0)
+    tts_volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def apply_language_profile(self) -> "ScriptTtsPreviewRequest":
+        if self.language == "id":
+            self.tts_mode = "edge"
+            if not self.edge_voice.startswith("id-"):
+                self.edge_voice = "id-ID-GadisNeural"
+        elif self.edge_voice.startswith("id-"):
+            self.edge_voice = "en-US-AriaNeural"
+        return self
 
 
 class DiagnosticsSoakRequest(BaseModel):

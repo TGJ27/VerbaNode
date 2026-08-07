@@ -13,6 +13,11 @@ from app.config import Settings
 from app.defaults import (
     ROPI_CONTEXT_SIZE,
     ROPI_GREETING,
+    ROPI_ID_EDGE_VOICE,
+    ROPI_ID_GREETING,
+    ROPI_ID_ROLE,
+    ROPI_ID_STT_MODEL,
+    ROPI_ID_SYSTEM_PROMPT,
     ROPI_LLM_MODEL,
     ROPI_MAX_TOKENS,
     ROPI_ROLE,
@@ -74,6 +79,7 @@ class Database:
             top_p REAL NOT NULL DEFAULT 0.9,
             max_tokens INTEGER NOT NULL DEFAULT 224,
             context_size INTEGER NOT NULL DEFAULT 4096,
+            language TEXT NOT NULL DEFAULT 'en',
             tts_mode TEXT NOT NULL DEFAULT 'edge_fallback',
             edge_voice TEXT NOT NULL DEFAULT 'en-US-AriaNeural',
             kokoro_voice_id INTEGER NOT NULL DEFAULT 0,
@@ -105,6 +111,12 @@ class Database:
             title TEXT NOT NULL,
             text TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
+            language TEXT NOT NULL DEFAULT 'en',
+            tts_mode TEXT NOT NULL DEFAULT 'edge',
+            edge_voice TEXT NOT NULL DEFAULT 'en-US-AriaNeural',
+            kokoro_voice_id INTEGER NOT NULL DEFAULT 0,
+            tts_rate REAL NOT NULL DEFAULT 1.0,
+            tts_volume REAL NOT NULL DEFAULT 1.0,
             sort_order INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -167,6 +179,24 @@ class Database:
                 conn.execute(
                     "ALTER TABLE agents ADD COLUMN max_tokens INTEGER NOT NULL DEFAULT 224"
                 )
+            if "language" not in agent_columns:
+                conn.execute(
+                    "ALTER TABLE agents ADD COLUMN language TEXT NOT NULL DEFAULT 'en'"
+                )
+            script_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(scripts)").fetchall()
+            }
+            script_migrations = {
+                "language": "TEXT NOT NULL DEFAULT 'en'",
+                "tts_mode": "TEXT NOT NULL DEFAULT 'edge'",
+                "edge_voice": "TEXT NOT NULL DEFAULT 'en-US-AriaNeural'",
+                "kokoro_voice_id": "INTEGER NOT NULL DEFAULT 0",
+                "tts_rate": "REAL NOT NULL DEFAULT 1.0",
+                "tts_volume": "REAL NOT NULL DEFAULT 1.0",
+            }
+            for column, declaration in script_migrations.items():
+                if column not in script_columns:
+                    conn.execute(f"ALTER TABLE scripts ADD COLUMN {column} {declaration}")
         self._seed()
 
     def _seed(self) -> None:
@@ -256,10 +286,10 @@ class Database:
                     """
                     INSERT INTO agents(
                         name,color,avatar,role,system_prompt,greeting,llm_model,
-                        temperature,top_p,max_tokens,context_size,tts_mode,edge_voice,
+                        temperature,top_p,max_tokens,context_size,language,tts_mode,edge_voice,
                         kokoro_voice_id,tts_rate,tts_volume,stt_model,tools_enabled,
                         created_at,updated_at
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         "Ropi",
@@ -273,6 +303,7 @@ class Database:
                         ROPI_TOP_P,
                         ROPI_MAX_TOKENS,
                         ROPI_CONTEXT_SIZE,
+                        "en",
                         "edge_fallback",
                         "en-US-AriaNeural",
                         0,
@@ -366,6 +397,54 @@ class Database:
                     "UPDATE settings SET value='4', updated_at=? WHERE key='ropi_defaults_version'",
                     (now,),
                 )
+            conn.execute(
+                "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
+                ("indonesian_agent_seed_version", "0", now),
+            )
+            id_seed_row = conn.execute(
+                "SELECT value FROM settings WHERE key='indonesian_agent_seed_version'"
+            ).fetchone()
+            try:
+                id_seed_version = int(id_seed_row[0]) if id_seed_row else 0
+            except (TypeError, ValueError):
+                id_seed_version = 0
+            if id_seed_version < 1:
+                existing_id = conn.execute(
+                    "SELECT id FROM agents WHERE lower(trim(name)) IN ('ropi indonesia','ropi id') LIMIT 1"
+                ).fetchone()
+                if not existing_id:
+                    cur = conn.execute(
+                        """
+                        INSERT INTO agents(
+                            name,color,avatar,role,system_prompt,greeting,llm_model,
+                            temperature,top_p,max_tokens,context_size,language,tts_mode,edge_voice,
+                            kokoro_voice_id,tts_rate,tts_volume,stt_model,tools_enabled,
+                            created_at,updated_at
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            "Ropi Indonesia", "#ef6c35", "RI", ROPI_ID_ROLE,
+                            ROPI_ID_SYSTEM_PROMPT, ROPI_ID_GREETING, ROPI_LLM_MODEL,
+                            ROPI_TEMPERATURE, ROPI_TOP_P, ROPI_MAX_TOKENS,
+                            ROPI_CONTEXT_SIZE, "id", "edge", ROPI_ID_EDGE_VOICE,
+                            0, 1.0, 1.0, ROPI_ID_STT_MODEL,
+                            json.dumps([
+                                "get_current_time", "get_location",
+                                "get_weather", "handle_exit_intent",
+                            ]),
+                            now, now,
+                        ),
+                    )
+                    indonesian_agent_id = int(cur.lastrowid)
+                    conn.execute(
+                        "INSERT INTO conversations(agent_id,title,created_at,updated_at) VALUES(?,?,?,?)",
+                        (indonesian_agent_id, "Percakapan baru", now, now),
+                    )
+                conn.execute(
+                    "UPDATE settings SET value='1', updated_at=? WHERE key='indonesian_agent_seed_version'",
+                    (now,),
+                )
+
             agent_id = conn.execute("SELECT id FROM agents ORDER BY id LIMIT 1").fetchone()[0]
             conn.execute(
                 "UPDATE settings SET value=?, updated_at=? WHERE key='active_agent_id'",
@@ -382,14 +461,16 @@ class Database:
             script_count = conn.execute("SELECT COUNT(*) FROM scripts").fetchone()[0]
             if script_count == 0:
                 conn.execute(
-                    "INSERT INTO scripts(title,text,enabled,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                    """
+                    INSERT INTO scripts(
+                        title,text,enabled,language,tts_mode,edge_voice,kokoro_voice_id,
+                        tts_rate,tts_volume,sort_order,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
                     (
                         "Introduction",
                         "Hello and welcome. This is the VerbaNode standalone voice assistant.",
-                        1,
-                        0,
-                        now,
-                        now,
+                        1, "en", "edge", "en-US-AriaNeural", 0, 1.0, 1.0, 0, now, now,
                     ),
                 )
 
@@ -456,6 +537,7 @@ class Database:
 
     # Agents
     def _decode_agent(self, data: dict[str, Any]) -> dict[str, Any]:
+        data["language"] = str(data.get("language") or "en")
         data["tools_enabled"] = json.loads(data.get("tools_enabled") or "[]")
         data["info_ids"] = self.agent_info_ids(int(data["id"]))
         data["kokoro_voice_name"] = voice_name(data.get("kokoro_voice_id"))
@@ -475,7 +557,7 @@ class Database:
         now = utc_now()
         fields = [
             "name", "color", "avatar", "role", "system_prompt", "greeting", "llm_model",
-            "temperature", "top_p", "max_tokens", "context_size", "tts_mode", "edge_voice",
+            "temperature", "top_p", "max_tokens", "context_size", "language", "tts_mode", "edge_voice",
             "kokoro_voice_id", "tts_rate", "tts_volume", "stt_model",
         ]
         values = [payload[field] for field in fields]
@@ -496,7 +578,7 @@ class Database:
         now = utc_now()
         fields = [
             "name", "color", "avatar", "role", "system_prompt", "greeting", "llm_model",
-            "temperature", "top_p", "max_tokens", "context_size", "tts_mode", "edge_voice",
+            "temperature", "top_p", "max_tokens", "context_size", "language", "tts_mode", "edge_voice",
             "kokoro_voice_id", "tts_rate", "tts_volume", "stt_model",
         ]
         assignments = ",".join(f"{field}=?" for field in fields)
@@ -605,8 +687,22 @@ class Database:
         with self._write_lock, self.connect() as conn:
             sort_order = conn.execute("SELECT COALESCE(MAX(sort_order),-1)+1 FROM scripts").fetchone()[0]
             cur = conn.execute(
-                "INSERT INTO scripts(title,text,enabled,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                (payload["title"], payload["text"], int(payload["enabled"]), sort_order, now, now),
+                """
+                INSERT INTO scripts(
+                    title,text,enabled,language,tts_mode,edge_voice,kokoro_voice_id,
+                    tts_rate,tts_volume,sort_order,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    payload["title"], payload["text"], int(payload.get("enabled", True)),
+                    str(payload.get("language") or "en"),
+                    str(payload.get("tts_mode") or "edge"),
+                    str(payload.get("edge_voice") or "en-US-AriaNeural"),
+                    int(payload.get("kokoro_voice_id") or 0),
+                    float(payload.get("tts_rate") or 1.0),
+                    float(1.0 if payload.get("tts_volume") is None else payload.get("tts_volume")),
+                    sort_order, now, now,
+                ),
             )
             script_id = int(cur.lastrowid)
         return self.get_script(script_id) or {}
@@ -614,8 +710,21 @@ class Database:
     def update_script(self, script_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
         with self._write_lock, self.connect() as conn:
             cur = conn.execute(
-                "UPDATE scripts SET title=?,text=?,enabled=?,updated_at=? WHERE id=?",
-                (payload["title"], payload["text"], int(payload["enabled"]), utc_now(), script_id),
+                """
+                UPDATE scripts SET title=?,text=?,enabled=?,language=?,tts_mode=?,
+                    edge_voice=?,kokoro_voice_id=?,tts_rate=?,tts_volume=?,updated_at=?
+                WHERE id=?
+                """,
+                (
+                    payload["title"], payload["text"], int(payload.get("enabled", True)),
+                    str(payload.get("language") or "en"),
+                    str(payload.get("tts_mode") or "edge"),
+                    str(payload.get("edge_voice") or "en-US-AriaNeural"),
+                    int(payload.get("kokoro_voice_id") or 0),
+                    float(payload.get("tts_rate") or 1.0),
+                    float(1.0 if payload.get("tts_volume") is None else payload.get("tts_volume")),
+                    utc_now(), script_id,
+                ),
             )
             if not cur.rowcount:
                 return None
@@ -641,7 +750,7 @@ class Database:
         with self.connect() as conn:
             row = conn.execute(
                 """
-                SELECT q.*,s.title,s.text,s.enabled FROM script_queue q
+                SELECT q.*,s.title,s.text,s.enabled,s.language,s.tts_mode,s.edge_voice,s.kokoro_voice_id,s.tts_rate,s.tts_volume FROM script_queue q
                 JOIN scripts s ON s.id=q.script_id WHERE q.id=?
                 """,
                 (queue_id,),
@@ -652,7 +761,7 @@ class Database:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                SELECT q.*,s.title,s.text,s.enabled FROM script_queue q
+                SELECT q.*,s.title,s.text,s.enabled,s.language,s.tts_mode,s.edge_voice,s.kokoro_voice_id,s.tts_rate,s.tts_volume FROM script_queue q
                 JOIN scripts s ON s.id=q.script_id ORDER BY q.position,q.id
                 """
             ).fetchall()
@@ -662,7 +771,7 @@ class Database:
         with self._write_lock, self.connect() as conn:
             row = conn.execute(
                 """
-                SELECT q.*,s.title,s.text,s.enabled FROM script_queue q
+                SELECT q.*,s.title,s.text,s.enabled,s.language,s.tts_mode,s.edge_voice,s.kokoro_voice_id,s.tts_rate,s.tts_volume FROM script_queue q
                 JOIN scripts s ON s.id=q.script_id
                 WHERE q.status='waiting' ORDER BY q.position,q.id LIMIT 1
                 """

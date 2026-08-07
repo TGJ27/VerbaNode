@@ -60,8 +60,14 @@ class ToolService:
     ) -> dict[str, Any]:
         return await self.manager.execute(name, arguments)
 
-    def format_result(self, name: str, result: dict[str, Any]) -> str:
-        return self.manager.format_result(name, result)
+    def format_result(
+        self,
+        name: str,
+        result: dict[str, Any],
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        return self.manager.format_result(name, result, metadata=metadata)
 
     def configure_disabled_plugins(self, plugin_ids: Iterable[str]) -> None:
         self.manager.configure_disabled(plugin_ids)

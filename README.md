@@ -2,7 +2,19 @@
 
 VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
 
-**Current test release:** v0.6.7 Beta typed-chat interruption fix.
+**Current test release:** v0.7.0 Beta bilingual agents and per-script voices.
+
+## v0.7.0 bilingual agents and per-script voices
+
+- Adds two agent language profiles: English and Bahasa Indonesia.
+- English agents use SenseVoiceSmall through FunASR.
+- Indonesian agents use multilingual Whisper Base through FunASR with decoding fixed to Indonesian.
+- Adds a default **Ropi Indonesia** agent using `id-ID-GadisNeural` through Edge TTS.
+- Enforces one active language profile at a time from the active agent configuration.
+- Localizes deterministic time, date, location, weather, and stop-conversation replies.
+- Gives every Script its own language, TTS mode, Edge voice, Kokoro voice, speech rate, and volume instead of inheriting the active agent voice.
+- Adds `download_whisper.bat` for preparing the Indonesian ASR model.
+- Existing databases are migrated automatically.
 
 ## v0.6.7 typed-chat interruption fix
 
@@ -19,11 +31,11 @@ VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive bro
 
 ## Main features
 
-- Multiple editable agents with independent identity and character instructions, Ollama models, TTS voices, information, tools, memory, and chat history.
+- Multiple editable English or Indonesian agents with independent identity, ASR profile, character instructions, Ollama model, TTS voice, information, tools, memory, and chat history.
 - Continuous conversation, host push-to-talk, browser-device push-to-talk, typed chat, and Stop Current TTS.
-- Silero VAD, SenseVoice/FunASR, Ollama, Edge TTS, and local Sherpa-ONNX Kokoro.
+- Silero VAD, English SenseVoiceSmall, Indonesian Whisper Base through FunASR, Ollama, Edge TTS, and local Sherpa-ONNX Kokoro.
 - Sentence-buffered LLM-to-TTS streaming while chat remains one assistant message.
-- Global script buttons with queue controls and persistent audio caching.
+- Global script buttons with queue controls, per-script language/TTS selection, and persistent audio caching.
 - SQLite storage, backup/restore, and per-agent memory.
 - Selectable host input/output devices with persistent streams and device fingerprint recovery.
 - One active controller; a valid PIN transfers control immediately.
@@ -199,6 +211,7 @@ Download speech and local TTS models:
 
 ```bat
 download_funasr.bat
+download_whisper.bat
 download_kokoro.bat
 ```
 
@@ -291,7 +304,8 @@ setup_windows.bat            Conda environment and dependency setup
 setup_database.bat           Create, migrate, or reset SQLite data
 run.bat                      HTTPS launcher
 run_http.bat                 Optional HTTP launcher
-download_funasr.bat          SenseVoice model downloader
+download_funasr.bat          English SenseVoice model downloader
+download_whisper.bat         Indonesian Whisper Base downloader
 download_kokoro.bat          Kokoro model downloader
 ```
 

@@ -41,6 +41,7 @@ from app.schemas import (
     QueueReorder,
     RoleGenerateRequest,
     ScriptCreate,
+    ScriptTtsPreviewRequest,
     TakeoverResponse,
     TextMessageRequest,
 )
@@ -546,7 +547,7 @@ async def run_diagnostics_self_test() -> dict[str, Any]:
             raise RuntimeError(f"AI Engine heartbeat is stale ({heartbeat}s)")
         remote = health.get("remote") or {}
         asr_state = (remote.get("asr") or {}).get("state", "unknown")
-        return f"AI Engine PID {health.get('pid')} is responsive; SenseVoice state is {asr_state}"
+        return f"AI Engine PID {health.get('pid')} is responsive; active ASR state is {asr_state}"
 
     async def ollama_check() -> str:
         models = await state.llm.list_models()
@@ -1187,7 +1188,11 @@ async def reload_ai_asr(token: Token) -> dict[str, Any]:
     await state.conversation.stop_conversation(stop_tts=True)
     await state.script_queue.stop()
     try:
-        result = await asyncio.to_thread(state.ai_engine.reload_asr)
+        active_agent = state.conversation.active_agent()
+        result = await asyncio.to_thread(
+            state.ai_engine.reload_asr,
+            str(active_agent.get("stt_model") or state.settings.funasr_model),
+        )
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     await state.events.broadcast("ai_model_reloaded", {"provider": "asr", "status": result})
@@ -1232,6 +1237,36 @@ async def preview_edge_voice(
     if not played:
         raise HTTPException(status_code=503, detail="Edge voice preview was cancelled")
     return {"ok": True, "voice": payload.voice}
+
+
+@app.post("/api/tts/script-preview")
+async def preview_script_tts(
+    payload: ScriptTtsPreviewRequest,
+    token: Token,
+) -> dict[str, Any]:
+    await state.conversation.stop_conversation(stop_tts=True)
+    agent_like = payload.model_dump()
+    speech_id = state.tts.begin_speech()
+    try:
+        played = await asyncio.to_thread(
+            state.tts.speak_blocking,
+            payload.text,
+            agent_like,
+            speech_id,
+            use_cache=False,
+            cache_namespace="script-preview",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Script voice preview failed: {exc}") from exc
+    if not played:
+        raise HTTPException(status_code=503, detail="Script voice preview was cancelled")
+    return {
+        "ok": True,
+        "language": payload.language,
+        "tts_mode": payload.tts_mode,
+        "edge_voice": payload.edge_voice,
+        "kokoro_voice_id": payload.kokoro_voice_id,
+    }
 
 
 @app.post("/api/audio/test-input")

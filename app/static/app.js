@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.6.7';
+const FRONTEND_VERSION = '0.7.0';
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
 
 const appState = {
@@ -732,7 +732,7 @@ function renderAgents() {
     return `<article class="card agent-card ${active ? 'active' : ''}" style="--agent-color:${escapeHtml(agent.color)}">
       <div class="agent-card-head"><div class="agent-avatar" style="background:${escapeHtml(agent.color)}">${escapeHtml(agent.avatar || 'VA')}</div><div><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.role)}</p></div></div>
       <div class="agent-card-body">${escapeHtml(agent.greeting)}</div>
-      <div class="agent-card-meta"><span class="chip">${escapeHtml(agent.llm_model)}</span><span class="chip">${escapeHtml(agent.tts_mode)}</span><span class="chip">${escapeHtml(agent.kokoro_voice_name || 'Kokoro voice')}</span><span class="chip">${agent.info_ids?.length || 0} info</span></div>
+      <div class="agent-card-meta"><span class="chip">${agent.language === 'id' ? 'Bahasa Indonesia' : 'English'}</span><span class="chip">${escapeHtml(agent.llm_model)}</span><span class="chip">${escapeHtml(agent.tts_mode)}</span><span class="chip">${escapeHtml(agent.kokoro_voice_name || 'Kokoro voice')}</span><span class="chip">${agent.info_ids?.length || 0} info</span></div>
       <div class="agent-card-actions">
         ${active ? '<button class="btn success compact" disabled>Active</button>' : `<button class="btn secondary compact" data-activate-agent="${agent.id}">Use agent</button>`}
         <button class="btn ghost compact" data-edit-agent="${agent.id}">Edit</button>
@@ -969,6 +969,7 @@ function renderScripts() {
   else grid.innerHTML = appState.scripts.map(script => `<article class="card script-card">
     <div class="card-title-row"><h3>${escapeHtml(script.title)}</h3><span class="enabled-pill ${script.enabled ? '' : 'off'}">● ${script.enabled ? 'Ready' : 'Disabled'}</span></div>
     <p>${escapeHtml(script.text)}</p>
+    <div class="agent-card-meta"><span class="chip">${script.language === 'id' ? 'Bahasa Indonesia' : 'English'}</span><span class="chip">${escapeHtml(script.tts_mode || 'edge')}</span><span class="chip">${escapeHtml(script.edge_voice || '')}</span></div>
     <div class="script-actions"><button class="btn success compact" data-run-script="${script.id}" ${script.enabled ? '' : 'disabled'}>▶ Run now</button><button class="btn secondary compact" data-queue-script="${script.id}" ${script.enabled ? '' : 'disabled'}>＋ Queue</button><button class="icon-btn" data-edit-script="${script.id}" title="Edit">✎</button></div>
   </article>`).join('');
   $('#quickScripts').innerHTML = appState.scripts.filter(script => script.enabled).slice(0, 4).map(script => `<div class="quick-script"><span>${escapeHtml(script.title)}</span><button class="btn secondary compact" data-run-script="${script.id}">▶</button></div>`).join('') || '<p class="tiny muted">No enabled scripts.</p>';
@@ -1097,7 +1098,7 @@ function renderRuntimeStatus(data) {
     <dt>Kokoro</dt><dd>${kokoroHealth.circuit_open ? 'Recovering' : (tts.kokoro_model_ready ? (tts.kokoro_loaded ? 'Loaded' : 'Model available') : 'Not downloaded')}</dd>
     <dt>AI Engine</dt><dd>${aiEngine.mode === 'isolated_process' ? (aiEngine.alive ? `Process ${aiEngine.pid} active` : 'Process unavailable') : 'In-process compatibility mode'}</dd>
     <dt>AI state</dt><dd>${escapeHtml(String(aiRemote.coordinator_state || 'idle'))}</dd>
-    <dt>SenseVoice state</dt><dd>${escapeHtml(String(aiAsr.state || stt.state || 'unknown'))}${aiAsr.last_latency_ms != null ? ` · ${aiAsr.last_latency_ms} ms` : ''}</dd>
+    <dt>Active ASR state</dt><dd>${escapeHtml(String(aiAsr.state || stt.state || 'unknown'))}${aiAsr.last_latency_ms != null ? ` · ${aiAsr.last_latency_ms} ms` : ''}</dd>
     <dt>Kokoro state</dt><dd>${escapeHtml(String(aiKokoro.state || tts.kokoro_status?.state || 'unknown'))}${aiKokoro.last_latency_ms != null ? ` · ${aiKokoro.last_latency_ms} ms` : ''}</dd>
     <dt>AI queues</dt><dd>ASR ${aiEngine.inflight?.asr ?? 0}/${aiEngine.queue_limits?.asr ?? '-'} · TTS ${aiEngine.inflight?.kokoro ?? 0}/${aiEngine.queue_limits?.kokoro ?? '-'}</dd>
     <dt>AI restarts</dt><dd>${aiEngine.restart_count ?? 0}</dd>
@@ -1422,6 +1423,47 @@ async function respondTakeover(requestId, approve) {
   } catch (error) { toast(error.message, 'error'); closeModal(); }
 }
 
+const AGENT_LANGUAGE_PROFILES = {
+  en: { label: 'English', sttModel: 'iic/SenseVoiceSmall', localePrefix: 'en-', defaultVoice: 'en-US-AriaNeural', preview: 'Hello. This is a preview of the selected English voice.' },
+  id: { label: 'Bahasa Indonesia', sttModel: 'Whisper-base', localePrefix: 'id-', defaultVoice: 'id-ID-GadisNeural', preview: 'Halo. Ini adalah contoh suara Bahasa Indonesia yang dipilih.' },
+};
+
+function languageProfile(language = 'en') {
+  return AGENT_LANGUAGE_PROFILES[language] || AGENT_LANGUAGE_PROFILES.en;
+}
+
+function edgeVoicesForLanguage(language = 'en') {
+  const profile = languageProfile(language);
+  const voices = appState.edgeVoices?.voices || [];
+  return voices.filter(voice => String(voice.locale || '').toLowerCase().startsWith(profile.localePrefix));
+}
+
+function applyLanguageTtsAvailability(select, language = 'en') {
+  if (!select) return;
+  const indonesian = language === 'id';
+  [...select.options].forEach(option => {
+    option.disabled = indonesian && option.value !== 'edge';
+  });
+  if (indonesian) select.value = 'edge';
+}
+
+function renderStandaloneEdgeVoiceSelect(select, language = 'en', selectedVoice = '') {
+  if (!select) return;
+  const profile = languageProfile(language);
+  const voices = edgeVoicesForLanguage(language);
+  const available = [...voices];
+  if (selectedVoice && !available.some(voice => voice.short_name === selectedVoice)) {
+    const selected = (appState.edgeVoices?.voices || []).find(voice => voice.short_name === selectedVoice);
+    if (selected) available.unshift(selected);
+  }
+  if (!available.length) {
+    available.push({ short_name: profile.defaultVoice, name: profile.defaultVoice, locale: language === 'id' ? 'id-ID' : 'en-US', gender: 'Unknown' });
+  }
+  select.innerHTML = available.map(voice => `<option value="${escapeHtml(voice.short_name)}">${escapeHtml(edgeVoiceLabel(voice))}</option>`).join('');
+  select.value = selectedVoice && available.some(voice => voice.short_name === selectedVoice) ? selectedVoice : profile.defaultVoice;
+  if (!select.value) select.selectedIndex = 0;
+}
+
 function edgeVoiceLabel(voice) {
   const name = voice.name || voice.short_name || 'Voice';
   const locale = voice.locale || 'unknown locale';
@@ -1429,11 +1471,13 @@ function edgeVoiceLabel(voice) {
   return `${name} — ${locale} · ${gender}`;
 }
 
-function renderEdgeVoiceOptions(selectedVoice = '') {
+function renderEdgeVoiceOptions(selectedVoice = '', language = 'en') {
   const select = $('#edgeVoiceSelect');
   const localeFilter = $('#edgeVoiceLocaleFilter');
   if (!select || !localeFilter) return;
-  const voices = appState.edgeVoices?.voices || [];
+  const allVoices = appState.edgeVoices?.voices || [];
+  const profile = languageProfile(language);
+  const voices = allVoices.filter(voice => String(voice.locale || '').toLowerCase().startsWith(profile.localePrefix));
   const locales = [...new Set(voices.map(voice => voice.locale).filter(Boolean))].sort();
   const currentLocale = localeFilter.value;
   localeFilter.innerHTML = `<option value="">All locales</option>${locales.map(locale => `<option value="${escapeHtml(locale)}">${escapeHtml(locale)}</option>`).join('')}`;
@@ -1441,12 +1485,15 @@ function renderEdgeVoiceOptions(selectedVoice = '') {
   const filtered = localeFilter.value ? voices.filter(voice => voice.locale === localeFilter.value) : voices;
   const available = [...filtered];
   if (selectedVoice && !available.some(voice => voice.short_name === selectedVoice)) {
-    const selected = voices.find(voice => voice.short_name === selectedVoice);
+    const selected = allVoices.find(voice => voice.short_name === selectedVoice);
     available.unshift(selected || { short_name: selectedVoice, name: selectedVoice, locale: 'custom', gender: 'Unknown' });
   }
   select.innerHTML = available.map(voice => `<option value="${escapeHtml(voice.short_name)}">${escapeHtml(edgeVoiceLabel(voice))}</option>`).join('');
-  if (!available.length) select.innerHTML = `<option value="en-US-AriaNeural">Aria — en-US · Female</option>`;
-  select.value = selectedVoice || available[0]?.short_name || 'en-US-AriaNeural';
+  if (!available.length) {
+    select.innerHTML = `<option value="${escapeHtml(profile.defaultVoice)}">${escapeHtml(profile.defaultVoice)}</option>`;
+  }
+  select.value = selectedVoice || available[0]?.short_name || profile.defaultVoice;
+  if (!select.value) select.value = profile.defaultVoice;
   const status = $('#edgeVoiceStatus');
   if (status) {
     const source = appState.edgeVoices?.source === 'live' || appState.edgeVoices?.source === 'live-cache' ? 'online catalogue' : 'bundled fallback list';
@@ -1454,10 +1501,10 @@ function renderEdgeVoiceOptions(selectedVoice = '') {
   }
 }
 
-async function loadEdgeVoices(refresh = false, selectedVoice = '') {
+async function loadEdgeVoices(refresh = false, selectedVoice = '', language = 'en') {
   const payload = await api(`/api/tts/edge-voices?refresh=${refresh ? 'true' : 'false'}`);
   appState.edgeVoices = payload || appState.edgeVoices;
-  renderEdgeVoiceOptions(selectedVoice || $('#edgeVoiceSelect')?.value || '');
+  renderEdgeVoiceOptions(selectedVoice || $('#edgeVoiceSelect')?.value || '', language);
   return payload;
 }
 
@@ -1466,7 +1513,7 @@ function agentDefaults() {
     name: 'New Agent', color: '#6c63ff', avatar: 'NA', role: 'General voice assistant',
     system_prompt: 'You are a friendly, clear, and concise voice assistant. Describe your identity, domain, personality, tone, and speaking style here.',
     greeting: 'Hello. How can I help you?', llm_model: appState.models.find(model => model.name === 'qwen3.5:0.8b')?.name || appState.models[0]?.name || 'qwen3.5:0.8b',
-    temperature: 0.2, top_p: 0.8, max_tokens: 224, context_size: 4096, tts_mode: 'edge_fallback',
+    temperature: 0.2, top_p: 0.8, max_tokens: 224, context_size: 4096, language: 'en', tts_mode: 'edge_fallback',
     edge_voice: 'en-US-AriaNeural', kokoro_voice_id: 0, tts_rate: 1.0, tts_volume: 1.0,
     stt_model: 'iic/SenseVoiceSmall', tools_enabled: ['get_current_time','get_location','get_weather','handle_exit_intent'], info_ids: [],
   };
@@ -1487,13 +1534,24 @@ function openAgentModal(agentId = null) {
   const modelNames = [...new Set([agent.llm_model, ...appState.models.map(model => model.name || model.model)].filter(Boolean))];
   modelSelect.innerHTML = modelNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
   modelSelect.value = agent.llm_model;
-  renderEdgeVoiceOptions(agent.edge_voice || 'en-US-AriaNeural');
-  $('#edgeVoiceLocaleFilter').onchange = () => renderEdgeVoiceOptions($('#edgeVoiceSelect').value);
+  const languageSelect = form.elements.namedItem('language');
+  const sttModelInput = form.elements.namedItem('stt_model');
+  const applyAgentLanguage = (forceDefaultVoice = false) => {
+    const language = languageSelect.value || 'en';
+    const profile = languageProfile(language);
+    sttModelInput.value = profile.sttModel;
+    const currentVoice = forceDefaultVoice ? profile.defaultVoice : (form.elements.namedItem('edge_voice').value || profile.defaultVoice);
+    renderEdgeVoiceOptions(currentVoice, language);
+    applyLanguageTtsAvailability(form.elements.namedItem('tts_mode'), language);
+  };
+  applyAgentLanguage(false);
+  languageSelect.onchange = () => applyAgentLanguage(true);
+  $('#edgeVoiceLocaleFilter').onchange = () => renderEdgeVoiceOptions($('#edgeVoiceSelect').value, languageSelect.value);
   $('#refreshEdgeVoicesBtn').onclick = async () => {
     const button = $('#refreshEdgeVoicesBtn');
     button.disabled = true; button.textContent = 'Refreshing…';
     try {
-      const payload = await loadEdgeVoices(true, $('#edgeVoiceSelect').value);
+      const payload = await loadEdgeVoices(true, $('#edgeVoiceSelect').value, languageSelect.value);
       toast(payload.source === 'live' ? 'Edge voice catalogue refreshed.' : 'Using the bundled Edge voice list.', payload.error ? 'error' : 'success');
     } catch (error) { toast(error.message, 'error'); }
     finally { button.disabled = false; button.textContent = '↻ Refresh Edge voices'; }
@@ -1508,14 +1566,14 @@ function openAgentModal(agentId = null) {
           voice: $('#edgeVoiceSelect').value,
           rate: Number(form.elements.namedItem('tts_rate').value || 1),
           volume: Number(form.elements.namedItem('tts_volume').value || 1),
-          text: `Hello. This is ${agent.name || 'VerbaNode'} using the selected Edge voice.`,
+          text: languageSelect.value === 'id' ? `Halo. Ini adalah ${agent.name || 'VerbaNode'} menggunakan suara Edge yang dipilih.` : `Hello. This is ${agent.name || 'VerbaNode'} using the selected Edge voice.`,
         }),
       });
       toast('Edge voice preview completed.', 'success');
     } catch (error) { toast(error.message, 'error'); }
     finally { button.disabled = false; button.textContent = '▶ Preview selected voice'; }
   };
-  loadEdgeVoices(false, agent.edge_voice || 'en-US-AriaNeural').catch(() => {});
+  loadEdgeVoices(false, agent.edge_voice || languageProfile(agent.language).defaultVoice, agent.language || 'en').catch(() => {});
   const voiceSelect = form.elements.namedItem('kokoro_voice_id');
   const voices = appState.kokoroVoices.length ? appState.kokoroVoices : [
     { id: 0, name: 'af_maple', category: 'American female' },
@@ -1570,7 +1628,7 @@ function openAgentModal(agentId = null) {
       name: values.name, color: values.color, avatar: values.avatar, role: values.role,
       system_prompt: values.system_prompt, greeting: values.greeting, llm_model: values.llm_model,
       temperature: Number(values.temperature), top_p: Number(values.top_p), max_tokens: Number(values.max_tokens), context_size: Number(values.context_size),
-      tts_mode: values.tts_mode, edge_voice: values.edge_voice, kokoro_voice_id: Number(values.kokoro_voice_id),
+      language: values.language, tts_mode: values.tts_mode, edge_voice: values.edge_voice, kokoro_voice_id: Number(values.kokoro_voice_id),
       tts_rate: Number(values.tts_rate), tts_volume: Number(values.tts_volume), stt_model: values.stt_model,
       tools_enabled: $$('input[name="tool"]:checked', form).map(input => input.value),
       info_ids: $$('input[name="info"]:checked', form).map(input => Number(input.value)),
@@ -1597,7 +1655,59 @@ function openSimpleModal(kind, item = null) {
   if (kind === 'info') {
     $('#simpleModalFields').innerHTML = `<label>Title<input name="title" required value="${escapeHtml(item?.title || '')}"></label><label>Full text<textarea name="content" rows="10" required>${escapeHtml(item?.content || '')}</textarea></label><label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>`;
   } else {
-    $('#simpleModalFields').innerHTML = `<label>Button title<input name="title" required value="${escapeHtml(item?.title || '')}"></label><label>Spoken text<textarea name="text" rows="8" required>${escapeHtml(item?.text || '')}</textarea></label><label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>${item ? '<button type="button" id="deleteSimpleItem" class="btn danger-outline">Delete</button>' : ''}`;
+    const language = item?.language || 'en';
+    const profile = languageProfile(language);
+    $('#simpleModalFields').innerHTML = `
+      <label>Button title<input name="title" required value="${escapeHtml(item?.title || '')}"></label>
+      <label>Spoken text<textarea name="text" rows="8" required>${escapeHtml(item?.text || '')}</textarea></label>
+      <div class="form-grid two">
+        <label>Language<select name="language"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select></label>
+        <label>TTS mode<select name="tts_mode"><option value="edge">Edge only</option><option value="kokoro">Kokoro local only</option><option value="edge_fallback">Edge → Kokoro fallback</option><option value="kokoro_fallback">Kokoro → Edge fallback</option></select></label>
+        <label>Edge voice<select name="edge_voice" id="scriptEdgeVoiceSelect"></select></label>
+        <label>Kokoro voice<select name="kokoro_voice_id" id="scriptKokoroVoiceSelect"></select></label>
+        <label>Speech rate<input name="tts_rate" type="number" min="0.5" max="2" step="0.05" value="${Number(item?.tts_rate ?? 1)}"></label>
+        <label>Volume<input name="tts_volume" type="number" min="0" max="1" step="0.05" value="${Number(item?.tts_volume ?? 1)}"></label>
+      </div>
+      <button type="button" id="previewScriptVoiceBtn" class="btn secondary">▶ Preview script voice</button>
+      <label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>
+      ${item ? '<button type="button" id="deleteSimpleItem" class="btn danger-outline">Delete</button>' : ''}`;
+    form.elements.namedItem('language').value = language;
+    form.elements.namedItem('tts_mode').value = item?.tts_mode || 'edge';
+    const populateScriptVoices = (forceDefault = false) => {
+      const selectedLanguage = form.elements.namedItem('language').value || 'en';
+      const selectedProfile = languageProfile(selectedLanguage);
+      renderStandaloneEdgeVoiceSelect(
+        $('#scriptEdgeVoiceSelect'),
+        selectedLanguage,
+        forceDefault ? selectedProfile.defaultVoice : (item?.edge_voice || selectedProfile.defaultVoice),
+      );
+      applyLanguageTtsAvailability(form.elements.namedItem('tts_mode'), selectedLanguage);
+    };
+    populateScriptVoices(false);
+    form.elements.namedItem('language').onchange = () => populateScriptVoices(true);
+    const scriptKokoro = $('#scriptKokoroVoiceSelect');
+    const scriptVoices = appState.kokoroVoices.length ? appState.kokoroVoices : [{ id: 0, name: 'af_maple', category: 'American female' }];
+    scriptKokoro.innerHTML = scriptVoices.map(voice => `<option value="${voice.id}">${escapeHtml(voice.name)} — ${escapeHtml(voice.category)}</option>`).join('');
+    scriptKokoro.value = String(item?.kokoro_voice_id ?? 0);
+    $('#previewScriptVoiceBtn').onclick = async () => {
+      const button = $('#previewScriptVoiceBtn');
+      button.disabled = true; button.textContent = 'Playing…';
+      try {
+        await api('/api/tts/script-preview', {
+          method: 'POST',
+          body: JSON.stringify({
+            text: form.elements.namedItem('text').value.trim() || languageProfile(form.elements.namedItem('language').value).preview,
+            language: form.elements.namedItem('language').value,
+            tts_mode: form.elements.namedItem('tts_mode').value,
+            edge_voice: form.elements.namedItem('edge_voice').value,
+            kokoro_voice_id: Number(form.elements.namedItem('kokoro_voice_id').value || 0),
+            tts_rate: Number(form.elements.namedItem('tts_rate').value || 1),
+            tts_volume: Number(form.elements.namedItem('tts_volume').value || 1),
+          }),
+        });
+      } catch (error) { toast(error.message, 'error'); }
+      finally { button.disabled = false; button.textContent = '▶ Preview script voice'; }
+    };
   }
   wireModalBasics();
   if (item && $('#deleteSimpleItem')) $('#deleteSimpleItem').onclick = async () => {
@@ -1614,7 +1724,12 @@ function openSimpleModal(kind, item = null) {
     const fd = new FormData(form);
     const payload = kind === 'info'
       ? { title: fd.get('title'), content: fd.get('content'), enabled: Boolean(form.elements.namedItem('enabled').checked) }
-      : { title: fd.get('title'), text: fd.get('text'), enabled: Boolean(form.elements.namedItem('enabled').checked) };
+      : {
+          title: fd.get('title'), text: fd.get('text'), enabled: Boolean(form.elements.namedItem('enabled').checked),
+          language: fd.get('language'), tts_mode: fd.get('tts_mode'), edge_voice: fd.get('edge_voice'),
+          kokoro_voice_id: Number(fd.get('kokoro_voice_id') || 0), tts_rate: Number(fd.get('tts_rate') || 1),
+          tts_volume: Number(fd.get('tts_volume') || 1),
+        };
     const base = kind === 'info' ? '/api/information' : '/api/scripts';
     try {
       await api(item ? `${base}/${item.id}` : base, { method: item ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -1976,9 +2091,9 @@ function bindEvents() {
     try {
       await api('/api/ai/reload-asr', { method: 'POST' });
       renderRuntimeStatus(await api('/api/status'));
-      toast('SenseVoice reloaded inside the AI Engine.', 'success');
+      toast('The active ASR model was reloaded inside the AI Engine.', 'success');
     } catch (error) { toast(error.message, 'error'); }
-    finally { button.disabled = false; button.textContent = 'Reload SenseVoice'; }
+    finally { button.disabled = false; button.textContent = 'Reload active ASR'; }
   };
   $('#reloadKokoroModelBtn').onclick = async () => {
     const button = $('#reloadKokoroModelBtn');

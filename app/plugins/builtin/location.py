@@ -44,4 +44,6 @@ class LocationPlugin(BuiltinPlugin):
         if result.get("error"):
             return str(result["error"])
         location = result.get("location") or context.settings.default_location
+        if str(context.metadata.get("language") or "en") == "id":
+            return f"Saat ini kita berada di {location}."
         return f"We are currently in {location}."
