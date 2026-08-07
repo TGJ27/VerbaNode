@@ -1,2 +1,2 @@
-APP_VERSION = "0.7.3"
-BUILD_LABEL = "bilingual-stabilization-beta"
+APP_VERSION = "0.7.4"
+BUILD_LABEL = "stable"

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.4 - Stable bilingual assistant foundation
+
+- Promoted the v0.7 bilingual assistant line to stable after final regression validation.
+- Consolidated English SenseVoiceSmall and Indonesian Whisper Base/Small agent profiles with persistent active-agent selection.
+- Includes selective short-term context, empty-Ollama-response recovery, per-script TTS, Edge voice management, Indonesian deterministic routing, ASR status/benchmark tooling, and plugin hardening.
+- Fixed Windows Whisper Base/Small cache detection so existing OpenAI Whisper checkpoints are reported correctly.
+- Updated stable release documentation and version metadata.
+- 121 automated tests pass.
+
 ## v0.7.3 - Bilingual stabilization and UX cleanup
 
 - Added Whisper Base/Small cache visibility so the dashboard shows whether Indonesian ASR models are already downloaded before switching.

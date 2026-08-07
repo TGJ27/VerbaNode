@@ -125,7 +125,7 @@ def test_diagnostics_ui_and_endpoints_are_present() -> None:
     assert '@app.get("/api/diagnostics")' in main
     assert '@app.post("/api/diagnostics/self-test")' in main
     assert '@app.get("/api/diagnostics/export")' in main
-    assert APP_VERSION == "0.7.3"
+    assert APP_VERSION == "0.7.4"
 
 
 def test_diagnostics_directory_is_runtime_only(tmp_path: Path) -> None:

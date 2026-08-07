@@ -2,38 +2,30 @@
 
 VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
 
-**Current test release:** v0.7.3 Beta bilingual stabilization and UX cleanup.
+**Current stable release:** v0.7.4.
 
-## v0.7.3 bilingual stabilization
+## v0.7.4 stable bilingual assistant foundation
 
-- Adds two agent language profiles: English and Bahasa Indonesia.
-- English agents use SenseVoiceSmall through FunASR.
-- Indonesian agents use multilingual Whisper Base through FunASR with decoding fixed to Indonesian.
-- Adds a default **Ropi Indonesia** agent using `id-ID-GadisNeural` through Edge TTS.
-- Enforces one active language profile at a time from the active agent configuration.
-- Localizes deterministic time, date, location, weather, and stop-conversation replies.
-- Gives every Script its own language, TTS mode, Edge voice, Kokoro voice, speech rate, and volume instead of inheriting the active agent voice.
-- Adds `download_whisper.bat` for preparing the Indonesian ASR model.
-- Existing databases are migrated automatically.
+VerbaNode v0.7.4 stabilizes the English/Indonesian assistant stack introduced across v0.7.x.
 
-## v0.6.7 typed-chat interruption fix
-
-- Typed chat can interrupt streamed TTS without wedging the generation lock.
-- TTS cancellation now reliably terminates generator and player workers.
-- No database migration is required.
-
-## v0.6.6 selective short-term memory and Edge voices
-
-- Stores complete conversation history but injects prior context only when the current request explicitly needs it.
-- Limits selected context to a compact summary and recent messages instead of sending the entire conversation.
-- Retries empty Ollama output with a minimal context and never saves a blank assistant response.
-- Adds natural location-routing phrases and an Edge voice dropdown with locale filtering, refresh, and preview.
+- Adds two persistent agent language profiles: **English** and **Bahasa Indonesia**.
+- English agents use **SenseVoiceSmall** through FunASR for low-latency recognition.
+- Indonesian agents can use **Whisper Base** or **Whisper Small** through FunASR with decoding fixed to Indonesian.
+- Includes default **Ropi** and **Ropi Indonesia** agents; the last active agent remains selected after restart.
+- Uses language-matched Edge TTS for Indonesian and supports Edge/Kokoro choices for English.
+- Gives each Script its own language, TTS provider, voice, rate, and volume instead of inheriting the active agent.
+- Adds selective short-term conversation context so stored history is only injected when a request needs prior context.
+- Includes the hardened built-in/external plugin architecture, Plugin Manager, diagnostics, soak monitoring, and failure isolation.
+- Adds Whisper Base/Small cache visibility, ASR load/transcription metrics, language-profile testing, and a real WAV benchmark.
+- Includes File Explorer-style Cards/List/Details views for Information and Plugins plus Small/Medium/Large UI text sizes.
+- Fixes typed-chat interruption during TTS, Windows Whisper cache detection, Indonesian deterministic routing, and empty-Ollama-response recovery.
+- Existing databases migrate automatically.
 
 ## Main features
 
 - Multiple editable English or Indonesian agents with independent identity, ASR profile, character instructions, Ollama model, TTS voice, information, tools, memory, and chat history.
 - Continuous conversation, host push-to-talk, browser-device push-to-talk, typed chat, and Stop Current TTS.
-- Silero VAD, English SenseVoiceSmall, Indonesian Whisper Base through FunASR, Ollama, Edge TTS, and local Sherpa-ONNX Kokoro.
+- Silero VAD, English SenseVoiceSmall, Indonesian Whisper Base/Small through FunASR, Ollama, Edge TTS, and local Sherpa-ONNX Kokoro.
 - Sentence-buffered LLM-to-TTS streaming while chat remains one assistant message.
 - Global script buttons with queue controls, per-script language/TTS selection, and persistent audio caching.
 - SQLite storage, backup/restore, and per-agent memory.
@@ -105,7 +97,7 @@ External plugins remain trusted local Python code and are not security-sandboxed
 - Exposes AI Engine PID, model state, load time, queue usage, inference latency, and restart count in Settings.
 - Provides `VERBANODE_AI_ENGINE_PROCESS=false` for compatibility troubleshooting.
 
-This remains a hardware test build until long-duration model and audio behavior is validated on the target Windows PC.
+The v0.7.4 line is the stable bilingual assistant foundation. Hardware-specific ASR latency and audio-device behavior should still be validated on each deployment PC.
 
 ## v0.4.2 Phase 2 isolated Audio Engine and hot-plug recovery
 
