@@ -743,3 +743,16 @@ input:focus,textarea:focus,select:focus { border-color: #8ab5ff; box-shadow: 0 0
   .edge-voice-actions { display: grid; grid-template-columns: 1fr; }
   .edge-voice-actions .btn { width: 100%; }
 }
+
+/* v0.7.3 bilingual ASR stabilization */
+.asr-cache-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.asr-cache-item { min-width:0; padding:11px 12px; display:grid; gap:3px; border:1px solid var(--line); border-radius:11px; background:#f8faff; }
+.asr-cache-item span,.asr-cache-item strong,.asr-cache-item small { display:block; }
+.asr-cache-item span { color:var(--muted); font-size:var(--font-micro); font-weight:800; }
+.asr-cache-item strong { font-size:var(--font-small); }
+.asr-cache-item small { color:var(--muted); font-size:var(--font-micro); line-height:1.4; }
+.asr-cache-item.ready { border-color:#cce8da; background:#f2fbf7; }
+.asr-cache-item.ready strong { color:#167c58; }
+.asr-cache-item.missing { border-color:#ead9b1; background:#fffaf0; }
+.asr-cache-item.missing strong { color:#946615; }
+@media (max-width:520px) { .asr-cache-grid { grid-template-columns:1fr; } }

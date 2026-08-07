@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 import threading
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
@@ -49,6 +51,73 @@ class FunASRService:
     @staticmethod
     def _is_whisper_model(model_name: str) -> bool:
         return str(model_name or "").strip().lower().startswith("whisper")
+
+    @staticmethod
+    def whisper_cache_status(cache_root: Path | None = None) -> dict[str, Any]:
+        """Report whether the optional Whisper checkpoints are already cached.
+
+        OpenAI Whisper normally stores checkpoints in ``~/.cache/whisper``.
+        On Windows, spawned processes and user environments can expose HOME,
+        USERPROFILE, XDG_CACHE_HOME, or WHISPER_CACHE_DIR differently.  Do not
+        trust a single environment variable: scan every plausible cache root
+        and report the actual checkpoint that exists.
+        """
+
+        def add_candidate(candidates: list[Path], value: str | Path | None, *, append_whisper: bool = False) -> None:
+            if not value:
+                return
+            path = Path(value).expanduser()
+            if append_whisper and path.name.lower() != "whisper":
+                path = path / "whisper"
+            try:
+                key = str(path.resolve(strict=False)).lower()
+            except Exception:
+                key = str(path).lower()
+            if all(existing[0] != key for existing in normalized):
+                normalized.append((key, path))
+                candidates.append(path)
+
+        if cache_root is not None:
+            roots = [Path(cache_root).expanduser()]
+        else:
+            roots: list[Path] = []
+            normalized: list[tuple[str, Path]] = []
+            add_candidate(roots, os.environ.get("WHISPER_CACHE_DIR"), append_whisper=True)
+            add_candidate(roots, os.environ.get("XDG_CACHE_HOME"), append_whisper=True)
+            add_candidate(roots, Path.home() / ".cache" / "whisper")
+            add_candidate(roots, (Path(os.environ["USERPROFILE"]) / ".cache" / "whisper") if os.environ.get("USERPROFILE") else None)
+            add_candidate(roots, (Path(os.environ["HOME"]) / ".cache" / "whisper") if os.environ.get("HOME") else None)
+            if not roots:
+                roots = [Path.home() / ".cache" / "whisper"]
+
+        models: dict[str, Any] = {}
+        for model_name, filename in (("Whisper-base", "base.pt"), ("Whisper-small", "small.pt")):
+            found_path: Path | None = None
+            for root in roots:
+                candidate = root / filename
+                if candidate.is_file():
+                    found_path = candidate
+                    break
+
+            path = found_path or (roots[0] / filename)
+            exists = found_path is not None
+            size_bytes = path.stat().st_size if exists else 0
+            models[model_name] = {
+                "downloaded": exists,
+                "path": str(path),
+                "size_bytes": int(size_bytes),
+                "size_mb": round(size_bytes / (1024 * 1024), 1) if size_bytes else 0.0,
+            }
+
+        active_root = next(
+            (root for root in roots if any((root / filename).is_file() for filename in ("base.pt", "small.pt"))),
+            roots[0],
+        )
+        return {
+            "root": str(active_root),
+            "roots_checked": [str(root) for root in roots],
+            "models": models,
+        }
 
     @staticmethod
     def fallback_model(model_name: str | None, language: str | None) -> str | None:
@@ -372,10 +441,17 @@ class FunASRService:
             installed = True
         except Exception:
             installed = False
+        cache = self.whisper_cache_status()
+        if self._model is not None and self._is_whisper_model(self._model_name or ""):
+            cached = cache.get("models", {}).get(self._model_name or "")
+            if cached is not None:
+                cached["downloaded"] = True
+                cached["loaded"] = True
         return {
             "provider": "OpenAI Whisper via FunASR" if self._is_whisper_model(self._model_name or self.settings.funasr_model) else "FunASR",
             "installed": installed,
             "loaded": self._model is not None,
             "model": self._model_name or self.settings.funasr_model,
             "confidence": "estimated",
+            "whisper_cache": cache,
         }

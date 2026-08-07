@@ -2,9 +2,9 @@
 
 VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
 
-**Current test release:** v0.7.2 Beta bilingual ASR hardening.
+**Current test release:** v0.7.3 Beta bilingual stabilization and UX cleanup.
 
-## v0.7.2 bilingual agents and ASR hardening
+## v0.7.3 bilingual stabilization
 
 - Adds two agent language profiles: English and Bahasa Indonesia.
 - English agents use SenseVoiceSmall through FunASR.

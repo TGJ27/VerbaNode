@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.7.3 - Bilingual stabilization and UX cleanup
+
+- Added Whisper Base/Small cache visibility so the dashboard shows whether Indonesian ASR models are already downloaded before switching.
+- Added a one-click active language profile test that warms the selected ASR model and plays a matching Edge TTS sample without writing to chat history.
+- Disabled ASR reload/benchmark controls while model operations are already loading or reloading.
+- Improved English/Indonesian agent voice normalization and script language/TTS compatibility checks.
+- Added clearer Indonesian script guidance and disabled incompatible Kokoro controls for Indonesian scripts.
+- Added regression tests for model-cache detection, language profile validation, and the bilingual UI controls.
+
 ## 0.7.2
 
 - Hardened the bilingual ASR path with automatic Indonesian Whisper Small to Whisper Base fallback when the accuracy-first model fails or times out.

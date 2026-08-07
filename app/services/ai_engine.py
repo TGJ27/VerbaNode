@@ -837,11 +837,18 @@ class AiSttProxy:
         health = self.engine.health()
         remote = health.get("remote") or {}
         asr = remote.get("asr") or {}
+        cache = FunASRService.whisper_cache_status()
+        loaded_model = asr.get("model") or self.settings.funasr_model
+        if bool(asr.get("loaded")) and FunASRService._is_whisper_model(str(loaded_model)):
+            cached = cache.get("models", {}).get(str(loaded_model))
+            if cached is not None:
+                cached["downloaded"] = True
+                cached["loaded"] = True
         return {
             "provider": "FunASR via AI Engine",
             "installed": asr.get("installed") is not False,
             "loaded": bool(asr.get("loaded")),
-            "model": asr.get("model") or self.settings.funasr_model,
+            "model": loaded_model,
             "confidence": "estimated",
             "state": asr.get("state") or ("starting" if health.get("alive") else "unavailable"),
             "last_latency_ms": asr.get("last_latency_ms"),
@@ -851,6 +858,7 @@ class AiSttProxy:
             "requested_model": self._last_requested_model,
             "fallback_model": self._last_fallback_model,
             "fallback_reason": self._last_fallback_reason,
+            "whisper_cache": cache,
         }
 
 

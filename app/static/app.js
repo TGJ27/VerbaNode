@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.7.2';
+const FRONTEND_VERSION = '0.7.3';
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
 
 const appState = {
@@ -1059,9 +1059,32 @@ function renderModels() {
   $('#modelList').innerHTML = appState.models.map(model => `<div class="model-item"><div><strong>${escapeHtml(model.name || model.model)}</strong><small>${escapeHtml(model.details?.parameter_size || '')} ${escapeHtml(model.details?.quantization_level || '')}</small></div><span class="chip">${bytesLabel(model.size)}</span></div>`).join('') || '<div class="queue-empty">No local models reported.</div>';
 }
 
+function whisperCacheEntry(modelName) {
+  return appState.data?.stt?.whisper_cache?.models?.[modelName]
+    || appState.lastRuntimeStatus?.stt?.whisper_cache?.models?.[modelName]
+    || null;
+}
+
+function whisperCacheLabel(modelName) {
+  const cached = whisperCacheEntry(modelName);
+  if (!cached) return '';
+  if (cached.downloaded) return ` · downloaded${cached.size_mb ? ` ${cached.size_mb} MB` : ''}`;
+  return ' · not downloaded';
+}
+
+function setAsrControlsBusy(busy) {
+  ['refreshAsrStatusBtn', 'testLanguageProfileBtn', 'runAsrBenchmarkBtn', 'reloadAsrModelBtn'].forEach(id => {
+    const button = $(`#${id}`);
+    if (button) button.disabled = Boolean(busy);
+  });
+  const input = $('#asrBenchmarkFile');
+  if (input) input.disabled = Boolean(busy);
+}
+
 function renderAsrModelStatus(data) {
   const box = $('#asrModelStatusBox');
   const list = $('#asrModelStatusList');
+  const cacheNode = $('#asrModelCache');
   if (!box || !list) return;
   const stt = data?.stt || {};
   const agent = data?.active_agent || appState.activeAgent || {};
@@ -1070,7 +1093,9 @@ function renderAsrModelStatus(data) {
   const loaded = aiAsr.model || stt.model || 'Not loaded';
   const language = agent.language === 'id' ? 'Bahasa Indonesia' : 'English';
   const fallback = stt.fallback_model;
-  box.innerHTML = `<strong>${escapeHtml(String(selected))}</strong><br><span class="muted">${escapeHtml(language)} · ${escapeHtml(String(aiAsr.state || stt.state || 'unknown'))}${fallback ? ` · fallback active: ${escapeHtml(String(fallback))}` : ''}</span>`;
+  const stateName = String(aiAsr.state || stt.state || 'unknown');
+  const busy = ['loading', 'reloading'].includes(stateName.toLowerCase());
+  box.innerHTML = `<strong>${escapeHtml(String(selected))}</strong><br><span class="muted">${escapeHtml(language)} · ${escapeHtml(stateName)}${fallback ? ` · fallback active: ${escapeHtml(String(fallback))}` : ''}</span>`;
   list.innerHTML = `
     <dt>Selected by agent</dt><dd>${escapeHtml(String(selected))}</dd>
     <dt>Actually loaded</dt><dd>${escapeHtml(String(loaded))}</dd>
@@ -1079,11 +1104,25 @@ function renderAsrModelStatus(data) {
     <dt>Completed jobs</dt><dd>${aiAsr.jobs_completed ?? 0}</dd>
     <dt>Fallback</dt><dd>${fallback ? `${escapeHtml(String(stt.requested_model || selected))} → ${escapeHtml(String(fallback))}` : 'Not used'}</dd>
     <dt>Last error</dt><dd>${escapeHtml(String(aiAsr.last_error || stt.last_error || stt.fallback_reason || 'None'))}</dd>`;
+
+  if (cacheNode) {
+    const cache = stt.whisper_cache || {};
+    const models = cache.models || {};
+    cacheNode.innerHTML = ['Whisper-base', 'Whisper-small'].map(model => {
+      const item = models[model] || {};
+      const ready = Boolean(item.downloaded);
+      const name = model === 'Whisper-base' ? 'Whisper Base' : 'Whisper Small';
+      return `<div class="asr-cache-item ${ready ? 'ready' : 'missing'}"><span>${escapeHtml(name)}</span><strong>${ready ? 'Downloaded' : 'Not downloaded'}</strong><small>${ready && item.size_mb ? `${item.size_mb} MB` : ready ? 'Ready for offline loading' : 'First use will download the model'}</small></div>`;
+    }).join('');
+  }
+  setAsrControlsBusy(busy);
 }
 
 function renderRuntimeStatus(data) {
   const tts = data.tts || {};
   const stt = data.stt || {};
+  appState.lastRuntimeStatus = data;
+  if (appState.data) appState.data.stt = stt;
   const hardware = data.hardware || {};
   const audio = data.audio || {};
   const audioEngine = audio.engine || {};
@@ -1581,19 +1620,26 @@ function openAgentModal(agentId = null) {
     const profile = languageProfile(language);
     const currentStt = forceDefaults ? profile.sttModel : (sttModelSelect.value || agent.stt_model || profile.sttModel);
     sttModelSelect.innerHTML = (profile.sttModels || [{ value: profile.sttModel, label: profile.sttModel }])
-      .map(model => `<option value="${escapeHtml(model.value)}">${escapeHtml(model.label)}</option>`).join('');
+      .map(model => `<option value="${escapeHtml(model.value)}">${escapeHtml(model.label + (model.value.startsWith('Whisper-') ? whisperCacheLabel(model.value) : ''))}</option>`).join('');
     sttModelSelect.value = [...sttModelSelect.options].some(option => option.value === currentStt) ? currentStt : profile.sttModel;
     sttModelSelect.disabled = false;
     const hint = $('#agentSttModelHint');
-    if (hint) hint.textContent = language === 'id'
-      ? 'Whisper Base is faster on CPU. Whisper Small is heavier but usually more accurate for Indonesian and code-switching.'
-      : 'SenseVoiceSmall is the fixed fast English recognizer.';
+    if (hint) {
+      const selectedModel = sttModelSelect.value;
+      const cacheText = selectedModel.startsWith('Whisper-')
+        ? (whisperCacheEntry(selectedModel)?.downloaded ? ' The selected model is already downloaded.' : ' The selected model is not cached yet; first use will download it.')
+        : '';
+      hint.textContent = language === 'id'
+        ? `Whisper Base is faster on CPU. Whisper Small is heavier but usually more accurate for Indonesian and code-switching.${cacheText}`
+        : 'SenseVoiceSmall is the fixed fast English recognizer.';
+    }
     const currentVoice = forceDefaults ? profile.defaultVoice : (form.elements.namedItem('edge_voice').value || profile.defaultVoice);
     renderEdgeVoiceOptions(currentVoice, language);
     applyLanguageTtsAvailability(form.elements.namedItem('tts_mode'), language);
   };
   applyAgentLanguage(false);
   languageSelect.onchange = () => applyAgentLanguage(true);
+  sttModelSelect.onchange = () => applyAgentLanguage(false);
   $('#edgeVoiceLocaleFilter').onchange = () => renderEdgeVoiceOptions($('#edgeVoiceSelect').value, languageSelect.value);
   $('#refreshEdgeVoicesBtn').onclick = async () => {
     const button = $('#refreshEdgeVoicesBtn');
@@ -1716,6 +1762,7 @@ function openSimpleModal(kind, item = null) {
         <label>Speech rate<input name="tts_rate" type="number" min="0.5" max="2" step="0.05" value="${Number(item?.tts_rate ?? 1)}"></label>
         <label>Volume<input name="tts_volume" type="number" min="0" max="1" step="0.05" value="${Number(item?.tts_volume ?? 1)}"></label>
       </div>
+      <div id="scriptTtsCompatibilityHint" class="status-box"></div>
       <button type="button" id="previewScriptVoiceBtn" class="btn secondary">▶ Preview script voice</button>
       <label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>
       ${item ? '<button type="button" id="deleteSimpleItem" class="btn danger-outline">Delete</button>' : ''}`;
@@ -1730,6 +1777,12 @@ function openSimpleModal(kind, item = null) {
         forceDefault ? selectedProfile.defaultVoice : (item?.edge_voice || selectedProfile.defaultVoice),
       );
       applyLanguageTtsAvailability(form.elements.namedItem('tts_mode'), selectedLanguage);
+      const kokoroSelect = $('#scriptKokoroVoiceSelect');
+      if (kokoroSelect) kokoroSelect.disabled = selectedLanguage === 'id';
+      const compatibility = $('#scriptTtsCompatibilityHint');
+      if (compatibility) compatibility.textContent = selectedLanguage === 'id'
+        ? 'Bahasa Indonesia scripts use Edge TTS only. Kokoro is disabled for this language profile.'
+        : 'English scripts can use Edge, Kokoro, or either fallback mode.';
     };
     populateScriptVoices(false);
     form.elements.namedItem('language').onchange = () => populateScriptVoices(true);
@@ -1778,6 +1831,20 @@ function openSimpleModal(kind, item = null) {
           kokoro_voice_id: Number(fd.get('kokoro_voice_id') || 0), tts_rate: Number(fd.get('tts_rate') || 1),
           tts_volume: Number(fd.get('tts_volume') || 1),
         };
+    if (kind === 'script') {
+      if (payload.language === 'id' && payload.tts_mode !== 'edge') {
+        toast('Bahasa Indonesia scripts must use Edge TTS.', 'error');
+        return;
+      }
+      if (payload.language === 'id' && !String(payload.edge_voice || '').toLowerCase().startsWith('id-')) {
+        toast('Choose an Indonesian Edge voice for this script.', 'error');
+        return;
+      }
+      if (payload.language === 'en' && String(payload.edge_voice || '').toLowerCase().startsWith('id-')) {
+        toast('Choose an English Edge voice for this script.', 'error');
+        return;
+      }
+    }
     const base = kind === 'info' ? '/api/information' : '/api/scripts';
     try {
       await api(item ? `${base}/${item.id}` : base, { method: item ? 'PUT' : 'POST', body: JSON.stringify(payload) });
@@ -2068,12 +2135,27 @@ function bindEvents() {
       toast('ASR status refreshed.', 'success');
     } catch (error) { toast(error.message, 'error'); }
   };
+  $('#testLanguageProfileBtn').onclick = async () => {
+    const button = $('#testLanguageProfileBtn');
+    setAsrControlsBusy(true);
+    button.textContent = 'Testing…';
+    try {
+      const result = await api('/api/ai/test-language-profile', { method: 'POST' });
+      const status = await api('/api/status');
+      renderRuntimeStatus(status);
+      toast(`${result.language === 'id' ? 'Indonesian' : 'English'} profile ready: ${result.model} + ${result.voice}.`, 'success');
+    } catch (error) { toast(error.message, 'error'); }
+    finally {
+      setAsrControlsBusy(false);
+      button.textContent = 'Test active language profile';
+    }
+  };
   $('#runAsrBenchmarkBtn').onclick = async () => {
     const file = $('#asrBenchmarkFile').files?.[0];
     if (!file) { toast('Choose a PCM WAV sample first.', 'error'); return; }
     const button = $('#runAsrBenchmarkBtn');
     const status = $('#asrBenchmarkStatus');
-    button.disabled = true; button.textContent = 'Benchmarking…';
+    setAsrControlsBusy(true); button.textContent = 'Benchmarking…';
     status.textContent = 'Loading and testing Whisper Base and Whisper Small. The first run can take longer if a model must be downloaded.';
     const body = new FormData(); body.append('file', file);
     try {
@@ -2089,7 +2171,7 @@ function bindEvents() {
       status.textContent = error.message;
       toast(error.message, 'error');
     } finally {
-      button.disabled = false; button.textContent = 'Benchmark Base vs Small';
+      setAsrControlsBusy(false); button.textContent = 'Benchmark Base vs Small';
     }
   };
   $('#pullModelForm').onsubmit = async event => {
@@ -2166,13 +2248,13 @@ function bindEvents() {
   };
   $('#reloadAsrModelBtn').onclick = async () => {
     const button = $('#reloadAsrModelBtn');
-    button.disabled = true; button.textContent = 'Loading…';
+    setAsrControlsBusy(true); button.textContent = 'Loading…';
     try {
       await api('/api/ai/reload-asr', { method: 'POST' });
       renderRuntimeStatus(await api('/api/status'));
       toast('The active ASR model was reloaded inside the AI Engine.', 'success');
     } catch (error) { toast(error.message, 'error'); }
-    finally { button.disabled = false; button.textContent = 'Reload active ASR'; }
+    finally { setAsrControlsBusy(false); button.textContent = 'Reload active ASR'; }
   };
   $('#reloadKokoroModelBtn').onclick = async () => {
     const button = $('#reloadKokoroModelBtn');

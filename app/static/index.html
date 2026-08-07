@@ -313,7 +313,12 @@
                   <p class="eyebrow">SPEECH RECOGNITION</p><h3>Active ASR model</h3>
                   <div id="asrModelStatusBox" class="status-box">Loading ASR status…</div>
                   <div id="asrModelStatusList" class="definition-list"></div>
-                  <button id="refreshAsrStatusBtn" type="button" class="btn ghost">Refresh ASR status</button>
+                  <div id="asrModelCache" class="asr-cache-grid"></div>
+                  <div class="button-grid two">
+                    <button id="refreshAsrStatusBtn" type="button" class="btn ghost">Refresh ASR status</button>
+                    <button id="testLanguageProfileBtn" type="button" class="btn secondary">Test active language profile</button>
+                  </div>
+                  <p class="tiny muted">The profile test loads the active agent's ASR model and plays a matching Edge voice sample. It does not record or add anything to chat history.</p>
                 </section>
                 <section class="card settings-card">
                   <p class="eyebrow">INDONESIAN BENCHMARK</p><h3>Whisper Base vs Small</h3>

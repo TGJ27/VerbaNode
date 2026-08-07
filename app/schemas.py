@@ -65,7 +65,7 @@ class AgentCreate(BaseModel):
                 self.edge_voice = "id-ID-GadisNeural"
         else:
             self.stt_model = "iic/SenseVoiceSmall"
-            if self.edge_voice.startswith("id-"):
+            if not self.edge_voice.lower().startswith("en-"):
                 self.edge_voice = "en-US-AriaNeural"
         return self
 
@@ -102,7 +102,7 @@ class ScriptCreate(BaseModel):
             self.tts_mode = "edge"
             if not self.edge_voice.startswith("id-"):
                 self.edge_voice = "id-ID-GadisNeural"
-        elif self.edge_voice.startswith("id-"):
+        elif not self.edge_voice.lower().startswith("en-"):
             self.edge_voice = "en-US-AriaNeural"
         return self
 
@@ -158,7 +158,7 @@ class ScriptTtsPreviewRequest(BaseModel):
             self.tts_mode = "edge"
             if not self.edge_voice.startswith("id-"):
                 self.edge_voice = "id-ID-GadisNeural"
-        elif self.edge_voice.startswith("id-"):
+        elif not self.edge_voice.lower().startswith("en-"):
             self.edge_voice = "en-US-AriaNeural"
         return self
 

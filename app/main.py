@@ -1200,6 +1200,72 @@ async def reload_ai_asr(token: Token) -> dict[str, Any]:
     return {"ok": True, "provider": "asr", "status": result, "engine": state.ai_engine.health()}
 
 
+@app.post("/api/ai/test-language-profile")
+async def test_active_language_profile(token: Token) -> dict[str, Any]:
+    """Warm the active agent's ASR and play a language-matched Edge sample.
+
+    This is intentionally non-destructive: it does not record microphone audio
+    and does not add a chat message. It verifies the selected recognizer can be
+    loaded and that the configured Edge voice can produce host playback.
+    """
+    await state.conversation.stop_conversation(stop_tts=True)
+    await state.script_queue.stop()
+    agent = state.conversation.active_agent()
+    language = str(agent.get("language") or "en").lower()
+    model_name = str(agent.get("stt_model") or state.settings.funasr_model)
+    if language == "id":
+        if model_name not in {"Whisper-base", "Whisper-small"}:
+            raise HTTPException(status_code=400, detail="Indonesian agents require Whisper Base or Whisper Small")
+        voice = str(agent.get("edge_voice") or "id-ID-GadisNeural")
+        if not voice.lower().startswith("id-"):
+            raise HTTPException(status_code=400, detail="Indonesian agents require an Indonesian Edge voice")
+        preview_text = "Halo. Profil Bahasa Indonesia VerbaNode siap digunakan."
+    else:
+        if model_name != "iic/SenseVoiceSmall":
+            raise HTTPException(status_code=400, detail="English agents require SenseVoiceSmall")
+        voice = str(agent.get("edge_voice") or "en-US-AriaNeural")
+        if voice.lower().startswith("id-"):
+            raise HTTPException(status_code=400, detail="English agents require an English Edge voice")
+        preview_text = "Hello. The English VerbaNode voice profile is ready."
+
+    try:
+        if state.ai_engine is not None:
+            current = state.stt.status()
+            if not current.get("loaded") or str(current.get("model")) != model_name:
+                asr_status = await asyncio.to_thread(state.ai_engine.reload_asr, model_name)
+            else:
+                asr_status = current
+        else:
+            reload_model = getattr(state.stt, "reload_model", None)
+            if reload_model is None:
+                raise RuntimeError("The configured ASR service cannot reload models")
+            asr_status = await asyncio.to_thread(reload_model, model_name)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"ASR profile test failed: {exc}") from exc
+
+    try:
+        played = await asyncio.to_thread(
+            state.tts.preview_edge_voice_blocking,
+            voice=voice,
+            text=preview_text,
+            rate=float(agent.get("tts_rate") or 1.0),
+            volume=float(agent.get("tts_volume") or 1.0),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Edge TTS profile test failed: {exc}") from exc
+    if not played:
+        raise HTTPException(status_code=503, detail="Language profile voice test was cancelled")
+
+    return {
+        "ok": True,
+        "language": language,
+        "model": model_name,
+        "voice": voice,
+        "asr": asr_status,
+        "stt": state.stt.status(),
+    }
+
+
 @app.post("/api/ai/benchmark-asr")
 async def benchmark_ai_asr(
     token: Token,
