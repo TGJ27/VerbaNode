@@ -5,7 +5,7 @@ cd /d "%~dp0"
 if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
 
 echo ============================================================
-echo VerbaNode v0.7.5 Windows application build
+echo VerbaNode v0.7.6 Windows application build
 echo ============================================================
 echo.
 

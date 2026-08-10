@@ -1,4 +1,4 @@
-# VerbaNode Windows Application Preview (v0.7.5)
+# VerbaNode Windows Application and Online Installer (v0.7.6)
 
 This release adds the packaging layer used to build `VerbaNode.exe` without
 removing or replacing the source development workflow.
@@ -64,3 +64,8 @@ light blue/white card design, indigo controls, rounded components, and status
 pills. CustomTkinter is a build-only launcher dependency; source development
 continues to use `run.bat` / `run_https.bat` without requiring the native
 launcher UI.
+
+
+## v0.7.6 online installer
+
+After `build_windows.bat`, run `build_installer.bat` to create `dist-installer\VerbaNode-Setup-0.7.6.exe`. The wizard can prepare SenseVoiceSmall, Whisper Base/Small, Kokoro, Ollama, and an Ollama model. The setup uses VerbaNode's frozen `--setup-*` commands and keeps mutable data/model caches outside Program Files.

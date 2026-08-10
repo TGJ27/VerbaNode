@@ -868,6 +868,10 @@ class WindowsLauncher:
         self.root.mainloop()
 
 def main() -> None:
+    setup_args = [arg for arg in sys.argv[1:] if arg.startswith("--setup-")]
+    if setup_args:
+        from app.setup_cli import run_from_argv
+        raise SystemExit(run_from_argv(sys.argv[1:]))
     if "--server" in sys.argv:
         run_server()
         return

@@ -1,37 +1,35 @@
-# VerbaNode v0.7.5 Windows Application Preview
+# VerbaNode v0.7.6 Windows Online Installer
 
-v0.7.5 is the first Windows desktop packaging preview built on the v0.7.4 stable assistant foundation. It does not change the STT/LLM/TTS/plugin behavior; it adds a production-style Windows launcher and frozen runtime layout.
+v0.7.6 turns the v0.7.5 frozen Windows application into a normal one-file online installer while preserving the existing source-development workflow.
 
-## Native launcher
+## Installer
 
-When packaged as `VerbaNode.exe`, the application opens a small native Windows window that:
+- Installs the frozen application under `C:\Program Files\VerbaNode`.
+- Preserves runtime/user state under `%LOCALAPPDATA%\VerbaNode`.
+- Preserves Whisper, ModelScope/SenseVoice, and Ollama model caches across upgrades.
+- Creates Start Menu shortcuts, optional Desktop shortcut, optional Start-with-Windows shortcut, and a Private-network firewall rule.
+- Uses a stable Inno Setup `AppId` so future setup EXEs upgrade the same installation.
 
-- starts VerbaNode using HTTPS;
-- shows VerbaNode Core, Audio Engine, AI Engine, and Ollama status;
-- discovers usable IPv4 network interfaces;
-- lists `https://127.0.0.1:8002` and LAN dashboard addresses;
-- provides Open and Copy actions for every address;
-- can open the dashboard automatically once the backend is healthy;
-- can restart the backend services without closing the launcher.
+## Online component wizard
 
-## Upgrade-safe data layout
+- English: optionally prepares SenseVoiceSmall.
+- Bahasa Indonesia: choose Whisper Base, Whisper Small, or both.
+- Edge TTS remains bundled/online and needs no model download.
+- Kokoro local TTS can be downloaded optionally.
+- Ollama can be detected/installed and the selected local LLM is pulled automatically; default is `qwen3.5:0.8b`.
 
-Source development remains repository-local. Frozen/installed builds instead store mutable data under `%LOCALAPPDATA%\VerbaNode`, including the database, configuration, certificates, plugins, diagnostics, runtime audio, backups, logs, and VerbaNode-managed models. Whisper and ModelScope continue using their normal per-user caches. Replacing the application binaries therefore does not overwrite agents, scripts, settings, plugins, or downloaded model caches.
+## Setup safety
 
-## HTTPS
+- Database is backed up before installer-triggered migration.
+- HTTPS certificate is checked/generated before first launch.
+- Existing agents, scripts, Information, settings, plugins, certificates, databases, and downloaded models are not intentionally removed by upgrades.
+- The normal uninstaller removes app binaries/shortcuts/firewall rule but leaves persistent user data and external model caches intact.
 
-Development still uses `run.bat` -> `run_https.bat`. The packaged application performs the equivalent HTTPS certificate preparation internally and can generate the local certificate without relying on a Conda OpenSSL installation.
+## Branding
 
-## Build
-
-On Windows, activate the normal VerbaNode environment and run:
-
-```bat
-build_windows.bat
-```
-
-The preview uses PyInstaller `onedir` and produces `dist\VerbaNode\VerbaNode.exe`. PyInstaller builds are platform-specific, so the Windows executable must be built on Windows.
+- The supplied final VerbaNode icon is used for both `VerbaNode.exe` and `VerbaNode-Setup-0.7.6.exe`.
 
 ## Validation
 
-The source package passes 125 automated tests plus Python and JavaScript syntax checks. The actual frozen executable still needs first-run validation on the target Windows PC before this packaging layer is promoted beyond preview.
+- 145 automated tests pass in source mode.
+- Windows/Inno Setup compilation still needs to be run on the target Windows development PC after applying this patch.

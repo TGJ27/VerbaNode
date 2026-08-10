@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.7.6 - Windows online installer
+
+- Add one-file Inno Setup 7 online installer around the frozen VerbaNode application.
+- Add English SenseVoiceSmall and Indonesian Whisper Base/Small/Both setup choices.
+- Add optional Kokoro local TTS download.
+- Add Ollama detection/install and local model pull during setup.
+- Add installer-triggered database backup/migration and HTTPS certificate initialization.
+- Use the approved VerbaNode icon for both the application EXE and Setup EXE.
+- Keep Program Files binaries separate from persistent LocalAppData/model caches so upgrades preserve user data.
+- Fix the previous Inno warnings by using a common Startup shortcut and an UninstallRun RunOnceId.
+
 ## v0.7.5 - Windows application packaging preview
 
 - Added a PyInstaller onedir build for `VerbaNode.exe`.

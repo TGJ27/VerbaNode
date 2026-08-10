@@ -30,3 +30,5 @@ diagnostics/
 build/
 dist/
 *.spec.bak
+
+dist-installer/
