@@ -3,16 +3,30 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from app.paths import (
+    BACKUP_DIR,
+    CERT_DIR,
+    CONFIG_DIR,
+    DATA_DIR,
+    DIAGNOSTICS_DIR,
+    MODEL_DIR,
+    PLUGIN_DIR,
+    RESOURCE_ROOT,
+    RUNTIME_AUDIO_DIR,
+    SOURCE_ROOT,
+    ensure_runtime_layout,
+)
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = RESOURCE_ROOT
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=ROOT_DIR / ".env",
+        env_file=CONFIG_DIR / ".env",
         env_prefix="VERBANODE_",
         case_sensitive=False,
         extra="ignore",
@@ -21,7 +35,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8002
     pin: str = "1234"
-    db_path: Path = ROOT_DIR / "data" / "verbanode.db"
+    db_path: Path = DATA_DIR / "verbanode.db"
     ollama_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:0.8b"
     default_location: str = "Jakarta"
@@ -32,8 +46,8 @@ class Settings(BaseSettings):
     max_record_seconds: int = 30
     post_tts_mic_guard_ms: int = Field(default=500, ge=0, le=3000)
     barge_in_start_delay_ms: int = Field(default=800, ge=0, le=5000)
-    kokoro_dir: Path = ROOT_DIR / "models" / "kokoro" / "kokoro-int8-multi-lang-v1_1"
-    tts_cache_path: Path = ROOT_DIR / "data" / "tts_cache"
+    kokoro_dir: Path = MODEL_DIR / "kokoro" / "kokoro-int8-multi-lang-v1_1"
+    tts_cache_path: Path = DATA_DIR / "tts_cache"
     kokoro_threads: int = Field(default=2, ge=1, le=16)
     open_browser: bool = True
     ssl_certfile: Path | None = None
@@ -66,7 +80,7 @@ class Settings(BaseSettings):
     ai_engine_preload_asr: bool = True
     ai_engine_preload_kokoro: bool = True
     ai_engine_kokoro_timeout_seconds: float = Field(default=60.0, ge=10.0, le=300.0)
-    external_plugins_path: Path = ROOT_DIR / "plugins"
+    external_plugins_path: Path = PLUGIN_DIR
     plugin_execution_timeout_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
     plugin_failure_threshold: int = Field(default=3, ge=1, le=20)
     plugin_max_concurrent_executions: int = Field(default=4, ge=1, le=32)
@@ -84,7 +98,7 @@ class Settings(BaseSettings):
 
     @property
     def runtime_audio_dir(self) -> Path:
-        path = ROOT_DIR / "runtime_audio"
+        path = RUNTIME_AUDIO_DIR
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -96,31 +110,32 @@ class Settings(BaseSettings):
 
     @property
     def backup_dir(self) -> Path:
-        path = ROOT_DIR / "backups"
+        path = BACKUP_DIR
         path.mkdir(parents=True, exist_ok=True)
         return path
 
     @property
     def diagnostics_dir(self) -> Path:
-        path = ROOT_DIR / "diagnostics"
+        path = DIAGNOSTICS_DIR
         path.mkdir(parents=True, exist_ok=True)
         return path
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    ensure_runtime_layout()
     settings = Settings()
     if not settings.db_path.is_absolute():
-        settings.db_path = ROOT_DIR / settings.db_path
+        settings.db_path = DATA_DIR.parent / settings.db_path
     if not settings.kokoro_dir.is_absolute():
-        settings.kokoro_dir = ROOT_DIR / settings.kokoro_dir
+        settings.kokoro_dir = MODEL_DIR.parent / settings.kokoro_dir
     if not settings.tts_cache_path.is_absolute():
-        settings.tts_cache_path = ROOT_DIR / settings.tts_cache_path
+        settings.tts_cache_path = DATA_DIR.parent / settings.tts_cache_path
     if not settings.external_plugins_path.is_absolute():
-        settings.external_plugins_path = ROOT_DIR / settings.external_plugins_path
+        settings.external_plugins_path = PLUGIN_DIR.parent / settings.external_plugins_path
     if settings.ssl_certfile and not settings.ssl_certfile.is_absolute():
-        settings.ssl_certfile = ROOT_DIR / settings.ssl_certfile
+        settings.ssl_certfile = CERT_DIR.parent / settings.ssl_certfile
     if settings.ssl_keyfile and not settings.ssl_keyfile.is_absolute():
-        settings.ssl_keyfile = ROOT_DIR / settings.ssl_keyfile
+        settings.ssl_keyfile = CERT_DIR.parent / settings.ssl_keyfile
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     return settings

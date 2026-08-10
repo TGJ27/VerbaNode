@@ -11,6 +11,12 @@ from typing import Any, Iterator
 
 from app.config import Settings
 from app.defaults import (
+    DEFAULT_COMPANY_INFO_CONTENT,
+    DEFAULT_COMPANY_INFO_TITLE,
+    DEFAULT_INTRO_EN_TEXT,
+    DEFAULT_INTRO_EN_TITLE,
+    DEFAULT_INTRO_ID_TEXT,
+    DEFAULT_INTRO_ID_TITLE,
     ROPI_CONTEXT_SIZE,
     ROPI_GREETING,
     ROPI_ID_EDGE_VOICE,
@@ -341,7 +347,7 @@ class Database:
                     UPDATE agents
                     SET role=?, system_prompt=?, llm_model=?, temperature=?, top_p=?,
                         max_tokens=?, context_size=?, updated_at=?
-                    WHERE lower(trim(name))='ropi'
+                    WHERE lower(trim(name))='ropi' AND language='en'
                     """,
                     (
                         ROPI_ROLE,
@@ -361,7 +367,7 @@ class Database:
                     "handle_exit_intent",
                 ]
                 ropi_rows = conn.execute(
-                    "SELECT id, tools_enabled FROM agents WHERE lower(trim(name))='ropi'"
+                    "SELECT id, tools_enabled FROM agents WHERE lower(trim(name))='ropi' AND language='en'"
                 ).fetchall()
                 for row in ropi_rows:
                     try:
@@ -385,7 +391,7 @@ class Database:
                     """
                     UPDATE agents
                     SET role=?, system_prompt=?, updated_at=?
-                    WHERE lower(trim(name))='ropi'
+                    WHERE lower(trim(name))='ropi' AND language='en'
                       AND (
                         system_prompt LIKE '%Mandatory live-data and tool rules:%'
                         OR system_prompt LIKE '%Tools are the only source of truth%'
@@ -423,7 +429,7 @@ class Database:
                         ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """,
                         (
-                            "Ropi Indonesia", "#ef6c35", "RI", ROPI_ID_ROLE,
+                            "Ropi", "#ef6c35", "RI", ROPI_ID_ROLE,
                             ROPI_ID_SYSTEM_PROMPT, ROPI_ID_GREETING, ROPI_LLM_MODEL,
                             ROPI_TEMPERATURE, ROPI_TOP_P, ROPI_MAX_TOKENS,
                             ROPI_CONTEXT_SIZE, "id", "edge", ROPI_ID_EDGE_VOICE,
@@ -476,20 +482,96 @@ class Database:
                     "INSERT INTO conversations(agent_id,title,created_at,updated_at) VALUES(?,?,?,?)",
                     (agent_id, "New conversation", now, now),
                 )
-            script_count = conn.execute("SELECT COUNT(*) FROM scripts").fetchone()[0]
-            if script_count == 0:
+            # v0.7.5 packaged defaults. Keep this idempotent so upgrades never
+            # duplicate content or overwrite operator-created agents/scripts/info.
+            conn.execute(
+                "INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
+                ("packaged_defaults_version", "0", now),
+            )
+            packaged_row = conn.execute(
+                "SELECT value FROM settings WHERE key='packaged_defaults_version'"
+            ).fetchone()
+            try:
+                packaged_version = int(packaged_row[0]) if packaged_row else 0
+            except (TypeError, ValueError):
+                packaged_version = 0
+
+            if packaged_version < 1:
+                # Upgrade the originally seeded Indonesian agent to the requested
+                # production identity. Only the known seed names are migrated;
+                # unrelated custom Indonesian agents are left untouched.
                 conn.execute(
                     """
-                    INSERT INTO scripts(
-                        title,text,enabled,language,tts_mode,edge_voice,kokoro_voice_id,
-                        tts_rate,tts_volume,sort_order,created_at,updated_at
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                    UPDATE agents
+                    SET name='Ropi', color='#ef6c35', avatar='RI', role=?,
+                        system_prompt=?, greeting=?, updated_at=?
+                    WHERE language='id'
+                      AND lower(trim(name)) IN ('ropi indonesia','ropi id')
                     """,
-                    (
-                        "Introduction",
-                        "Hello and welcome. This is the VerbaNode standalone voice assistant.",
-                        1, "en", "edge", "en-US-AriaNeural", 0, 1.0, 1.0, 0, now, now,
-                    ),
+                    (ROPI_ID_ROLE, ROPI_ID_SYSTEM_PROMPT, ROPI_ID_GREETING, now),
+                )
+
+                # Refresh only the exact legacy English seed text. Any script
+                # the operator edited remains untouched.
+                conn.execute(
+                    """
+                    UPDATE scripts SET text=?,updated_at=?
+                    WHERE language='en'
+                      AND lower(trim(title))='introduction'
+                      AND text='Hello and welcome. This is the VerbaNode standalone voice assistant.'
+                    """,
+                    (DEFAULT_INTRO_EN_TEXT, now),
+                )
+
+                # Seed both direct-speech introductions independently. Existing
+                # scripts with the same language/title are preserved.
+                script_defaults = [
+                    (DEFAULT_INTRO_EN_TITLE, DEFAULT_INTRO_EN_TEXT, "en", "edge", "en-US-AriaNeural", 0),
+                    (DEFAULT_INTRO_ID_TITLE, DEFAULT_INTRO_ID_TEXT, "id", "edge", ROPI_ID_EDGE_VOICE, 1),
+                ]
+                for title, text, language, tts_mode, edge_voice, sort_order in script_defaults:
+                    existing_script = conn.execute(
+                        "SELECT id FROM scripts WHERE language=? AND lower(trim(title))=lower(trim(?)) LIMIT 1",
+                        (language, title),
+                    ).fetchone()
+                    if not existing_script:
+                        conn.execute(
+                            """
+                            INSERT INTO scripts(
+                                title,text,enabled,language,tts_mode,edge_voice,kokoro_voice_id,
+                                tts_rate,tts_volume,sort_order,created_at,updated_at
+                            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                            """,
+                            (
+                                title, text, 1, language, tts_mode, edge_voice,
+                                0, 1.0, 1.0, sort_order, now, now,
+                            ),
+                        )
+
+                # Seed the company profile once and assign it to every existing
+                # agent so both English and Indonesian Ropi can use it. If the
+                # operator already has an item with this title, preserve its text.
+                info_row = conn.execute(
+                    "SELECT id FROM information WHERE lower(trim(title))=lower(trim(?)) LIMIT 1",
+                    (DEFAULT_COMPANY_INFO_TITLE,),
+                ).fetchone()
+                if info_row:
+                    info_id = int(info_row[0])
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO information(title,content,enabled,created_at,updated_at) VALUES(?,?,?,?,?)",
+                        (DEFAULT_COMPANY_INFO_TITLE, DEFAULT_COMPANY_INFO_CONTENT, 1, now, now),
+                    )
+                    info_id = int(cur.lastrowid)
+                agent_rows = conn.execute("SELECT id FROM agents ORDER BY id").fetchall()
+                conn.executemany(
+                    "INSERT OR IGNORE INTO agent_information(agent_id,info_id) VALUES(?,?)",
+                    [(int(row[0]), info_id) for row in agent_rows],
+                )
+
+                conn.execute(
+                    "UPDATE settings SET value='1',updated_at=? WHERE key='packaged_defaults_version'",
+                    (now,),
                 )
 
     # Settings

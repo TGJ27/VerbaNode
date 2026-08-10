@@ -27,3 +27,6 @@ Thumbs.db
 
 # Runtime diagnostics and soak-test reports
 diagnostics/
+build/
+dist/
+*.spec.bak

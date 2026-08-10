@@ -1,0 +1,4 @@
+# Build-only dependencies for the Windows onedir executable.
+pyinstaller>=6.21,<7.0
+cryptography>=44,<47
+customtkinter>=6.0,<7.0

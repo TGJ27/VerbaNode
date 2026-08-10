@@ -36,4 +36,4 @@ def test_settings_ui_is_split_into_submenus_and_rejected_messages_are_muted() ->
     assert "show_rejected_stt_transcripts" in javascript
     assert ".message.user.rejected-transcript" in css
     assert ".message-list.hide-rejected-transcripts .rejected-transcript" in css
-    assert APP_VERSION == "0.7.4"
+    assert APP_VERSION == "0.7.5"

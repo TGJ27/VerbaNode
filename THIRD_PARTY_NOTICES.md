@@ -13,3 +13,9 @@
 - Model weights are downloaded separately and retain their own applicable terms.
 
 No upstream model files or proprietary visual assets are included in this repository. External models and runtimes retain their own licenses and terms.
+
+## CustomTkinter
+
+- License: MIT.
+- Use in VerbaNode: native Windows launcher presentation layer for the packaged application.
+- The source-mode web dashboard and VerbaNode runtime do not depend on CustomTkinter; it is bundled with the Windows application build.

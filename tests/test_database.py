@@ -35,8 +35,9 @@ def test_seed_and_agent_isolation(tmp_path: Path) -> None:
     payload["info_ids"] = [info["id"]]
     created = db.create_agent(payload)
     assert created["info_ids"] == [info["id"]]
-    assert len(db.enabled_information_for_agent(created["id"])) == 1
-    assert db.enabled_information_for_agent(english["id"]) == []
+    assert any(item["id"] == info["id"] for item in db.enabled_information_for_agent(created["id"]))
+    default_english_info = db.enabled_information_for_agent(english["id"])
+    assert any(item["title"] == "Sari Teknologi Company Profile" for item in default_english_info)
 
 
 def test_script_queue_order(tmp_path: Path) -> None:

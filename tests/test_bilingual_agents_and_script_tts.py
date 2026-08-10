@@ -20,7 +20,7 @@ def test_default_english_and_indonesian_agents(tmp_path: Path) -> None:
     indonesian = next(agent for agent in agents if agent["language"] == "id")
     assert english["stt_model"] == "iic/SenseVoiceSmall"
     assert english["edge_voice"] == "en-US-AriaNeural"
-    assert indonesian["name"] == "Ropi Indonesia"
+    assert indonesian["name"] == "Ropi"
     assert indonesian["stt_model"] == "Whisper-base"
     assert indonesian["tts_mode"] == "edge"
     assert indonesian["edge_voice"] == "id-ID-GadisNeural"
@@ -248,3 +248,40 @@ def test_deleting_inactive_agent_does_not_change_active_agent(tmp_path: Path) ->
     db.set_setting("active_agent_id", str(indonesian["id"]))
     assert db.delete_agent(english["id"]) is True
     assert int(db.get_setting("active_agent_id", "0")) == indonesian["id"]
+
+
+def test_packaged_default_scripts_and_company_information(tmp_path: Path) -> None:
+    db = Database(Settings(db_path=tmp_path / "packaged-defaults.db", open_browser=False))
+    db.initialize()
+
+    scripts = db.list_scripts()
+    english = next(script for script in scripts if script["language"] == "en" and script["title"] == "Introduction")
+    indonesian = next(script for script in scripts if script["language"] == "id" and script["title"] == "Introduksi")
+    assert english["text"] == "Hello and welcome. This is the VerbaNode voice assistant."
+    assert english["tts_mode"] == "edge"
+    assert english["edge_voice"] == "en-US-AriaNeural"
+    assert indonesian["text"] == "Halo dan selamat datang. Ini adalah VerbaNode."
+    assert indonesian["tts_mode"] == "edge"
+    assert indonesian["edge_voice"] == "id-ID-GadisNeural"
+
+    info = next(item for item in db.list_information() if item["title"] == "Sari Teknologi Company Profile")
+    assert info["enabled"] == 1
+    assert "more than 15 years of experience" in info["content"]
+    assert "Industry 4.0" in info["content"]
+    for agent in db.list_agents():
+        assert info["id"] in agent["info_ids"]
+
+
+def test_packaged_default_seed_is_idempotent_and_preserves_existing_information(tmp_path: Path) -> None:
+    db = Database(Settings(db_path=tmp_path / "idempotent-defaults.db", open_browser=False))
+    db.initialize()
+    info = next(item for item in db.list_information() if item["title"] == "Sari Teknologi Company Profile")
+    db.update_information(info["id"], {"title": info["title"], "content": "Operator customized text", "enabled": True})
+    before_scripts = len(db.list_scripts())
+
+    db.initialize()
+
+    assert len(db.list_scripts()) == before_scripts
+    updated = db.get_information(info["id"])
+    assert updated is not None
+    assert updated["content"] == "Operator customized text"

@@ -2,7 +2,13 @@
 
 VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
 
-**Current stable release:** v0.7.4.
+**Current stable assistant release:** v0.7.4.
+
+**Windows application preview:** v0.7.5.
+
+## v0.7.5 Windows application preview
+
+v0.7.5 adds an optional PyInstaller-based Windows application wrapper while preserving the normal source workflow. Build it on Windows with `build_windows.bat`. The frozen app opens a native launcher, starts the same HTTPS backend, lists available dashboard IPs, and keeps mutable user data under `%LOCALAPPDATA%\VerbaNode` so upgrades do not overwrite agents, scripts, settings, plugins, or model caches. See `packaging/WINDOWS_APP.md`.
 
 ## v0.7.4 stable bilingual assistant foundation
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.5 - Windows application packaging preview
+
+- Added a PyInstaller onedir build for `VerbaNode.exe`.
+- Added a native Windows launcher that supervises the HTTPS backend, reports Core/Audio/AI/Ollama status, and lists usable dashboard IP addresses with Open/Copy actions.
+- Added frozen-runtime path separation so installed binaries stay read-only while agents, scripts, settings, plugins, certificates, diagnostics, and VerbaNode-managed models live under `%LOCALAPPDATA%\VerbaNode`.
+- Preserved the existing source development workflow through `run.bat` and `run_https.bat`.
+- Added internal HTTPS certificate generation fallback for packaged systems without Conda OpenSSL.
+- Added Windows packaging documentation, build dependencies, PyInstaller spec, and regression tests.
+
+
 ## v0.7.4 - Stable bilingual assistant foundation
 
 - Promoted the v0.7 bilingual assistant line to stable after final regression validation.

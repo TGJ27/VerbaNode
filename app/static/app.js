@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.7.4';
+const FRONTEND_VERSION = '0.7.5';
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
 
 const appState = {

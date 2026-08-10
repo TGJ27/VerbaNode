@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import shutil
 import sqlite3
 import tempfile
@@ -18,6 +19,7 @@ from fastapi import (
     FastAPI,
     File,
     Header,
+    Request,
     HTTPException,
     UploadFile,
     WebSocket,
@@ -27,6 +29,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import ROOT_DIR
+from app.paths import CERT_DIR
+from app.process_control import request_shutdown
 from app.schemas import (
     AgentCreate,
     AgentUpdate,
@@ -131,7 +135,7 @@ async def root() -> FileResponse:
 
 @app.get("/verbanode-local-ca.crt")
 async def local_certificate() -> FileResponse:
-    certificate = ROOT_DIR / "certs" / "verbanode-local-ca.crt"
+    certificate = CERT_DIR / "verbanode-local-ca.crt"
     if not certificate.exists():
         raise HTTPException(status_code=404, detail="Local HTTPS certificate has not been generated")
     return FileResponse(
@@ -144,6 +148,48 @@ async def local_certificate() -> FileResponse:
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {"status": "ok", "version": app.version, "build": BUILD_LABEL}
+
+
+@app.post("/internal/launcher/shutdown")
+async def launcher_shutdown(
+    request: Request,
+    x_verbanode_launcher_token: Annotated[
+        str | None, Header(alias="X-VerbaNode-Launcher-Token")
+    ] = None,
+) -> dict[str, str]:
+    client_host = request.client.host if request.client else ""
+    if client_host not in {"127.0.0.1", "::1"}:
+        raise HTTPException(status_code=403, detail="Local launcher access only")
+
+    expected = os.environ.get("VERBANODE_LAUNCHER_SHUTDOWN_TOKEN", "")
+    supplied = x_verbanode_launcher_token or ""
+    if not expected or not supplied or not secrets.compare_digest(expected, supplied):
+        raise HTTPException(status_code=403, detail="Invalid launcher token")
+
+    request_shutdown()
+    return {"status": "shutting_down"}
+
+
+@app.get("/health/launcher")
+async def launcher_health() -> dict[str, Any]:
+    """Sanitized local launcher status that does not expose controller data."""
+    audio_health = state.audio_engine.health() if state.audio_engine is not None else None
+    ai_health = state.ai_engine.health() if state.ai_engine is not None else None
+    return {
+        "status": "ok",
+        "version": app.version,
+        "build": BUILD_LABEL,
+        "audio_engine": {
+            "enabled": state.audio_engine is not None,
+            "alive": bool(audio_health and audio_health.get("alive")),
+            "pid": audio_health.get("pid") if audio_health else None,
+        },
+        "ai_engine": {
+            "enabled": state.ai_engine is not None,
+            "alive": bool(ai_health and ai_health.get("alive")),
+            "pid": ai_health.get("pid") if ai_health else None,
+        },
+    }
 
 
 # Authentication and single-controller takeover
