@@ -11,6 +11,8 @@ AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\VerbaNode
 DefaultGroupName=VerbaNode
+UsePreviousAppDir=yes
+DirExistsWarning=auto
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 SetupArchitecture=x64
@@ -64,7 +66,11 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch VerbaNode"; WorkingDir: 
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""VerbaNode"" program=""{app}\{#MyAppExeName}"""; Flags: runhidden waituntilterminated; RunOnceId: "VerbaNodeFirewallRemove"
 
 [Code]
+const
+  VerbaNodeUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{914EFF97-CD2A-477F-9CBD-BF62FEA8A0C7}_is1';
+
 var
+  ModePage: TInputOptionWizardPage;
   LanguagePage: TInputOptionWizardPage;
   WhisperPage: TInputOptionWizardPage;
   FeaturePage: TInputOptionWizardPage;
@@ -73,6 +79,8 @@ var
   DownloadPage: TDownloadWizardPage;
   EssentialSetupOK: Boolean;
   SetupWarnings: String;
+  ExistingInstall: Boolean;
+  InstalledVersion: String;
 
 procedure AppendWarning(const Text: String);
 begin
@@ -81,16 +89,49 @@ begin
   SetupWarnings := SetupWarnings + Text;
 end;
 
+function DetectExistingInstall(): Boolean;
+begin
+  InstalledVersion := '';
+  Result := RegQueryStringValue(HKLM64, VerbaNodeUninstallKey, 'DisplayVersion', InstalledVersion);
+  if not Result then
+    Result := RegQueryStringValue(HKLM32, VerbaNodeUninstallKey, 'DisplayVersion', InstalledVersion);
+
+  if not Result then
+  begin
+    Result := FileExists(ExpandConstant('{autopf}\VerbaNode\{#MyAppExeName}'));
+    if Result then
+      InstalledVersion := 'existing version';
+  end;
+end;
+
+function ShouldConfigureComponents(): Boolean;
+begin
+  Result := (not ExistingInstall) or (ModePage.SelectedValueIndex = 1);
+end;
+
 procedure InitializeWizard();
 begin
   EssentialSetupOK := True;
   SetupWarnings := '';
+  ExistingInstall := DetectExistingInstall();
+
+  ModePage := CreateInputOptionPage(
+    wpSelectDir,
+    'Existing VerbaNode installation detected',
+    'VerbaNode ' + InstalledVersion + ' is already installed.',
+    'Choose how Setup should handle this run. Persistent agents, scripts, Information, settings, plugins, certificates and downloaded model caches are always preserved.',
+    True,
+    False
+  );
+  ModePage.Add('Update application only (recommended) - keep current AI models and components');
+  ModePage.Add('Update application and review/add AI components');
+  ModePage.SelectedValueIndex := 0;
 
   LanguagePage := CreateInputOptionPage(
-    wpSelectTasks,
+    ModePage.ID,
     'Language support',
     'Choose which speech-recognition models Setup should prepare.',
-    'The application runtime is already included. Selected AI models are downloaded online only if they are missing.',
+    'Setup checks the existing user caches first. Selected AI models are downloaded only when missing; already-installed models are never downloaded again.',
     False,
     False
   );
@@ -116,7 +157,7 @@ begin
     WhisperPage.ID,
     'Optional local components',
     'Choose additional components to prepare.',
-    'Edge TTS is already part of VerbaNode. Kokoro and Ollama are optional local components.',
+    'Edge TTS is already part of VerbaNode. Existing Kokoro, Ollama and Ollama models are detected and reused instead of reinstalled.',
     False,
     False
   );
@@ -149,10 +190,14 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if PageID = WhisperPage.ID then
-    Result := not LanguagePage.Values[1]
+  if PageID = ModePage.ID then
+    Result := not ExistingInstall
+  else if (PageID = LanguagePage.ID) or (PageID = FeaturePage.ID) then
+    Result := not ShouldConfigureComponents()
+  else if PageID = WhisperPage.ID then
+    Result := (not ShouldConfigureComponents()) or (not LanguagePage.Values[1])
   else if PageID = OllamaModelPage.ID then
-    Result := not FeaturePage.Values[1];
+    Result := (not ShouldConfigureComponents()) or (not FeaturePage.Values[1]);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -263,6 +308,9 @@ begin
       EssentialSetupOK := False;
       AppendWarning('HTTPS initialization failed. VerbaNode will not be launched automatically.');
     end;
+
+    if not ShouldConfigureComponents() then
+      Exit;
 
     if LanguagePage.Values[0] then
       if not RunSetupCommand(

@@ -16,14 +16,14 @@ Only the model required by the active agent is used for transcription. The isola
 Run the normal dependency installer:
 
 ```bat
-setup_windows.bat
+scripts/setup/setup_windows.bat
 ```
 
 The main requirements now include `openai-whisper`. Prepare both ASR models before a demonstration:
 
 ```bat
-download_funasr.bat
-download_whisper.bat
+scripts/models/download_funasr.bat
+scripts/models/download_whisper.bat
 ```
 
 The model files are stored in the provider cache outside the Git repository. Do not commit downloaded model files.
@@ -67,13 +67,13 @@ For Indonesian scripts, VerbaNode enforces Edge TTS and an `id-ID` voice. Englis
 Run:
 
 ```bat
-setup_windows.bat
+scripts/setup/setup_windows.bat
 ```
 
 Then prepare the model:
 
 ```bat
-download_whisper.bat
+scripts/models/download_whisper.bat
 ```
 
 ### The first Indonesian transcription is slow

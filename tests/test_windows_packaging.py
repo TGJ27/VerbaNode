@@ -54,10 +54,10 @@ def test_certificate_address_list_always_contains_localhost(monkeypatch) -> None
 
 def test_windows_build_assets_exist() -> None:
     root = Path(__file__).resolve().parent.parent
-    assert (root / "VerbaNode.spec").exists()
+    assert (root / "packaging" / "VerbaNode.spec").exists()
     assert (root / "build_windows.bat").exists()
-    assert (root / "requirements-packaging.txt").exists()
-    assert (root / "packaging" / "WINDOWS_APP.md").exists()
+    assert (root / "packaging" / "requirements-packaging.txt").exists()
+    assert (root / "docs" / "packaging" / "WINDOWS_APP.md").exists()
 
 
 def test_frozen_env_seed_generates_six_digit_pin(tmp_path) -> None:

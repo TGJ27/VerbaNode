@@ -7,7 +7,7 @@ call :find_conda
 if errorlevel 1 (
   echo.
   echo Conda was not found.
-  echo Install Miniconda or Anaconda, then run setup_windows.bat.
+  echo Install Miniconda or Anaconda, then run scripts\setup\setup_windows.bat.
   echo You can also set VERBANODE_CONDA_BAT to the full path of conda.bat.
   echo.
   pause
@@ -18,7 +18,7 @@ call "%CONDA_BAT%" activate "%VERBANODE_CONDA_ENV%" >nul 2>nul
 if errorlevel 1 (
   echo.
   echo Conda environment "%VERBANODE_CONDA_ENV%" was not found or could not be activated.
-  echo Run setup_windows.bat first.
+  echo Run scripts\setup\setup_windows.bat first.
   echo.
   pause
   exit /b 1

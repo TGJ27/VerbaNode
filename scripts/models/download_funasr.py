@@ -15,7 +15,7 @@ def main() -> int:
     try:
         from funasr import AutoModel
     except ImportError:
-        print("FunASR is not installed. Run setup_windows.bat first.", file=sys.stderr, flush=True)
+        print("FunASR is not installed. Run scripts/setup/setup_windows.bat first.", file=sys.stderr, flush=True)
         return 1
 
     try:

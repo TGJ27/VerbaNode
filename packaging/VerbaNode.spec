@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_dynamic_libs, collect_submodules
 
-ROOT = Path(SPECPATH).resolve()
+ROOT = Path(SPECPATH).resolve().parent
 
 
 def safe_collect(package: str):
@@ -17,6 +17,7 @@ datas = [
     (str(ROOT / "app" / "static"), "app/static"),
     (str(ROOT / ".env.example"), "."),
     (str(ROOT / "plugins"), "plugins"),
+    (str(ROOT / "packaging" / "assets" / "VerbaNode.png"), "packaging/assets"),
 ]
 binaries = []
 hiddenimports = [

@@ -36,7 +36,7 @@ def main() -> int:
         from funasr import AutoModel  # noqa: F401
     except ImportError:
         print(
-            "FunASR or openai-whisper is not installed. Run setup_windows.bat first.",
+            "FunASR or openai-whisper is not installed. Run scripts/setup/setup_windows.bat first.",
             file=sys.stderr,
             flush=True,
         )

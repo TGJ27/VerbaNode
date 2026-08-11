@@ -5,7 +5,7 @@ cd /d "%~dp0"
 if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
 call :find_conda
 if errorlevel 1 (
-  echo Conda was not found. Run setup_windows.bat first.
+  echo Conda was not found. Run scripts\setup\setup_windows.bat first.
   pause
   exit /b 1
 )
@@ -16,7 +16,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-python scripts\generate_local_cert.py
+python scripts\windows\generate_local_cert.py
 if errorlevel 1 (
   echo Could not generate the local HTTPS certificate.
   pause

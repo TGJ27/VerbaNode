@@ -25,11 +25,20 @@ v0.7.6 turns the v0.7.5 frozen Windows application into a normal one-file online
 - Existing agents, scripts, Information, settings, plugins, certificates, databases, and downloaded models are not intentionally removed by upgrades.
 - The normal uninstaller removes app binaries/shortcuts/firewall rule but leaves persistent user data and external model caches intact.
 
+
+## Repository organization
+
+- Keeps only primary run/build entry points in the repository root.
+- Groups setup helpers under `scripts/setup/`, model downloaders under `scripts/models/`, and Windows utilities under `scripts/windows/`.
+- Groups architecture, plugin, feature, and packaging documentation under dedicated `docs/` subfolders.
+- Moves PyInstaller-specific files into `packaging/` beside the Inno Setup definition and icon assets.
+- Updates build scripts, documentation, runtime help text, and regression tests to use the reorganized paths without changing the development or installed runtime behavior.
+
 ## Branding
 
 - The supplied final VerbaNode icon is used for both `VerbaNode.exe` and `VerbaNode-Setup-0.7.6.exe`.
 
 ## Validation
 
-- 145 automated tests pass in source mode.
+- 151 automated tests pass in source mode after the repository cleanup.
 - Windows/Inno Setup compilation still needs to be run on the target Windows development PC after applying this patch.

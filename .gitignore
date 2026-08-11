@@ -32,3 +32,9 @@ dist/
 *.spec.bak
 
 dist-installer/
+
+# Patch/delivery artifacts should stay outside the repository
+/PATCH_INSTRUCTIONS*
+/CHANGED_FILES.txt
+/REMOVE_FILES.txt
+/ICON_HOTFIX_README.txt

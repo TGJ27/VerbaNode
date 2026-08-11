@@ -41,7 +41,7 @@ model caches.
 
 ## Build on Windows
 
-Activate the normal VerbaNode environment, then run:
+Run from the repository root:
 
 ```bat
 build_windows.bat

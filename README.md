@@ -1,362 +1,576 @@
+<div align="center">
+
+<img src="packaging/assets/VerbaNode.png" alt="VerbaNode" width="140">
+
 # VerbaNode
 
-VerbaNode is a Windows-hosted, CPU-capable voice assistant with a responsive browser dashboard. AI processing and host audio run on the Windows PC. A desktop browser or phone can control the system over the local network, and browser-device push-to-talk can use the phone microphone over HTTPS.
+### Local, modular voice-assistant platform for Windows
 
-**Current stable assistant release:** v0.7.4.
+**Speech-to-Text · Local LLM · Text-to-Speech · Agents · Memory · Plugins · HTTPS Dashboard**
 
-**Windows application / online installer:** v0.7.6.
+</div>
 
-## v0.7.6 Windows application and online installer
+---
 
-v0.7.6 includes the PyInstaller-based Windows application wrapper while preserving the normal source workflow. Build it on Windows with `build_windows.bat`. The frozen app opens a native launcher, starts the same HTTPS backend, lists available dashboard IPs, and keeps mutable user data under `%LOCALAPPDATA%\VerbaNode` so upgrades do not overwrite agents, scripts, settings, plugins, or model caches. See `packaging/WINDOWS_APP.md`.
+## Overview
 
-## v0.7.4 stable bilingual assistant foundation
+VerbaNode is a Windows-first local voice-assistant platform designed for interactive robots, kiosks, desktop assistants, demonstrations, and other systems that need a configurable conversational interface.
 
-VerbaNode v0.7.4 stabilizes the English/Indonesian assistant stack introduced across v0.7.x.
+The project combines speech recognition, local LLM inference, text-to-speech, agent profiles, selective short-term memory, script playback, information/knowledge entries, and a modular plugin system behind one responsive web dashboard.
 
-- Adds two persistent agent language profiles: **English** and **Bahasa Indonesia**.
-- English agents use **SenseVoiceSmall** through FunASR for low-latency recognition.
-- Indonesian agents can use **Whisper Base** or **Whisper Small** through FunASR with decoding fixed to Indonesian.
-- Includes default **Ropi** and **Ropi Indonesia** agents; the last active agent remains selected after restart.
-- Uses language-matched Edge TTS for Indonesian and supports Edge/Kokoro choices for English.
-- Gives each Script its own language, TTS provider, voice, rate, and volume instead of inheriting the active agent.
-- Adds selective short-term conversation context so stored history is only injected when a request needs prior context.
-- Includes the hardened built-in/external plugin architecture, Plugin Manager, diagnostics, soak monitoring, and failure isolation.
-- Adds Whisper Base/Small cache visibility, ASR load/transcription metrics, language-profile testing, and a real WAV benchmark.
-- Includes File Explorer-style Cards/List/Details views for Information and Plugins plus Small/Medium/Large UI text sizes.
-- Fixes typed-chat interruption during TTS, Windows Whisper cache detection, Indonesian deterministic routing, and empty-Ollama-response recovery.
-- Existing databases migrate automatically.
+VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-## Main features
+> **Project status:** active development. The Windows application and online installer are currently in the v0.7.x beta line. Validate installer/model behavior on the target PC before production deployment.
 
-- Multiple editable English or Indonesian agents with independent identity, ASR profile, character instructions, Ollama model, TTS voice, information, tools, memory, and chat history.
-- Continuous conversation, host push-to-talk, browser-device push-to-talk, typed chat, and Stop Current TTS.
-- Silero VAD, English SenseVoiceSmall, Indonesian Whisper Base/Small through FunASR, Ollama, Edge TTS, and local Sherpa-ONNX Kokoro.
-- Sentence-buffered LLM-to-TTS streaming while chat remains one assistant message.
-- Global script buttons with queue controls, per-script language/TTS selection, and persistent audio caching.
-- SQLite storage, backup/restore, and per-agent memory.
-- Selectable host input/output devices with persistent streams and device fingerprint recovery.
-- One active controller; a valid PIN transfers control immediately.
+---
 
+## Highlights
 
+- **Local-first conversational pipeline**
+  - Local LLMs through Ollama
+  - Local speech recognition
+  - Optional local TTS
+  - Edge TTS support
 
-## v0.6.3 plugin hardening
+- **Bilingual agent support**
+  - English pipeline using SenseVoiceSmall
+  - Bahasa Indonesia pipeline using Whisper Base or Whisper Small
+  - Language-specific STT and TTS configuration per agent
 
-- Validates external manifests, semantic versions, permissions, paths, package sizes, and LLM tool schemas before registration.
-- Applies per-plugin timeouts, bounded concurrency, active-call cancellation, and failure thresholds.
-- Removes unhealthy plugins from routing while leaving VerbaNode and other plugins operational.
-- Keeps the previous working plugin when replacement code fails validation or reload.
-- Adds detailed plugin states and metrics to Plugin Manager and Diagnostics.
-- Includes `plugins/_template/`, manifest/security documentation, and Windows `tzdata` compatibility.
+- **Multiple interaction modes**
+  - Conversation mode
+  - Push-to-Talk
+  - Click-and-Hold
+  - Talk by Text
+  - Script playback
 
-External plugins remain trusted local Python code and are not security-sandboxed.
+- **Agent system**
+  - Multiple configurable agents
+  - Per-agent language, STT, TTS, role prompt, greeting, and UI identity
+  - Active-agent persistence
 
-## v0.6.1 built-in Plugin Manager Phase 2
+- **Selective short-term memory**
+  - Conversation history is stored
+  - Relevant context can be supplied when needed instead of resending the entire conversation every turn
 
-- Adds a dedicated responsive **Plugins** page for all registered built-in capabilities.
-- Allows global enable/disable control with persistent state in SQLite settings.
-- Shows plugin health, version, author, category, permissions, agent assignments, execution count, errors, average latency, last latency, and last error.
-- Adds per-plugin and global metric reset actions.
-- Adds Plugin Manager capability reporting to bootstrap, runtime status, diagnostics export, and the system self-test.
+- **Information / knowledge entries**
+  - Reusable information can be enabled globally or assigned to selected agents
 
-## v0.6.0 internal plugin architecture Phase 1
+- **Plugin architecture**
+  - Built-in plugins
+  - External plugins
+  - Plugin manifests, validation, metrics, hardening, and reload support
+  - Template and example plugin included
 
-- Separates current time, configured location, live weather, and stop-conversation capabilities into independent backend modules.
-- Adds an ordered internal plugin registry and plugin manager with execution health and latency metrics.
-- Keeps the existing agent tool names, deterministic routing, LLM function calling, prompts, database, APIs, and dashboard behavior compatible.
-- Uses a small `ToolService` compatibility facade, allowing the conversation and LLM layers to remain independent of capability implementations.
-- Does not add external plugin installation or dynamic loading yet.
+- **Windows application**
+  - Standalone packaged `VerbaNode.exe`
+  - Native launcher
+  - Core / Audio Engine / AI Engine / Ollama health status
+  - Dashboard PIN controls
+  - HTTPS localhost and LAN address discovery
+  - Graceful process-tree shutdown
 
-## v0.5.3 diagnostics UI hotfix
+- **Windows installer**
+  - Standard Program Files installation
+  - Upgrade-aware application identity
+  - Persistent user data outside Program Files
+  - Optional component/model setup
+  - Start Menu / Desktop shortcuts
+  - Uninstall support
 
-- Detects dashboard/backend version mismatches before Diagnostics requests are made.
-- Replaces repeated 404 toasts with clear restart instructions.
-- Aligns Diagnostics cards and loading placeholders consistently.
+---
 
-## v0.5.2 diagnostics and soak monitoring
+## Core Pipeline
 
-- Adds **Settings → Diagnostics** with separate health cards for the Core, Audio Engine, AI Engine, and Windows host.
-- Shows process CPU/RAM/thread use, heartbeat age, model state, queue use, device locks, and restart counts.
-- Adds a non-destructive installation self-test for SQLite, runtime directories, audio endpoints, engines, Ollama, and pipeline state.
-- Records the latest completed-turn STT, LLM, TTS, and total response latency without storing conversation text.
-- Adds configurable 5-minute to 2-hour soak monitoring and summarizes resource use, queue pressure, engine restarts, and pipeline errors.
-- Adds redacted recent logs and a safe diagnostics ZIP export that excludes the PIN, `.env`, database, conversations, certificates, caches, and model binaries.
-- Adds a dashboard favicon to remove the harmless `/favicon.ico` startup 404.
-
-
-## v0.5.1 settings navigation and rejected-STT display controls
-
-- Splits Settings into focused Conversation, Host audio, AI models, Runtime, and Data submenus.
-- Uses a desktop settings sidebar and a horizontally scrollable mobile category bar.
-- Adds a persistent **Show rejected STT transcripts** toggle.
-- Keeps low-confidence speech out of the agent pipeline while optionally showing it as muted gray diagnostic messages.
-- Hides future rejected transcripts completely when the display toggle is off.
-- Preserves the isolated Audio Engine and AI Engine architecture from v0.5.0.
-
-## v0.5.0 Phase 3 isolated AI Engine
-
-- Moves SenseVoice/FunASR and local Kokoro model ownership into one supervised AI Engine child process.
-- Keeps Ollama as its own external service and keeps Edge TTS in the core.
-- Preloads SenseVoice once, optionally preloads Kokoro, and reuses both models across turns.
-- Adds bounded inference queues, timeouts, heartbeat monitoring, automatic restart, and manual model reload controls.
-- Keeps the v0.4.2 isolated Audio Engine and Windows hot-plug recovery unchanged.
-- Exposes AI Engine PID, model state, load time, queue usage, inference latency, and restart count in Settings.
-- Provides `VERBANODE_AI_ENGINE_PROCESS=false` for compatibility troubleshooting.
-
-The v0.7.4 line is the stable bilingual assistant foundation. Hardware-specific ASR latency and audio-device behavior should still be validated on each deployment PC.
-
-## v0.4.2 Phase 2 isolated Audio Engine and hot-plug recovery
-
-- Moves persistent Windows microphone and speaker ownership into one supervised child process.
-- Keeps microphone and speaker coordinated together instead of splitting them into competing processes.
-- Adds spawn-safe IPC proxies for capture, PTT, playback, cancellation, device tests, and health.
-- Keeps PortAudio callbacks, VAD frame buffering, and speaker buffers inside the Audio Engine; only completed utterances and audio-file paths cross IPC.
-- Adds a watchdog heartbeat, forced restart for a dead or unresponsive audio process, and restoration of selected device/lock state.
-- Keeps FastAPI, the dashboard, database, LLM, tools, prompts, memory, ASR, and TTS synthesis online if native audio fails.
-- Adds Audio Engine PID, coordinator state, heartbeat age, and restart count to runtime status.
-- Adds a protected **Restart Audio Engine** action in Settings for recovery testing.
-- Rebuilds the PortAudio device snapshot when USB/Bluetooth devices are connected while VerbaNode is running.
-- Automatically retries microphone, speaker, PTT, capture, tests, and playback after remapping saved device fingerprints.
-- Uses an Audio Engine-only restart as the final fallback when Windows keeps stale native audio handles.
-- Provides `VERBANODE_AUDIO_ENGINE_PROCESS=false` as an in-process compatibility fallback.
-
-This build requires physical Windows audio testing before it should be marked as a stable GitHub release.
-
-## v0.3.3 natural core-tool routing
-
-- Current time/date requests now bypass the LLM even when preceded by greetings, wake words, or polite filler, such as **“hello Ropi, what time is it?”**.
-- Minor ASR or typing errors such as **“what day its its?”** are recognized conservatively as current date/time requests.
-- Greeting handling also applies to configured-location, live-weather, and stop-conversation requests.
-- Unrelated questions such as **“What is time complexity?”** and **“What time does the meeting start?”** continue to reach the LLM normally.
-- Direct time responses are generated from `VERBANODE_DEFAULT_TIMEZONE` and cannot be guessed by the model.
-
-
-## v0.3.2 layered prompt architecture
-
-- Agent-editable instructions now contain only identity, domain, personality, tone, and speaking style.
-- Tool selection policy, memory policy, safety rules, TTS formatting, retrieved knowledge handling, and runtime context are composed internally by VerbaNode.
-- Deterministic routing still handles obvious time/date, location, weather, and stop-conversation requests before the LLM.
-- The agent editor labels the field as **Character instructions** and explains which concerns are handled internally.
-- The AI role generator no longer writes operational tool, memory, safety, or runtime instructions into agent characters.
-- Existing v0.3.1 default Ropi prompts migrate once; customized Ropi character prompts are preserved.
-
-
-## v0.3.1 reliability patch
-
-- Made the default Ropi role more concrete, concise, and explicit about physical-action limits.
-- Added mandatory tool rules: current time/date, configured location, weather, and conversation-stop requests must use their tools and must never be guessed.
-- Added conservative deterministic routing for obvious core requests such as “What time is it?” so `qwen3.5:0.8b` cannot skip the tool call.
-- Restored the four core tools for the Ropi agent during the one-time v0.3.1 database migration while preserving additional custom tools.
-- Added configurable `VERBANODE_DEFAULT_TIMEZONE` with `Asia/Jakarta` as the default.
-- Removed duplicate HTTP heartbeats while WebSocket is connected, which was the main source of recurring Windows HTTPS connection-reset noise.
-- Suppressed only the known harmless `WinError 10054` Proactor cleanup callback; other asyncio errors remain visible.
-
-## v0.3.0 Phase 1 improvements
-
-- Authoritative pipeline state machine with `turn_id`, `capture_id`, and `generation_id` tracking.
-- ASR timeout, one transient retry, immutable PCM snapshots, and direct PCM recognition before WAV fallback.
-- Default estimated STT threshold reduced from 88% to 70%; deliberate custom values are preserved.
-- Finite Ollama and tool timeouts, up to three tool rounds, and interrupted tool-call history repair.
-- Faster first-clause TTS, bounded TTS queues, retries, and Edge/Kokoro circuit breaking.
-- Audio device fingerprints and recovery metrics for Windows/PortAudio device-ID changes.
-- Responsive XiaozhiConsole-inspired interface that fits one desktop viewport and provides phone drawer, bottom navigation, and fixed voice controls.
-
-## Interface previews
-
-### Desktop conversation
-
-![Desktop conversation](docs/ui-preview/desktop-conversation.png)
-
-### Desktop agents
-
-![Desktop agents](docs/ui-preview/desktop-agents.png)
-
-### Phone conversation
-
-![Phone conversation](docs/ui-preview/mobile-conversation.png)
-
-## Requirements
-
-- Windows 10 or Windows 11, 64-bit.
-- Miniconda or Anaconda.
-- Ollama for Windows.
-- 8 GB RAM minimum; CPU-only operation is supported.
-- Devices on the same trusted local network for remote dashboard access.
-
-## First-time setup
-
-Open Command Prompt or PowerShell in the project folder:
-
-```bat
-setup_windows.bat
+```text
+Microphone / Browser PTT / Typed Text
+                |
+                v
+        +----------------+
+        | Audio / Input  |
+        +----------------+
+                |
+                v
+        +----------------+
+        |      STT       |
+        | SenseVoice /   |
+        | Whisper        |
+        +----------------+
+                |
+                v
+        +----------------+
+        | Conversation   |
+        | Controller     |
+        +----------------+
+          |      |      |
+          |      |      +--------------------+
+          |      |                           |
+          v      v                           v
+      Plugins  Memory / Info              Ollama
+          |      |                           |
+          +------+-------------+-------------+
+                               |
+                               v
+                        +-------------+
+                        | LLM Response|
+                        +-------------+
+                               |
+                               v
+                        +-------------+
+                        |     TTS     |
+                        | Edge/Kokoro |
+                        +-------------+
+                               |
+                               v
+                            Speaker
 ```
 
-The setup script creates the `verbanode` Conda environment, installs dependencies, creates `.env`, and generates a random six-digit controller PIN.
+The packaged Windows application separates major runtime responsibilities into the VerbaNode Core, Audio Engine, and AI Engine so long-running audio and inference work are isolated from the dashboard/controller process.
 
-Pull the default LLM:
+---
 
-```bat
-ollama pull qwen3.5:0.8b
+## Speech and Voice Stack
+
+| Function | English | Bahasa Indonesia |
+|---|---|---|
+| Speech recognition | SenseVoiceSmall | Whisper Base / Whisper Small |
+| Local fallback | Agent/config dependent | Whisper Small can fall back to Base |
+| Online TTS | Edge TTS | Edge TTS |
+| Local TTS | Kokoro | Currently intended primarily for supported configured voices |
+| LLM | Ollama models | Ollama models |
+
+VerbaNode also exposes ASR status information such as the configured model, loaded model, load/transcription latency, fallback state, and errors.
+
+---
+
+## Windows Installation
+
+### Option A — Installer
+
+For normal users, use the Windows installer from the project's **GitHub Releases** page:
+
+```text
+VerbaNode-Setup-<version>.exe
 ```
 
-Create or migrate the SQLite database:
+The installer is intended to:
 
-```bat
-setup_database.bat
+- install VerbaNode under `C:\Program Files\VerbaNode`
+- create Windows shortcuts
+- configure the application firewall rule
+- initialize or migrate the VerbaNode database
+- prepare HTTPS
+- preserve existing user data during upgrades
+- optionally prepare selected AI components/models
+
+### Persistent data
+
+Installed application binaries and user data are deliberately separated.
+
+```text
+C:\Program Files\VerbaNode\
+    VerbaNode.exe
+    _internal\
+    ...
 ```
 
-Download speech and local TTS models:
+Persistent user state is stored under:
 
-```bat
-download_funasr.bat
-download_whisper.bat
-download_kokoro.bat
+```text
+%LOCALAPPDATA%\VerbaNode\
 ```
 
-Start VerbaNode with HTTPS:
+This includes application-managed data such as configuration, database state, certificates, plugins, diagnostics, backups, and other writable runtime files.
 
-```bat
+Model caches may also live in their normal user locations, for example:
+
+```text
+%USERPROFILE%\.cache\whisper\
+%USERPROFILE%\.cache\modelscope\
+%USERPROFILE%\.ollama\
+```
+
+**Upgrading VerbaNode should replace application binaries without deleting agents, scripts, information entries, settings, plugins, databases, certificates, or downloaded model caches.**
+
+---
+
+## Development Setup
+
+### Requirements
+
+Primary development target:
+
+- Windows 10/11 x64
+- Git
+- Miniconda or Anaconda
+- Python 3.11 environment
+- Ollama for local LLM inference
+- A working microphone and audio output device
+
+### 1. Clone the repository
+
+```powershell
+git clone https://github.com/TGJ27/VerbaNode.git
+cd VerbaNode
+```
+
+### 2. Run the Windows setup
+
+```powershell
+scripts\setup\setup_windows.bat
+```
+
+The setup script prepares the `verbanode` Conda environment and installs the required Python dependencies.
+
+### 3. Initialize the database
+
+```powershell
+scripts\setup\setup_database.bat
+```
+
+### 4. Download optional/local models
+
+Model helpers are grouped under:
+
+```text
+scripts\models\
+```
+
+Available helpers include:
+
+```powershell
+scripts\models\download_funasr.bat
+scripts\models\download_whisper.bat
+scripts\models\download_kokoro.bat
+```
+
+Only download the models required by the agents and TTS providers you plan to use.
+
+### 5. Configure environment settings
+
+Copy:
+
+```text
+.env.example
+```
+
+to:
+
+```text
+.env
+```
+
+and adjust the required values for your machine.
+
+Do **not** commit `.env`, generated certificates, databases, model files, or runtime audio.
+
+### 6. Start VerbaNode
+
+Recommended development startup:
+
+```powershell
 run.bat
 ```
 
-HTTPS is required for phone/browser microphone permission. Use `run_http.bat` only when browser-device microphone capture is not needed. Run `allow_firewall.bat` as Administrator to permit another device through Windows Firewall.
+`run.bat` uses the HTTPS development path so browser microphone access and LAN dashboard access behave consistently with the packaged application.
 
-## External plugins
+Other development entry points:
 
-VerbaNode scans the top-level `plugins/` directory. Each external plugin uses this structure:
+```powershell
+run_https.bat
+run_http.bat
+```
+
+---
+
+## Dashboard Access
+
+When VerbaNode is running, the dashboard is exposed through HTTPS.
+
+Typical local address:
 
 ```text
-plugins/my_plugin/
+https://127.0.0.1:8002
+```
+
+Available LAN/Wi-Fi addresses are shown by the packaged Windows launcher.
+
+The launcher also exposes:
+
+- service health
+- Ollama connection status
+- dashboard PIN Show / Hide / Copy
+- Open Dashboard
+- Restart Services
+- Minimize
+- Exit
+
+HTTPS certificates are generated and maintained by VerbaNode for local operation.
+
+---
+
+## Building the Windows Application
+
+The repository includes a PyInstaller-based Windows application build.
+
+Run:
+
+```powershell
+build_windows.bat
+```
+
+The build script:
+
+1. locates Conda
+2. reuses the `verbanode` environment when available
+3. creates it when missing
+4. installs packaging requirements
+5. performs a clean PyInstaller build
+
+Output:
+
+```text
+dist\
+└── VerbaNode\
+    ├── VerbaNode.exe
+    └── _internal\
+```
+
+The application is intentionally packaged as **onedir** rather than a single-file PyInstaller executable because VerbaNode contains multiprocessing, native audio/ML libraries, model runtimes, and other resources that benefit from an explicit application directory.
+
+---
+
+## Building the Windows Installer
+
+Install Inno Setup on the development machine, then run:
+
+```powershell
+build_installer.bat
+```
+
+Output:
+
+```text
+dist-installer\
+└── VerbaNode-Setup-<version>.exe
+```
+
+Installer-related files live under:
+
+```text
+packaging\
+├── VerbaNode.spec
+├── VerbaNode.iss
+├── requirements-packaging.txt
+├── README.md
+└── assets\
+    ├── VerbaNode.ico
+    └── VerbaNode.png
+```
+
+See:
+
+- `docs/packaging/WINDOWS_APP.md`
+- `docs/packaging/INSTALLER.md`
+- `packaging/README.md`
+
+for packaging-specific documentation.
+
+---
+
+## Plugins
+
+VerbaNode separates built-in application plugins from external user plugins.
+
+### Built-in plugins
+
+Built-ins live under:
+
+```text
+app\plugins\builtin\
+```
+
+Current built-in capabilities include conversation control, location, current time, and weather-related tooling.
+
+### External plugins
+
+External plugin examples and templates live under:
+
+```text
+plugins\
+├── example_echo\
+└── _template\
+```
+
+A plugin normally contains:
+
+```text
+my_plugin\
 ├── plugin.json
 ├── plugin.py
 └── README.md
 ```
 
-After adding or changing a folder, open **Plugins** and press **Reload external**. New tools must also be enabled for the active agent under **Agents → Edit → Models & Voice → Tools**.
+Use `_template` as the starting point for new plugins.
 
-The included `example_echo` plugin can be tested with:
-
-```text
-Echo external plugins are working.
-```
-
-See `docs/EXTERNAL_PLUGINS.md` for the manifest, lifecycle, compatibility rules, and security limitations.
-
-## Upgrade from v0.2.6
-
-1. Back up the current installation and use the dashboard backup function for the database.
-2. Replace repository files with v0.6.3, but keep your local `.env`, `data/`, `models/`, and `certs/` directories.
-3. Run:
-
-```bat
-setup_windows.bat
-setup_database.bat
-```
-
-4. Start with `run.bat`.
-
-The application continues to use `data/verbanode.db`. Existing databases are migrated in place. Only the old default STT threshold of 88% is migrated to 70%; other custom threshold values remain unchanged.
-
-## Database setup
-
-The repository commits only `data/.gitkeep`; it does not commit a user database.
-
-```bat
-setup_database.bat
-```
-
-This creates or migrates `data/verbanode.db` and seeds Agent Ropi with:
-
-- model `qwen3.5:0.8b`;
-- temperature `0.2`;
-- top-p `0.8`;
-- maximum response tokens `224`;
-- estimated STT confidence threshold `70%`.
-
-To intentionally erase and recreate the database:
-
-```bat
-setup_database.bat --reset
-```
-
-The script requires typing `RESET` before deletion.
-
-## Audio architecture
-
-Phase 2 uses one supervised **Audio Engine child process** to own both the persistent microphone and persistent speaker endpoints. The FastAPI/LLM core communicates with it through bounded multiprocessing queues. PortAudio callbacks and frame-level buffers stay inside the child process; only completed host-microphone utterances, small status messages, and generated audio-file paths cross IPC.
-
-A watchdog checks the child process and restarts it when it exits or becomes unresponsive. Selected device and requested lock state are restored after restart. Microphone and speaker intentionally remain together in one process so Windows audio state is coordinated rather than contested by two independent processes. See `docs/PHASE2_IMPLEMENTATION.md`.
-
-## Project structure
+Plugin documentation:
 
 ```text
-app/                         FastAPI application, services, database, and web UI
-app/services/pipeline.py     Pipeline state, identifiers, metrics, and health
-app/services/audio_engine.py Supervised child process, IPC proxies, watchdog, and restart
-scripts/                     Model, certificate, audio-test, and database utilities
-tests/                       Automated regression tests
-data/.gitkeep                Empty runtime data directory placeholder
-models/                      Download instructions; model binaries are ignored
-docs/ui-preview/             Desktop and phone interface previews
-setup_windows.bat            Conda environment and dependency setup
-setup_database.bat           Create, migrate, or reset SQLite data
-run.bat                      HTTPS launcher
-run_http.bat                 Optional HTTP launcher
-download_funasr.bat          English SenseVoice model downloader
-download_whisper.bat         Indonesian Whisper Base downloader
-download_kokoro.bat          Kokoro model downloader
+docs\plugins\
 ```
 
-## Configuration
+includes architecture, manifest, security, manager, and external-plugin guides.
 
-`setup_windows.bat` copies `.env.example` to `.env`. Important values include:
+---
 
-| Variable | Purpose |
-| --- | --- |
-| `VERBANODE_PIN` | Controller PIN |
-| `VERBANODE_PORT` | Dashboard/API port |
-| `VERBANODE_DB_PATH` | SQLite database path |
-| `VERBANODE_OLLAMA_URL` | Ollama API URL |
-| `VERBANODE_DEFAULT_MODEL` | New-agent default model |
-| `VERBANODE_DEFAULT_TIMEZONE` | Timezone used by the exact current-time tool |
-| `VERBANODE_FUNASR_MODEL` | STT model identifier |
-| `VERBANODE_STT_TIMEOUT_SECONDS` | ASR timeout |
-| `VERBANODE_TOOL_TIMEOUT_SECONDS` | Individual tool timeout |
-| `VERBANODE_MAX_TOOL_ROUNDS` | Maximum sequential tool rounds |
-| `VERBANODE_TTS_CIRCUIT_OPEN_SECONDS` | Provider cooldown after repeated failure |
-| `VERBANODE_KOKORO_DIR` | Local Kokoro model folder |
-| `VERBANODE_TTS_CACHE_PATH` | Persistent script/greeting cache |
-| `VERBANODE_AUDIO_ENGINE_PROCESS` | Enable the Phase 2 isolated audio process |
-| `VERBANODE_AUDIO_ENGINE_WATCHDOG_SECONDS` | Audio process heartbeat interval |
-| `VERBANODE_AI_ENGINE_PROCESS` | Enable isolated SenseVoice and Kokoro models |
-| `VERBANODE_AI_ENGINE_WATCHDOG_SECONDS` | AI process heartbeat interval |
-| `VERBANODE_AI_ENGINE_PRELOAD_ASR` | Load SenseVoice when the AI process starts |
-| `VERBANODE_AI_ENGINE_PRELOAD_KOKORO` | Load Kokoro at startup when model files exist |
+## Repository Structure
 
-Do not commit `.env`, databases, models, certificates, backups, or TTS cache files.
+```text
+VerbaNode/
+├── app/                  # Core application
+│   ├── plugins/          # Internal plugin framework + built-ins
+│   ├── services/         # STT, TTS, audio, AI engine, memory, pipeline, etc.
+│   └── static/           # Responsive web dashboard
+│
+├── plugins/              # External plugin template/examples
+├── packaging/            # PyInstaller + Inno Setup + branding assets
+├── scripts/              # Setup, model, and Windows helper scripts
+├── docs/                 # Architecture, features, plugins, packaging docs
+├── tests/                # Automated regression tests
+│
+├── launcher.py           # Source/frozen launcher entry point
+├── run.bat               # Recommended development startup
+├── run_http.bat
+├── run_https.bat
+├── build_windows.bat     # Build Windows application
+├── build_installer.bat   # Build Windows installer
+│
+├── requirements.txt
+├── requirements-core.txt
+├── requirements-dev.txt
+├── README.md
+├── CHANGELOG.md
+└── RELEASE_NOTES.md
+```
+
+Generated build output, databases, caches, models, certificates, diagnostics, and runtime audio should remain outside Git tracking.
+
+---
 
 ## Testing
 
-```bat
-conda run -n verbanode python -m pip install -r requirements-dev.txt
-conda run -n verbanode python -m pytest -q
+Run the full test suite with:
+
+```powershell
+python -m pytest -q
 ```
 
-GitHub Actions runs compilation and tests on Windows for every push and pull request. Hardware-dependent microphone, Bluetooth, browser permission, and speaker behavior must also be tested on the target Windows PC.
+The test suite covers areas including:
 
-## Publishing the update
+- audio lifecycle and device selection
+- Audio Engine and AI Engine isolation
+- STT confidence handling
+- bilingual agents
+- Whisper hardening and fallback
+- TTS caching and interruption
+- selective memory
+- typed-chat interruption
+- plugin architecture and security
+- diagnostics
+- Windows launcher lifecycle and styling
+- Windows packaging
+- installer/setup CLI behavior
+- repository layout
 
-From the existing Git repository:
+Before a release, also test the packaged application and installer on Windows outside the source repository.
 
-```bat
-git status
-git add .
-git commit -m "fix: harden VerbaNode plugin execution and reload"
-git push origin main
+---
+
+## Documentation
+
+Documentation is grouped by topic:
+
+```text
+docs/
+├── architecture/
+├── features/
+├── packaging/
+├── plugins/
+└── ui-preview/
 ```
 
-Test this build on the target Windows audio hardware first. After validation, create a GitHub pre-release tagged `v0.6.3-beta.1` and use `RELEASE_NOTES.md` as the release description.
+Useful starting points:
 
-## Reference architecture
+- `docs/architecture/PIPELINE_COMPARISON.md`
+- `docs/features/BILINGUAL_AGENTS_AND_SCRIPT_TTS.md`
+- `docs/features/SELECTIVE_MEMORY.md`
+- `docs/plugins/EXTERNAL_PLUGINS.md`
+- `docs/plugins/PLUGIN_SECURITY.md`
+- `docs/packaging/WINDOWS_APP.md`
+- `docs/packaging/INSTALLER.md`
 
-The project was architecturally informed by the MIT-licensed `xiaozhi-esp32-server` project. VerbaNode uses a Windows-hosted topology rather than its remote ESP32 audio-device topology. See `THIRD_PARTY_NOTICES.md`, `docs/PIPELINE_COMPARISON.md`, `docs/PHASE1_IMPLEMENTATION.md`, `docs/PHASE2_IMPLEMENTATION.md`, `docs/PHASE3_IMPLEMENTATION.md`, `docs/PHASE3_DIAGNOSTICS.md`, and `docs/INTERNAL_PLUGIN_ARCHITECTURE.md`, and `docs/EXTERNAL_PLUGINS.md`.
+---
+
+## Security and Privacy
+
+VerbaNode is designed primarily for local deployment, but it still exposes a browser-accessible dashboard and can use online services depending on configuration.
+
+Keep these rules in mind:
+
+- never commit `.env`
+- never commit generated private certificate keys
+- keep dashboard PINs private
+- only expose the dashboard to trusted networks
+- review external plugins before enabling them
+- remember that Edge TTS is an online service
+- Ollama/local STT/local TTS data remains local unless another configured plugin/service sends data externally
+
+See `SECURITY.md` for project security guidance.
+
+---
+
+## Current Direction
+
+The v0.7.x line focuses on completing the assistant and Windows deployment foundation:
+
+- bilingual English / Bahasa Indonesia operation
+- stable audio and AI engine isolation
+- selective memory
+- modular plugins
+- native Windows launcher
+- packaged application
+- upgrade-safe online installer
+
+The next major development area is the **robot capability layer**, where VerbaNode plugins can expose verified robot actions such as status, display control, navigation, photobooth, and other physical capabilities without allowing the LLM to claim an action succeeded unless the backend confirms it.
+
+---
+
+## Contributing
+
+Contributions, testing, bug reports, and plugin improvements are welcome.
+
+Before submitting changes:
+
+```powershell
+python -m pytest -q
+```
+
+Please keep changes modular, preserve the source-development workflow, and avoid committing generated/runtime data.
+
+See `CONTRIBUTING.md` for additional guidance.
+
+---
+
+## License
+
+See `LICENSE` for licensing terms.
+
+---
+
+<div align="center">
+
+**VerbaNode**
+
+Local voice-assistant infrastructure for interactive systems and robotics.
+
+</div>

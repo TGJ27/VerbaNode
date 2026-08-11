@@ -172,7 +172,7 @@ class KokoroTtsProvider:
                 return self._tts
             if not self.model_ready():
                 raise TtsUnavailable(
-                    "Kokoro model is missing. Run: python scripts/download_kokoro.py"
+                    "Kokoro model is missing. Run: python scripts/models/download_kokoro.py"
                 )
             try:
                 import sherpa_onnx

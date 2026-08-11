@@ -29,6 +29,22 @@ def test_whisper_selection_validation(monkeypatch: pytest.MonkeyPatch) -> None:
         setup_cli.download_whisper("large")
 
 
+def test_sensevoice_download_skips_existing_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(setup_cli, "ensure_runtime_layout", lambda: None)
+    monkeypatch.setattr(
+        setup_cli,
+        "sensevoice_cache_status",
+        lambda: {"downloaded": True, "path": "C:/cache/model.pt"},
+    )
+    assert setup_cli.download_sensevoice() == 0
+
+
+def test_ollama_pull_skips_existing_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(setup_cli, "_ensure_ollama_running", lambda: None)
+    monkeypatch.setattr(setup_cli, "ollama_model_installed", lambda _name: True)
+    assert setup_cli.pull_ollama_model("qwen3.5:0.8b") == 0
+
+
 def test_final_icon_exists_and_is_ico() -> None:
     icon = Path("packaging/assets/VerbaNode.ico")
     assert icon.exists()

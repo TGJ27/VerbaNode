@@ -162,7 +162,7 @@ def _ai_engine_worker(
                     state["kokoro"]["model_ready"] = ready
                 if not ready:
                     raise TtsUnavailable(
-                        "Kokoro model is missing. Run: python scripts/download_kokoro.py"
+                        "Kokoro model is missing. Run: python scripts/models/download_kokoro.py"
                     )
                 status = kokoro.warmup()
                 elapsed = round((time.monotonic() - started) * 1000)

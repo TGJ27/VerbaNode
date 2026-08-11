@@ -78,7 +78,7 @@ echo.
 echo [5/7] Installing VerbaNode and packaging dependencies...
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :fail
-python -m pip install -r requirements-packaging.txt
+python -m pip install -r packaging\requirements-packaging.txt
 if errorlevel 1 goto :fail
 
 echo.
@@ -102,7 +102,7 @@ if exist dist\VerbaNode (
 
 echo.
 echo [7/7] Building VerbaNode.exe...
-python -m PyInstaller --noconfirm --clean VerbaNode.spec
+python -m PyInstaller --noconfirm --clean packaging\VerbaNode.spec
 if errorlevel 1 goto :fail
 
 if not exist dist\VerbaNode\VerbaNode.exe (

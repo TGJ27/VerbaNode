@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 
 if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
 set "CONDA_BAT="
@@ -28,6 +28,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-python scripts\test_audio.py
+python scripts\windows\test_audio.py
 echo.
 pause

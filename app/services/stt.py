@@ -140,7 +140,7 @@ class FunASRService:
             try:
                 from funasr import AutoModel
             except ImportError as exc:
-                raise SttUnavailable("FunASR is not installed. Run setup_windows.bat.") from exc
+                raise SttUnavailable("FunASR is not installed. Run scripts/setup/setup_windows.bat.") from exc
 
             is_whisper = self._is_whisper_model(model_name)
             if is_whisper:
@@ -148,7 +148,7 @@ class FunASRService:
                     import whisper  # noqa: F401
                 except ImportError as exc:
                     raise SttUnavailable(
-                        "OpenAI Whisper support is not installed. Run setup_windows.bat again."
+                        "OpenAI Whisper support is not installed. Run scripts/setup/setup_windows.bat again."
                     ) from exc
             try:
                 LOGGER.info(

@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 
 if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
 call :find_conda
@@ -27,13 +27,13 @@ echo.
 call "%CONDA_BAT%" run -n "%VERBANODE_CONDA_ENV%" python -c "import sys" >nul 2>nul
 if errorlevel 1 (
     echo The Conda environment "%VERBANODE_CONDA_ENV%" does not exist.
-    echo Run setup_windows.bat first.
+    echo Run scripts\setup\setup_windows.bat first.
     echo.
     pause
     exit /b 1
 )
 
-call "%CONDA_BAT%" run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\download_kokoro.py
+call "%CONDA_BAT%" run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\models\download_kokoro.py
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" (
     echo.

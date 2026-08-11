@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 
 if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
 call :find_conda
@@ -43,7 +43,7 @@ python -c "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) els
 if errorlevel 1 (
   echo The "%VERBANODE_CONDA_ENV%" environment is not using Python 3.11.
   echo Delete it with: conda env remove -n %VERBANODE_CONDA_ENV%
-  echo Then run setup_windows.bat again.
+  echo Then run scripts\setup\setup_windows.bat again.
   pause
   exit /b 1
 )
@@ -69,13 +69,13 @@ echo Next steps:
 echo 1. Install Ollama for Windows and pull a model:
 echo    ollama pull qwen3.5:0.8b
 echo 2. Create or migrate the SQLite database:
-echo    setup_database.bat
+echo    scripts\setup\setup_database.bat
 echo 3. Download the local Kokoro model:
-echo    download_kokoro.bat
+echo    scripts\models\download_kokoro.bat
 echo 4. Pre-download the English SenseVoice model:
-echo    download_funasr.bat
+echo    scripts\models\download_funasr.bat
 echo 5. Pre-download Whisper Base for Indonesian agents:
-echo    download_whisper.bat
+echo    scripts\models\download_whisper.bat
 echo 6. Start VerbaNode with run.bat
 echo.
 pause
@@ -84,7 +84,7 @@ exit /b 0
 :install_failed
 echo.
 echo Dependency installation failed.
-echo Review the error above, then run setup_windows.bat again.
+echo Review the error above, then run scripts\setup\setup_windows.bat again.
 pause
 exit /b 1
 

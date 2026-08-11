@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 
 if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
 call :find_conda
 if errorlevel 1 (
-  echo Conda was not found. Run setup_windows.bat first.
+  echo Conda was not found. Run scripts\setup\setup_windows.bat first.
   pause
   exit /b 1
 )
@@ -13,13 +13,13 @@ if errorlevel 1 (
 call "%CONDA_BAT%" run -n "%VERBANODE_CONDA_ENV%" python -c "import sys" >nul 2>nul
 if errorlevel 1 (
   echo Conda environment "%VERBANODE_CONDA_ENV%" does not exist.
-  echo Run setup_windows.bat first.
+  echo Run scripts\setup\setup_windows.bat first.
   pause
   exit /b 1
 )
 
 if /I "%~1"=="--reset" goto :reset
-call "%CONDA_BAT%" run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\setup_database.py
+call "%CONDA_BAT%" run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\setup\setup_database.py
 if errorlevel 1 goto :failed
 pause
 exit /b 0
@@ -33,7 +33,7 @@ if /I not "%CONFIRM%"=="RESET" (
   pause
   exit /b 0
 )
-call "%CONDA_BAT%" run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\setup_database.py --reset
+call "%CONDA_BAT%" run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\setup\setup_database.py --reset
 if errorlevel 1 goto :failed
 pause
 exit /b 0

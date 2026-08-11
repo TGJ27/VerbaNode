@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 
 if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
 
@@ -17,11 +17,14 @@ if errorlevel 1 (
 )
 
 :conda_ready
-echo Downloading the FunASR speech model into the local model cache...
-echo This is about 936 MB and can take a long time on a slow connection.
-call conda run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\download_funasr.py
+set "WHISPER_MODEL=%~1"
+if "%WHISPER_MODEL%"=="" set "WHISPER_MODEL=base"
+
+echo Preparing Whisper %WHISPER_MODEL% for Indonesian speech recognition...
+echo Usage: download_whisper.bat [base^|small^|both]
+call conda run --no-capture-output -n "%VERBANODE_CONDA_ENV%" python -u scripts\models\download_whisper.py --model "%WHISPER_MODEL%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo.
-echo FunASR model setup completed.
+echo Whisper setup completed.
 pause

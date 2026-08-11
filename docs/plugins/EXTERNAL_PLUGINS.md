@@ -62,4 +62,4 @@ def create_plugin() -> Plugin:
 
 ## Security
 
-These controls isolate common failures but do not sandbox Python code. Only install plugins you trust. See `docs/PLUGIN_SECURITY.md` and `docs/PLUGIN_MANIFEST.md`.
+These controls isolate common failures but do not sandbox Python code. Only install plugins you trust. See `docs/plugins/PLUGIN_SECURITY.md` and `docs/plugins/PLUGIN_MANIFEST.md`.

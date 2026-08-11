@@ -18,7 +18,7 @@ from typing import Any
 import uvicorn
 
 from app.config import get_settings
-from app.paths import CONFIG_DIR, IS_FROZEN, LOG_DIR, ensure_runtime_layout
+from app.paths import CONFIG_DIR, IS_FROZEN, LOG_DIR, ensure_runtime_layout, resource_path
 from app.process_control import shutdown_requested
 from app.services.https_cert import CERT_FILE, KEY_FILE, discover_ipv4_addresses, ensure_local_certificate
 from app.version import APP_VERSION
@@ -269,8 +269,8 @@ class WindowsLauncher:
 
         available_width = max(760, screen_width - 32)
         available_height = max(500, screen_height - 90)
-        target_width = min(980, available_width)
-        target_height = min(585, available_height)
+        target_width = min(1000, available_width)
+        target_height = min(535, available_height)
 
         x = max(0, (screen_width - target_width) // 2)
         y = max(0, (screen_height - target_height) // 2)
@@ -298,6 +298,21 @@ class WindowsLauncher:
         scale = float(getattr(self, "font_scale", 1.28))
         scaled_size = max(size + 2, int(round(size * scale)))
         return self.ctk.CTkFont(family="Segoe UI", size=scaled_size, weight=weight)
+
+    def _load_brand_image(self, size: int = 48):
+        """Load the packaged VerbaNode brand mark for the native launcher."""
+        try:
+            from PIL import Image
+
+            image_path = resource_path("packaging", "assets", "VerbaNode.png")
+            image = Image.open(image_path).convert("RGBA")
+            return self.ctk.CTkImage(
+                light_image=image,
+                dark_image=image,
+                size=(size, size),
+            )
+        except Exception:
+            return None
 
     def _card(self, parent, *, corner_radius: int = 18):
         return self.ctk.CTkFrame(
@@ -348,19 +363,30 @@ class WindowsLauncher:
         outer.pack(fill="both", expand=True, padx=14, pady=8)
 
         # Product header -----------------------------------------------------
-        top = ctk.CTkFrame(outer, fg_color="transparent", height=48)
+        top = ctk.CTkFrame(outer, fg_color="transparent", height=66)
         top.pack(fill="x", pady=(0, 6))
         top.pack_propagate(False)
-        logo = ctk.CTkLabel(
-            top,
-            text="VN",
-            width=42,
-            height=42,
-            corner_radius=12,
-            fg_color=self.COLORS["primary"],
-            text_color="#FFFFFF",
-            font=self._font(15, "bold"),
-        )
+        self.brand_image = self._load_brand_image(52)
+        if self.brand_image is not None:
+            logo = ctk.CTkLabel(
+                top,
+                text="",
+                image=self.brand_image,
+                width=54,
+                height=54,
+                fg_color="transparent",
+            )
+        else:
+            logo = ctk.CTkLabel(
+                top,
+                text="VN",
+                width=48,
+                height=48,
+                corner_radius=12,
+                fg_color=self.COLORS["primary"],
+                text_color="#FFFFFF",
+                font=self._font(15, "bold"),
+            )
         logo.pack(side="left")
         title_wrap = ctk.CTkFrame(top, fg_color="transparent")
         title_wrap.pack(side="left", fill="x", expand=True, padx=(11, 0))
@@ -368,7 +394,7 @@ class WindowsLauncher:
             title_wrap,
             text="VerbaNode",
             text_color=self.COLORS["text"],
-            font=self._font(23, "bold"),
+            font=self._font(21, "bold"),
             anchor="w",
         ).pack(anchor="w")
         ctk.CTkLabel(
@@ -398,7 +424,7 @@ class WindowsLauncher:
 
         # Service health card ----------------------------------------------
         health = self._card(overview, corner_radius=16)
-        health.configure(height=204)
+        health.configure(height=220)
         health.grid_propagate(False)
         health.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         self._section_header(health, "S", "Services")
@@ -411,7 +437,7 @@ class WindowsLauncher:
             ("Ollama", "ollama", "OL"),
         )
         for index, (label, key, short) in enumerate(service_defs):
-            row = ctk.CTkFrame(services, fg_color="transparent", height=40)
+            row = ctk.CTkFrame(services, fg_color="transparent", height=42)
             row.pack(fill="x", padx=6, pady=(2 if index == 0 else 0, 1))
             row.pack_propagate(False)
             ctk.CTkLabel(
@@ -446,7 +472,7 @@ class WindowsLauncher:
 
         # Addresses card ----------------------------------------------------
         dash = self._card(overview, corner_radius=16)
-        dash.configure(height=204)
+        dash.configure(height=220)
         dash.grid_propagate(False)
         dash.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
         self._section_header(
@@ -458,18 +484,18 @@ class WindowsLauncher:
         self.address_frame = ctk.CTkScrollableFrame(
             dash,
             fg_color="transparent",
-            height=115,
+            height=138,
             corner_radius=0,
             scrollbar_button_color=self.COLORS["border"],
             scrollbar_button_hover_color="#C7D2E8",
         )
-        self.address_frame.pack(fill="x", padx=11, pady=(0, 8))
+        self.address_frame.pack(fill="both", expand=True, padx=11, pady=(0, 8))
         self._render_addresses()
 
         # PIN card ----------------------------------------------------------
         access = self._card(outer, corner_radius=15)
         access.pack(fill="x", pady=(0, 6))
-        access_row = ctk.CTkFrame(access, fg_color="transparent", height=50)
+        access_row = ctk.CTkFrame(access, fg_color="transparent", height=54)
         access_row.pack(fill="x", padx=12, pady=6)
         access_row.pack_propagate(False)
         ctk.CTkLabel(
@@ -536,7 +562,7 @@ class WindowsLauncher:
         ).pack(side="right", padx=(0, 7))
 
         # Primary actions ---------------------------------------------------
-        controls = ctk.CTkFrame(outer, fg_color="transparent", height=40)
+        controls = ctk.CTkFrame(outer, fg_color="transparent", height=42)
         controls.pack(fill="x", pady=(1, 4))
         controls.pack_propagate(False)
         ctk.CTkCheckBox(
@@ -610,7 +636,7 @@ class WindowsLauncher:
         ).pack(side="right", padx=(0, 6))
 
         # Footer ------------------------------------------------------------
-        bottom = ctk.CTkFrame(outer, fg_color="transparent", height=22)
+        bottom = ctk.CTkFrame(outer, fg_color="transparent", height=24)
         bottom.pack(fill="x")
         bottom.pack_propagate(False)
         ctk.CTkLabel(
@@ -639,11 +665,11 @@ class WindowsLauncher:
                 self.address_frame,
                 fg_color=self.COLORS["row"],
                 border_width=1,
-                border_color=self.COLORS["border"],
-                corner_radius=9,
-                height=54,
+                border_color="#CAD6EA",
+                corner_radius=10,
+                height=62,
             )
-            row.pack(fill="x", pady=(0, 4 if index < len(addresses) - 1 else 0))
+            row.pack(fill="x", padx=(1, 4), pady=(2, 5 if index < len(addresses) - 1 else 2))
             row.pack_propagate(False)
             icon_text = "PC" if label == "This computer" else "Wi"
             ctk.CTkLabel(
@@ -657,7 +683,7 @@ class WindowsLauncher:
                 font=self._font(9, "bold"),
             ).pack(side="left", padx=(7, 8))
             left = ctk.CTkFrame(row, fg_color="transparent")
-            left.pack(side="left", fill="x", expand=True)
+            left.pack(side="left", fill="both", expand=True, pady=5)
             ctk.CTkLabel(
                 left,
                 text=label,
@@ -676,7 +702,7 @@ class WindowsLauncher:
                 row,
                 text="Copy",
                 width=62,
-                height=30,
+                height=32,
                 corner_radius=9,
                 fg_color="#FFFFFF",
                 hover_color=self.COLORS["primary_soft"],
@@ -690,7 +716,7 @@ class WindowsLauncher:
                 row,
                 text="Open",
                 width=62,
-                height=30,
+                height=32,
                 corner_radius=9,
                 fg_color="#FFFFFF",
                 hover_color=self.COLORS["primary_soft"],
