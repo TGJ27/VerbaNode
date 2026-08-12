@@ -22,7 +22,7 @@ def test_launcher_uses_dashboard_style_customtkinter() -> None:
 def test_packaging_includes_customtkinter_and_brand_assets() -> None:
     requirements = (ROOT / "packaging" / "requirements-packaging.txt").read_text(encoding="utf-8")
     spec = (ROOT / "packaging" / "VerbaNode.spec").read_text(encoding="utf-8")
-    assert "customtkinter>=6.0,<7.0" in requirements
+    assert "customtkinter==6.0.0" in requirements
     assert '"customtkinter"' in spec
     assert '"VerbaNode.png"' in spec
     assert '"packaging/assets"' in spec

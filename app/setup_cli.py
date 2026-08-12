@@ -143,61 +143,6 @@ def sensevoice_cache_status() -> dict[str, object]:
     return {"downloaded": False, "path": None}
 
 
-def _modelscope_cache_roots() -> list[Path]:
-    roots: list[Path] = []
-    for variable in ("MODELSCOPE_CACHE", "MODELSCOPE_HOME"):
-        value = os.environ.get(variable)
-        if value:
-            roots.append(Path(value).expanduser())
-    roots.append(Path.home() / ".cache" / "modelscope")
-
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for root in roots:
-        key = os.path.normcase(str(root.resolve(strict=False)))
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(root)
-    return unique
-
-
-def sensevoice_cache_status() -> dict[str, object]:
-    """Return whether the configured SenseVoice checkpoint is already cached."""
-    settings = get_settings()
-    model_id = str(settings.funasr_model or "iic/SenseVoiceSmall").strip()
-    org, _, name = model_id.partition("/")
-    compact = model_id.replace("/", "--")
-    candidates: list[Path] = []
-
-    for root in _modelscope_cache_roots():
-        candidates.extend(
-            [
-                root / "models" / compact,
-                root / "models" / org / name if name else root / "models" / compact,
-                root / "hub" / org / name if name else root / "hub" / compact,
-                root / compact,
-            ]
-        )
-
-    for directory in candidates:
-        if not directory.exists():
-            continue
-        direct = directory / "model.pt"
-        if direct.is_file():
-            return {"downloaded": True, "path": str(direct)}
-        snapshots = directory / "snapshots"
-        if snapshots.exists():
-            try:
-                for checkpoint in snapshots.glob("*/model.pt"):
-                    if checkpoint.is_file():
-                        return {"downloaded": True, "path": str(checkpoint)}
-            except OSError:
-                pass
-
-    return {"downloaded": False, "path": None}
-
-
 def download_sensevoice() -> int:
     ensure_runtime_layout()
     cached = sensevoice_cache_status()
@@ -393,9 +338,6 @@ def pull_ollama_model(model_name: str) -> int:
     if ollama_model_installed(model):
         _print(f"Ollama model already installed: {model}")
         return 0
-    if ollama_model_installed(model):
-        _print(f"Ollama model already installed: {model}")
-        return 0
     payload = json.dumps({"model": model, "stream": False}).encode("utf-8")
     request = urllib.request.Request(
         OLLAMA_URL + "/api/pull",
@@ -429,12 +371,10 @@ def health_check() -> int:
         "certificate": str(cert),
         "certificate_exists": cert.exists() and key.exists(),
         "sensevoice": sensevoice_cache_status(),
-        "sensevoice": sensevoice_cache_status(),
         "whisper": whisper,
         "kokoro_exists": (MODEL_DIR / "kokoro" / KOKORO_DIR_NAME / "model.int8.onnx").exists(),
         "ollama_installed": ollama_installed(),
         "ollama_ready": _ollama_api_ready(),
-        "ollama_models": sorted(_ollama_model_names()),
         "ollama_models": sorted(_ollama_model_names()),
     }
     _print(json.dumps(report, ensure_ascii=False))

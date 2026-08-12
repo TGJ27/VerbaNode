@@ -1,71 +1,129 @@
-# VerbaNode Windows Application and Online Installer (v0.7.6)
+# VerbaNode Windows Application and Online Installer
 
-This release adds the packaging layer used to build `VerbaNode.exe` without
-removing or replacing the source development workflow.
+VerbaNode supports two parallel workflows: normal source development and a packaged Windows application. Packaging is intentionally additive; it does not replace the existing `run.bat` / `run_https.bat` development path.
 
-## Development remains unchanged
+## Source development
 
-Use `run.bat` / `run_https.bat` exactly as before. In source mode VerbaNode
-keeps repository-local `data/`, `certs/`, `plugins/`, `models/`, diagnostics,
-and `.env` paths.
+Use:
 
-## Frozen application behavior
+```bat
+run.bat
+```
 
-`dist/VerbaNode/VerbaNode.exe` opens a small Windows launcher. The launcher:
+Source mode keeps repository-local development data paths and continues to use the HTTPS startup flow.
 
-- creates/updates the HTTPS certificate;
-- starts the VerbaNode HTTPS backend as a supervised child process;
-- waits for Core, Audio Engine, and AI Engine health;
-- checks Ollama connectivity;
-- discovers usable IPv4 interfaces;
-- shows an Open and Copy action for each dashboard URL;
-- optionally opens the local dashboard automatically;
-- provides Restart Services and Exit controls.
+## Frozen Windows application
 
-The Windows application writes mutable state to `%LOCALAPPDATA%\VerbaNode`:
+`build_windows.bat` creates an onedir PyInstaller application:
 
-- `data/` database and TTS cache
-- `config/.env` and launcher preferences
-- `certs/`
-- `plugins/`
-- `models/` (for VerbaNode-managed local models)
-- `diagnostics/`
-- `runtime_audio/`
-- `backups/`
-- `logs/`
+```text
+dist\
+└── VerbaNode\
+    ├── VerbaNode.exe
+    └── _internal\
+```
 
-Whisper stays in `%USERPROFILE%\.cache\whisper` and ModelScope/SenseVoice keeps
-using its normal user cache. Installing a newer VerbaNode build therefore does
-not overwrite agents, scripts, settings, external plugins, certificates, or
-model caches.
+The native launcher:
 
-## Build on Windows
+- starts and supervises the HTTPS backend;
+- reports VerbaNode Core, Audio Engine, AI Engine, and Ollama health;
+- discovers usable localhost/LAN/Wi-Fi HTTPS dashboard addresses;
+- exposes dashboard PIN Show / Hide / Copy actions;
+- provides dashboard launch, restart, minimize, and graceful Exit controls;
+- uses the packaged VerbaNode branding and a fixed adaptive utility-window layout.
 
-Run from the repository root:
+The application uses **onedir** instead of PyInstaller onefile because VerbaNode includes multiprocessing, PyTorch/FunASR, native audio libraries, model runtimes, and UI resources. Onedir provides clearer native-library loading, faster repeat startup, and easier diagnostics.
+
+## Persistent installed data
+
+Program binaries are installed separately from writable user state.
+
+```text
+C:\Program Files\VerbaNode\
+    VerbaNode.exe
+    _internal\
+```
+
+Mutable installed state lives under:
+
+```text
+%LOCALAPPDATA%\VerbaNode\
+```
+
+This includes application-managed configuration, databases, certificates, external plugins, diagnostics, backups, logs, runtime audio, and VerbaNode-managed model assets.
+
+External caches continue to use their normal user locations where applicable:
+
+```text
+%USERPROFILE%\.cache\whisper\
+%USERPROFILE%\.cache\modelscope\
+%USERPROFILE%\.ollama\
+```
+
+Upgrades are designed to replace Program Files binaries without deleting agents, scripts, Information, settings, plugins, databases, certificates, or downloaded model caches.
+
+## Reproducible build environment
+
+Starting with v0.7.7, `build_windows.bat` uses a separate Conda environment named:
+
+```text
+verbanode-build
+```
+
+This keeps packaging changes away from the normal `verbanode` development environment. Packaging-tool versions are pinned in:
+
+```text
+packaging\requirements-packaging.txt
+```
+
+The build environment name can be overridden with `VERBANODE_CONDA_ENV` when needed.
+
+The application version is defined in:
+
+```text
+app\version.py
+```
+
+and the build scripts derive Windows build/installer version metadata from that source.
+
+## Build the application
+
+From the repository root:
 
 ```bat
 build_windows.bat
 ```
 
-PyInstaller is platform-specific; build the Windows executable on Windows.
-The output is an onedir application at `dist\VerbaNode\`.
+PyInstaller is platform-specific, so the Windows executable should be built on Windows.
 
-## Why onedir
+## Build the online installer
 
-VerbaNode uses multiprocessing, PyTorch/FunASR, native audio libraries, and
-large provider stacks. A one-folder bundle has faster startup, clearer DLL
-loading, and simpler diagnostics than extracting a giant one-file executable
-on every launch.
+After the application build succeeds:
 
-## Launcher visual theme
+```bat
+build_installer.bat
+```
 
-The frozen Windows launcher uses CustomTkinter and mirrors the web dashboard's
-light blue/white card design, indigo controls, rounded components, and status
-pills. CustomTkinter is a build-only launcher dependency; source development
-continues to use `run.bat` / `run_https.bat` without requiring the native
-launcher UI.
+The installer is generated under:
 
+```text
+dist-installer\VerbaNode-Setup-<version>.exe
+```
 
-## v0.7.6 online installer
+The Inno Setup wizard supports application installation/upgrades plus optional preparation of configured AI components. Existing SenseVoice, Whisper, Kokoro, Ollama, and Ollama model installations are detected and reused instead of blindly downloading them again. Existing VerbaNode installations default to an application-only update path unless the user chooses to review/add AI components.
 
-After `build_windows.bat`, run `build_installer.bat` to create `dist-installer\VerbaNode-Setup-0.7.6.exe`. The wizard can prepare SenseVoiceSmall, Whisper Base/Small, Kokoro, Ollama, and an Ollama model. The setup uses VerbaNode's frozen `--setup-*` commands and keeps mutable data/model caches outside Program Files.
+## Database upgrades
+
+Installer-triggered setup backs up the current database before migration. v0.7.7 adds a numbered `schema_version` migration foundation under `app/migrations/` so future schema changes can be ordered and applied without resetting user data. Legacy compatibility migrations remain supported.
+
+## Branding
+
+Windows branding assets live under:
+
+```text
+packaging\assets\
+├── VerbaNode.ico
+└── VerbaNode.png
+```
+
+The ICO is used for the application/installer/shortcuts, while the PNG is bundled for launcher UI branding.

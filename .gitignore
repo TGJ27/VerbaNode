@@ -3,7 +3,7 @@ __pycache__/
 .env
 data/*.db
 data/*.db-*
-backups/*.zip
+backups/
 runtime_audio/
 .pytest_cache/
 
@@ -18,6 +18,7 @@ certs/*.key
 certs/*.crt
 certs/*.cnf
 certs/local-ip.txt
+certs/local-ips.txt
 
 .vscode/
 .idea/
@@ -25,8 +26,9 @@ certs/local-ip.txt
 .DS_Store
 Thumbs.db
 
-# Runtime diagnostics and soak-test reports
+# Runtime diagnostics, audit logs, and soak-test reports
 diagnostics/
+logs/
 build/
 dist/
 *.spec.bak

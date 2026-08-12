@@ -6,16 +6,21 @@ from typing import Any
 
 @dataclass(slots=True)
 class PluginResult:
-    """Normalized result returned by an internal capability plugin.
+    """Normalized capability result.
 
-    Phase 1 keeps the public tool API dictionary-based for backwards
-    compatibility.  This model gives each plugin a consistent internal return
-    type and leaves room for future UI, permission, and lifecycle metadata.
+    ``data``/``response`` preserve the existing tool contract. The additional
+    action fields establish the verified execution contract used by future
+    robot/device capabilities.
     """
 
     data: dict[str, Any] = field(default_factory=dict)
     response: str | None = None
     stop_conversation: bool = False
+    success: bool = True
+    status: str = "completed"
+    action_id: str | None = None
+    error_code: str | None = None
+    verified: bool = True
 
     def as_tool_result(self) -> dict[str, Any]:
         payload = dict(self.data)

@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.7.6';
+const FRONTEND_VERSION = '0.7.7';
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
 
 const appState = {
@@ -25,6 +25,8 @@ const appState = {
   conversation: null,
   conversations: [],
   messages: [],
+  chatAutoScroll: localStorage.getItem('verbanode_chat_auto_scroll') !== 'false',
+  chatUnreadMessages: 0,
   mode: 'idle',
   pipeline: { state: 'idle', latency_ms: {}, counters: {} },
   diagnostics: null,
@@ -177,8 +179,15 @@ async function login(pin, clientName, forceTakeover = false) {
   });
   let payload = {};
   try { payload = await response.json(); } catch (_) {}
-  if (response.status === 401) throw new Error('Incorrect PIN');
-  if (!response.ok) throw new Error(payload.detail || 'Login failed');
+  if (response.status === 401) {
+    const retry = Number(payload.retry_after_seconds || 0);
+    throw new Error(retry ? `Incorrect PIN. Try again in ${retry}s.` : 'Incorrect PIN');
+  }
+  if (response.status === 429) {
+    const retry = Number(payload.retry_after_seconds || 1);
+    throw new Error(`Too many PIN attempts. Try again in ${retry}s.`);
+  }
+  if (!response.ok) throw new Error(payload.detail || payload.message || 'Login failed');
 
   if (payload.takeover_required) {
     // Compatibility with older backends: a valid PIN transfers control
@@ -253,11 +262,23 @@ async function reconnectWebSocketAfterValidation() {
   connectWebSocket();
 }
 
-function connectWebSocket() {
+async function connectWebSocket() {
   if (!appState.token) return;
   if (appState.ws) { try { appState.ws.close(); } catch (_) {} }
+  let ticketPayload;
+  try {
+    ticketPayload = await api('/api/auth/ws-ticket', { method: 'POST' });
+  } catch (error) {
+    if (!appState.token) return;
+    $('#connectionDot').classList.remove('online');
+    $('#connectionLabel').textContent = 'Reconnecting…';
+    clearTimeout(appState.reconnectTimer);
+    appState.reconnectTimer = setTimeout(reconnectWebSocketAfterValidation, 1500);
+    return;
+  }
+  if (!appState.token || !ticketPayload?.ticket) return;
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${protocol}//${location.host}/ws?token=${encodeURIComponent(appState.token)}`);
+  const ws = new WebSocket(`${protocol}//${location.host}/ws?ticket=${encodeURIComponent(ticketPayload.ticket)}`);
   appState.ws = ws;
   ws.onopen = () => {
     $('#connectionDot').classList.add('online');
@@ -270,15 +291,13 @@ function connectWebSocket() {
       return;
     }
     if (event.code === 4401) {
-      resetToLogin('Your controller session expired. Enter the PIN again.');
+      $('#connectionLabel').textContent = 'Reconnecting…';
+      clearTimeout(appState.reconnectTimer);
+      appState.reconnectTimer = setTimeout(reconnectWebSocketAfterValidation, 500);
       return;
     }
     $('#connectionLabel').textContent = 'Reconnecting…';
     clearTimeout(appState.reconnectTimer);
-    // A WebSocket rejected before acceptance is reported by browsers as code
-    // 1006, even when the server rejected an expired token with HTTP 403.
-    // Validate the HTTP session before attempting another WebSocket so an old
-    // token cannot create an endless 403 reconnect loop.
     appState.reconnectTimer = setTimeout(reconnectWebSocketAfterValidation, 1500);
   };
   ws.onerror = () => ws.close();
@@ -535,20 +554,88 @@ function renderActiveAgent() {
       <div class="agent-avatar" style="background:${escapeHtml(agent.color)}">${escapeHtml(agent.avatar || 'VA')}</div>
       <div><strong>${escapeHtml(agent.name)}</strong><small>${escapeHtml(agent.llm_model)}</small></div>
     </div>`;
+  const language = agent.language === 'id' ? 'Bahasa Indonesia' : 'English';
+  const stt = String(agent.stt_model || '').replace('iic/', '');
+  const tts = String(agent.tts_mode || 'TTS').replaceAll('_', ' ');
   $('#chatAgentIdentity').innerHTML = `
     <div class="agent-avatar" style="background:${escapeHtml(agent.color)}">${escapeHtml(agent.avatar || 'VA')}</div>
-    <div><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.role)} · ${escapeHtml(agent.llm_model)}</p></div>`;
+    <div class="agent-identity-copy">
+      <div class="agent-identity-title"><h3>${escapeHtml(agent.name)}</h3><span class="agent-context-chip">${escapeHtml(language)}</span></div>
+      <div class="agent-context-row"><span>${escapeHtml(stt)}</span><span>${escapeHtml(tts)}</span><span>${escapeHtml(agent.llm_model)}</span></div>
+    </div>`;
   document.documentElement.style.setProperty('--active-agent', agent.color || '#6c63ff');
 }
 
+
+const CHAT_AUTO_SCROLL_KEY = 'verbanode_chat_auto_scroll';
 
 function messageListNearBottom(list = $('#messageList'), threshold = 96) {
   return list.scrollHeight - list.scrollTop - list.clientHeight <= threshold;
 }
 
+function updateChatAutoScrollUi() {
+  const list = $('#messageList');
+  const toggle = $('#autoScrollToggle');
+  if (list) list.classList.toggle('scroll-locked', appState.chatAutoScroll);
+  if (toggle) {
+    toggle.textContent = appState.chatAutoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF';
+    toggle.classList.toggle('primary', appState.chatAutoScroll);
+    toggle.classList.toggle('ghost', !appState.chatAutoScroll);
+    toggle.setAttribute('aria-pressed', appState.chatAutoScroll ? 'true' : 'false');
+    toggle.title = appState.chatAutoScroll
+      ? 'Chat is locked to the newest message. Turn off to browse history.'
+      : 'Browsing is unlocked. New messages will not move your scroll position.';
+  }
+  updateNewMessagesButton();
+}
+
+function setChatAutoScroll(enabled, persist = true) {
+  appState.chatAutoScroll = Boolean(enabled);
+  if (persist) localStorage.setItem(CHAT_AUTO_SCROLL_KEY, appState.chatAutoScroll ? 'true' : 'false');
+  if (appState.chatAutoScroll) {
+    appState.chatUnreadMessages = 0;
+    scrollMessagesToBottom(true);
+  }
+  updateChatAutoScrollUi();
+}
+
+function updateNewMessagesButton() {
+  const button = $('#newMessagesBtn');
+  if (!button) return;
+  const visible = !appState.chatAutoScroll && appState.chatUnreadMessages > 0;
+  button.classList.toggle('hidden', !visible);
+  if (visible) {
+    button.textContent = `↓ ${appState.chatUnreadMessages} new ${appState.chatUnreadMessages === 1 ? 'message' : 'messages'}`;
+  }
+}
+
+function markChatActivity(count = 1) {
+  if (appState.chatAutoScroll) {
+    scrollMessagesToBottom(true);
+    return;
+  }
+  appState.chatUnreadMessages += Math.max(1, Number(count) || 1);
+  updateNewMessagesButton();
+}
+
+function clearChatUnreadIfAtBottom() {
+  if (appState.chatAutoScroll || !messageListNearBottom()) return;
+  if (appState.chatUnreadMessages) {
+    appState.chatUnreadMessages = 0;
+    updateNewMessagesButton();
+  }
+}
+
+function jumpToNewestMessages() {
+  appState.chatUnreadMessages = 0;
+  scrollMessagesToBottom(true);
+  updateNewMessagesButton();
+}
+
 function scrollMessagesToBottom(force = false) {
   const list = $('#messageList');
-  if (force || messageListNearBottom(list)) {
+  if (!list) return;
+  if (force || appState.chatAutoScroll) {
     requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
   }
 }
@@ -626,14 +713,22 @@ function activateSettingsPanel(panelName, remember = true) {
 
 function renderMessages() {
   const list = $('#messageList');
+  const hadContent = list.scrollHeight > list.clientHeight;
+  const previousTop = list.scrollTop;
   appState.streaming.clear();
+  appState.chatUnreadMessages = 0;
   if (!appState.messages.length) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">◉</div><h3>Start a conversation</h3><p>Use continuous mode, push to talk, or type below. Replies will be spoken by the Windows host.</p></div>`;
+    updateChatAutoScrollUi();
     return;
   }
   list.innerHTML = appState.messages.map(messageHtml).join('');
   applyRejectedTranscriptVisibility();
-  scrollMessagesToBottom(true);
+  updateChatAutoScrollUi();
+  requestAnimationFrame(() => {
+    if (appState.chatAutoScroll || !hadContent) list.scrollTop = list.scrollHeight;
+    else list.scrollTop = Math.min(previousTop, Math.max(0, list.scrollHeight - list.clientHeight));
+  });
 }
 
 function messageHtml(message) {
@@ -656,7 +751,6 @@ function appendRejectedTranscript(data) {
     setLiveStatus('idle', 'Ready', 'Low-confidence speech was filtered');
     return;
   }
-  const stickToBottom = messageListNearBottom(list);
   $('.empty-state', list)?.remove();
   const confidence = Number(data.confidence_percent ?? Math.round(Number(data.confidence || 0) * 100));
   const threshold = Number(data.threshold_percent ?? Math.round(Number(data.threshold || 0) * 100));
@@ -668,17 +762,16 @@ function appendRejectedTranscript(data) {
   const rejectedNodes = $$('.rejected-transcript', list);
   rejectedNodes.slice(0, Math.max(0, rejectedNodes.length - 100)).forEach(item => item.remove());
   applyRejectedTranscriptVisibility();
-  if (stickToBottom) scrollMessagesToBottom(true);
+  markChatActivity();
   setLiveStatus('idle', 'Ready', 'Low-confidence transcript was not sent');
 }
 
 function appendMessage(message) {
   const list = $('#messageList');
-  const stickToBottom = messageListNearBottom(list);
   $('.empty-state', list)?.remove();
   if ($(`[data-message-id="${message.id}"]`, list)) return;
   list.insertAdjacentHTML('beforeend', messageHtml(message));
-  if (stickToBottom) scrollMessagesToBottom(true);
+  markChatActivity();
   appState.messages.push(message);
 }
 
@@ -691,7 +784,7 @@ function beginAssistantStream(data) {
   node.innerHTML = `<div class="message-bubble typing-cursor"></div><div class="message-meta">${escapeHtml(appState.activeAgent?.name || 'Assistant')} · generating</div>`;
   list.appendChild(node);
   appState.streaming.set(data.generation_id, { node, text: '' });
-  scrollMessagesToBottom(true);
+  markChatActivity();
   setLiveStatus('thinking', 'Generating reply', 'Ollama is producing a response');
 }
 
@@ -699,10 +792,9 @@ function appendAssistantToken(data) {
   const stream = appState.streaming.get(data.generation_id);
   if (!stream) return;
   const list = $('#messageList');
-  const stickToBottom = messageListNearBottom(list);
   stream.text += data.token || '';
   $('.message-bubble', stream.node).textContent = stream.text;
-  if (stickToBottom) scrollMessagesToBottom(true);
+  if (appState.chatAutoScroll) scrollMessagesToBottom(true);
 }
 
 function completeAssistantStream(data) {
@@ -1898,6 +1990,10 @@ function bindEvents() {
   $$('[data-nav]').forEach(node => node.onclick = () => navigate(node.dataset.nav));
   $$('[data-settings-panel]').forEach(node => node.onclick = () => activateSettingsPanel(node.dataset.settingsPanel));
   $$('[data-view-target]').forEach(node => node.onclick = () => applyExplorerView(node.dataset.viewTarget, node.dataset.viewMode));
+  $('#autoScrollToggle').onclick = () => setChatAutoScroll(!appState.chatAutoScroll);
+  $('#newMessagesBtn').onclick = jumpToNewestMessages;
+  $('#messageList').addEventListener('scroll', clearChatUnreadIfAtBottom, { passive: true });
+  updateChatAutoScrollUi();
   $('#showRejectedSttToggle').onchange = applyRejectedTranscriptVisibility;
   $('#uiTextSizeSelect').onchange = event => applyUiTextSize(event.currentTarget.value);
   $('#mobileMenuBtn').onclick = openMobileNav; $('#mobileCloseNav').onclick = closeMobileNav; $('#sidebarBackdrop').onclick = closeMobileNav;

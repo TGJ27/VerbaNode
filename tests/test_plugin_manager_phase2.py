@@ -85,5 +85,5 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     assert '.get("/api/plugins")' in main
     assert '.put("/api/plugins/{plugin_id}")' in main
     assert '"plugin_manager": True' in main
-    assert APP_VERSION == "0.7.6"
-    assert BUILD_LABEL == "windows-online-installer"
+    assert APP_VERSION == "0.7.7"
+    assert BUILD_LABEL == "pre-major-hardening"

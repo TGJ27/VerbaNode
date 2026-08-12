@@ -16,7 +16,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-core.txt -r requirements-dev.txt numpy soundfile sounddevice
-      - name: Compile
+      - name: Ruff correctness checks
+        run: python -m ruff check app scripts tests
+      - name: Compile Python
         run: python -m compileall app scripts tests
+      - name: Check dashboard JavaScript syntax
+        run: node --check app/static/app.js
       - name: Test
         run: python -m pytest -q

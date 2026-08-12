@@ -2,10 +2,13 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
-if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
+if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode-build"
 
 echo ============================================================
-echo VerbaNode v0.7.6 Windows application build
+for /f "tokens=2 delims== " %%V in ('findstr /B /C:"APP_VERSION =" app\version.py') do set "APP_VERSION=%%~V"
+if not defined APP_VERSION set "APP_VERSION=unknown"
+
+echo VerbaNode v%APP_VERSION% Windows application build
 echo ============================================================
 echo.
 
@@ -70,12 +73,13 @@ if errorlevel 1 (
 )
 
 echo.
-echo [4/7] Updating build tools...
-python -m pip install --upgrade pip wheel setuptools
+echo [4/7] Verifying isolated build environment...
+echo Development environments are not modified by this build.
+python -m pip --version
 if errorlevel 1 goto :fail
 
 echo.
-echo [5/7] Installing VerbaNode and packaging dependencies...
+echo [5/7] Installing VerbaNode and pinned packaging dependencies...
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :fail
 python -m pip install -r packaging\requirements-packaging.txt

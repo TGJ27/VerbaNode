@@ -88,6 +88,7 @@ class WeatherPlugin(BuiltinPlugin):
         return None
 
     async def execute(self, context: PluginContext) -> PluginResult:
+        context.require_permission("internet")
         location = str(
             context.arguments.get("location") or context.settings.default_location
         )

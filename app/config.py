@@ -10,6 +10,7 @@ from app.paths import (
     DATA_DIR,
     DIAGNOSTICS_DIR,
     MODEL_DIR,
+    LOG_DIR,
     PLUGIN_DIR,
     RESOURCE_ROOT,
     RUNTIME_AUDIO_DIR,
@@ -54,6 +55,11 @@ class Settings(BaseSettings):
     ssl_keyfile: Path | None = None
     controller_timeout_seconds: int = 45
     takeover_timeout_seconds: int = 30
+    login_max_attempts: int = Field(default=5, ge=2, le=20)
+    login_attempt_window_seconds: float = Field(default=60.0, ge=10.0, le=600.0)
+    login_lockout_base_seconds: float = Field(default=5.0, ge=1.0, le=120.0)
+    login_lockout_max_seconds: float = Field(default=60.0, ge=5.0, le=900.0)
+    websocket_ticket_ttl_seconds: float = Field(default=15.0, ge=5.0, le=120.0)
     summary_trigger_messages: int = 24
     summary_keep_recent: int = 10
     stt_timeout_seconds: float = Field(default=30.0, ge=3.0, le=120.0)
@@ -87,6 +93,7 @@ class Settings(BaseSettings):
     plugin_shutdown_timeout_seconds: float = Field(default=5.0, ge=1.0, le=30.0)
     plugin_manifest_max_bytes: int = Field(default=65536, ge=1024, le=1048576)
     plugin_entry_max_bytes: int = Field(default=2097152, ge=4096, le=16777216)
+    capability_audit_path: Path = LOG_DIR / "capability-actions.jsonl"
 
     @property
     def external_plugins_dir(self) -> Path:
@@ -133,6 +140,8 @@ def get_settings() -> Settings:
         settings.tts_cache_path = DATA_DIR.parent / settings.tts_cache_path
     if not settings.external_plugins_path.is_absolute():
         settings.external_plugins_path = PLUGIN_DIR.parent / settings.external_plugins_path
+    if not settings.capability_audit_path.is_absolute():
+        settings.capability_audit_path = LOG_DIR.parent / settings.capability_audit_path
     if settings.ssl_certfile and not settings.ssl_certfile.is_absolute():
         settings.ssl_certfile = CERT_DIR.parent / settings.ssl_certfile
     if settings.ssl_keyfile and not settings.ssl_keyfile.is_absolute():

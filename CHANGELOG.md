@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.7.7 - Pre-major hardening and conversation UX
+
+- Added strict persistent chat Auto-scroll lock and new-message jump control.
+- Added active agent language/STT/TTS/LLM context chips in Conversation.
+- Added PIN login throttling and one-time WebSocket tickets.
+- Removed controller session tokens from WebSocket URLs.
+- Added verified plugin action metadata, idempotency action IDs, capability gateway, and action audit logging.
+- Added numbered database migration foundation.
+- Split authentication/WebSocket API routes out of `app/main.py`.
+- Removed duplicate setup/plugin-manager code introduced by previous patching.
+- Added Ruff correctness and JavaScript syntax checks to CI.
+- Isolated Windows packaging in a `verbanode-build` Conda environment and pinned packaging tool versions.
+- Centralized release version usage around `app/version.py`.
+- Replaced the legacy `VN` web badge with the application logo and aligned the web favicon/cache-busters to v0.7.7.
+- 160 automated tests passing.
+
 ## v0.7.6 - Windows online installer
 
 - Add one-file Inno Setup 7 online installer around the frozen VerbaNode application.

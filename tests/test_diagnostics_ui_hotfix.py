@@ -25,5 +25,5 @@ def test_diagnostics_cards_use_consistent_alignment() -> None:
     assert ".diagnostics-control-grid,.diagnostics-detail-grid" in css
     assert "align-items:stretch" in css
     assert ".diagnostic-compatibility-card" in css
-    assert APP_VERSION == "0.7.6"
-    assert BUILD_LABEL == "windows-online-installer"
+    assert APP_VERSION == "0.7.7"
+    assert BUILD_LABEL == "pre-major-hardening"

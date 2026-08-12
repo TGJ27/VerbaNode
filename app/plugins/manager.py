@@ -4,13 +4,18 @@ import asyncio
 import inspect
 import json
 import logging
+import threading
 import time
+import uuid
+from collections import OrderedDict, deque
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 from app.config import Settings
 from app.plugins.base import Plugin
+from app.plugins.capabilities import CapabilityGateway
 from app.plugins.context import PluginContext
 from app.plugins.exceptions import (
     PluginCompatibilityError,
@@ -82,6 +87,9 @@ class PluginManager:
         self._external_failures: dict[str, ExternalPluginFailure] = {}
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
         self._reload_locks: dict[str, asyncio.Lock] = {}
+        self._action_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
+        self._action_audit: deque[dict[str, Any]] = deque(maxlen=250)
+        self._action_audit_lock = threading.RLock()
         self._execution_semaphore = asyncio.Semaphore(
             int(self.settings.plugin_max_concurrent_executions)
         )
@@ -182,6 +190,8 @@ class PluginManager:
         self,
         plugin_id: str,
         arguments: dict[str, Any] | None = None,
+        *,
+        action_id: str | None = None,
     ) -> dict[str, Any]:
         plugin = self.registry.get(plugin_id)
         if plugin is None:
@@ -200,16 +210,28 @@ class PluginManager:
         if runtime.status in {"loading", "reloading"}:
             return {"error": f"Tool '{plugin_id}' is currently {runtime.status}"}
 
+        resolved_action_id = str(action_id or uuid.uuid4())
+        cache_key = (plugin_id, resolved_action_id)
+        if action_id is not None:
+            cached = self._action_cache.get(cache_key)
+            if cached is not None:
+                self._action_cache.move_to_end(cache_key)
+                return dict(cached)
+
         metric = self._metrics.setdefault(plugin_id, PluginMetrics())
         started = time.perf_counter()
+        started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         task = asyncio.current_task()
         if task is not None:
             self._active_tasks.setdefault(plugin_id, set()).add(task)
         runtime.active_executions += 1
 
+        audit_status = "failed"
+        audit_error: str | None = None
+        verified = True
         try:
             result = await asyncio.wait_for(
-                self._execute_bounded(plugin, arguments),
+                self._execute_bounded(plugin, arguments, resolved_action_id),
                 timeout=float(self.settings.plugin_execution_timeout_seconds),
             )
             metric.successes += 1
@@ -218,7 +240,25 @@ class PluginManager:
             metric.last_success_at = time.time()
             if plugin.enabled:
                 runtime.status = "healthy"
-            return result.as_tool_result()
+            payload = result.as_tool_result()
+            success = bool(result.success) and not bool(payload.get("error"))
+            raw_status = str(result.status or "").strip()
+            status = "failed" if not success and raw_status in {"", "completed"} else (raw_status or "completed")
+            action_meta = {
+                "id": result.action_id or resolved_action_id,
+                "success": success,
+                "status": status,
+                "verified": bool(result.verified),
+            }
+            if result.error_code:
+                action_meta["error_code"] = result.error_code
+            payload.setdefault("_action", action_meta)
+            audit_status = status
+            audit_error = str(payload.get("error")) if payload.get("error") else None
+            verified = bool(result.verified)
+            if action_id is not None:
+                self._remember_action(cache_key, payload)
+            return payload
         except asyncio.TimeoutError:
             message = (
                 f"Tool '{plugin_id}' timed out after "
@@ -227,14 +267,20 @@ class PluginManager:
             metric.timeouts += 1
             self._record_failure(plugin_id, message, increment_error=True)
             LOGGER.error(message)
+            audit_status = "timed_out"
+            audit_error = message
             return {"error": message}
         except asyncio.CancelledError:
             metric.cancellations += 1
+            audit_status = "cancelled"
+            audit_error = "Execution cancelled"
             raise
         except Exception as exc:
             message = f"Tool '{plugin_id}' failed: {exc}"
             self._record_failure(plugin_id, str(exc), increment_error=True)
             LOGGER.exception("%s plugin '%s' failed", plugin.source.capitalize(), plugin_id)
+            audit_status = "failed"
+            audit_error = str(exc)
             return {"error": message}
         finally:
             latency_ms = (time.perf_counter() - started) * 1000.0
@@ -248,17 +294,75 @@ class PluginManager:
                     tasks.discard(task)
                     if not tasks:
                         self._active_tasks.pop(plugin_id, None)
+            self._record_action_audit(
+                plugin_id=plugin_id,
+                action_id=resolved_action_id,
+                arguments=arguments or {},
+                status=audit_status,
+                verified=verified,
+                latency_ms=latency_ms,
+                started_at=started_at,
+                error=audit_error,
+            )
+
+    def _remember_action(self, key: tuple[str, str], payload: dict[str, Any]) -> None:
+        self._action_cache[key] = dict(payload)
+        self._action_cache.move_to_end(key)
+        while len(self._action_cache) > 256:
+            self._action_cache.popitem(last=False)
+
+    def _record_action_audit(
+        self,
+        *,
+        plugin_id: str,
+        action_id: str,
+        arguments: dict[str, Any],
+        status: str,
+        verified: bool,
+        latency_ms: float,
+        started_at: str,
+        error: str | None,
+    ) -> None:
+        entry = {
+            "action_id": action_id,
+            "plugin_id": plugin_id,
+            "status": status,
+            "verified": bool(verified),
+            "latency_ms": round(float(latency_ms), 2),
+            "started_at": started_at,
+            "completed_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "arguments": dict(arguments),
+            "error": error,
+        }
+        with self._action_audit_lock:
+            self._action_audit.append(entry)
+        try:
+            audit_path = self.settings.capability_audit_path
+            audit_path.parent.mkdir(parents=True, exist_ok=True)
+            with audit_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+        except OSError:
+            LOGGER.debug("Could not append capability action audit log", exc_info=True)
+
+    def action_audit(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._action_audit_lock:
+            items = list(self._action_audit)
+        return [dict(item) for item in items[-max(1, min(int(limit), 250)):]]
 
     async def _execute_bounded(
         self,
         plugin: Plugin,
         arguments: dict[str, Any] | None,
+        action_id: str,
     ):
         async with self._execution_semaphore:
             return await plugin.execute(
                 PluginContext(
                     settings=self.settings,
                     arguments=dict(arguments or {}),
+                    metadata={"plugin_id": plugin.id, "action_id": action_id},
+                    action_id=action_id,
+                    gateway=CapabilityGateway(plugin.id, frozenset(plugin.permissions)),
                 )
             )
 

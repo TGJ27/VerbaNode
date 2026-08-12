@@ -1,5 +1,7 @@
 #define MyAppName "VerbaNode"
-#define MyAppVersion "0.7.6"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.7.7"
+#endif
 #define MyAppPublisher "Sari Teknologi"
 #define MyAppExeName "VerbaNode.exe"
 
@@ -27,7 +29,7 @@ RestartApplications=no
 SetupIconFile=assets\VerbaNode.ico
 UninstallDisplayName=VerbaNode
 UninstallDisplayIcon={app}\VerbaNode.ico
-VersionInfoVersion=0.7.6.0
+VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=VerbaNode Windows Online Setup
 VersionInfoProductName={#MyAppName}

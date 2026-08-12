@@ -15,19 +15,18 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import (
-    Depends,
     FastAPI,
     File,
     Header,
     Request,
     HTTPException,
     UploadFile,
-    WebSocket,
-    WebSocketDisconnect,
 )
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.auth import router as auth_router
+from app.api.deps import Token
 from app.config import ROOT_DIR
 from app.paths import CERT_DIR
 from app.process_control import request_shutdown
@@ -40,13 +39,11 @@ from app.schemas import (
     DiagnosticsSoakRequest,
     EdgeVoicePreviewRequest,
     InfoCreate,
-    LoginRequest,
     PluginStateUpdate,
     QueueReorder,
     RoleGenerateRequest,
     ScriptCreate,
     ScriptTtsPreviewRequest,
-    TakeoverResponse,
     TextMessageRequest,
 )
 from app.services.kokoro_voices import KOKORO_VOICES
@@ -65,6 +62,7 @@ LOGGER = logging.getLogger(__name__)
 app = FastAPI(title="VerbaNode Standalone", version=APP_VERSION)
 STATIC_DIR = ROOT_DIR / "app" / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.include_router(auth_router)
 
 
 
@@ -114,16 +112,6 @@ async def shutdown_event() -> None:
         await asyncio.to_thread(state.recorder.close)
         await asyncio.to_thread(state.player.close)
 
-
-def require_token(
-    x_session_token: Annotated[str | None, Header()] = None,
-) -> str:
-    if not state.controller.validate(x_session_token):
-        raise HTTPException(status_code=401, detail="Controller session is not active")
-    return str(x_session_token)
-
-
-Token = Annotated[str, Depends(require_token)]
 
 
 @app.get("/")
@@ -191,95 +179,6 @@ async def launcher_health() -> dict[str, Any]:
         },
     }
 
-
-# Authentication and single-controller takeover
-@app.post("/api/auth/login")
-async def login(payload: LoginRequest) -> JSONResponse:
-    result = state.controller.login(payload.pin, payload.client_name, payload.force_takeover)
-    if result["status"] == "invalid_pin":
-        return JSONResponse(result, status_code=401)
-    old_token = result.pop("old_token", None)
-    if old_token:
-        await state.events.send(
-            old_token,
-            "control_revoked",
-            {
-                "reason": "automatic_takeover",
-                "new_client": payload.client_name,
-            },
-        )
-        await state.events.disconnect(old_token)
-    return JSONResponse(result)
-
-
-@app.get("/api/auth/takeover/{request_id}")
-async def takeover_status(request_id: str) -> dict[str, Any]:
-    return state.controller.pending_status(request_id)
-
-
-@app.post("/api/auth/takeover/respond")
-async def takeover_respond(payload: TakeoverResponse, token: Token) -> dict[str, Any]:
-    result = state.controller.respond(token, payload.request_id, payload.approve)
-    if result["status"] == "unauthorized":
-        raise HTTPException(status_code=401, detail="Controller session is not active")
-    if result["status"] == "not_found":
-        raise HTTPException(status_code=404, detail="Takeover request not found")
-    old_token = result.pop("old_token", None)
-    if payload.approve and old_token:
-        await state.events.send(old_token, "control_revoked", {"reason": "takeover_approved"})
-    return result
-
-
-@app.post("/api/auth/logout")
-async def logout(token: Token) -> dict[str, bool]:
-    state.controller.logout(token)
-    await state.events.disconnect(token)
-    return {"ok": True}
-
-
-@app.post("/api/heartbeat")
-async def heartbeat(token: Token) -> dict[str, Any]:
-    return {"ok": True, "active": state.controller.active_info()}
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str = "") -> None:
-    if not state.controller.validate(token):
-        await websocket.close(code=4401)
-        return
-    await state.events.connect(token, websocket)
-    await state.events.send(token, "connected", {"mode": state.conversation.mode})
-    try:
-        while True:
-            payload = await websocket.receive_json()
-            if not state.controller.validate(token):
-                await websocket.send_json({"event": "control_revoked", "data": {}})
-                await websocket.close(code=4401)
-                return
-            command = payload.get("command")
-            if command == "heartbeat":
-                await websocket.send_json({"event": "heartbeat", "data": {"ok": True}})
-            elif command == "ptt_start":
-                await state.conversation.start_ptt()
-            elif command == "ptt_stop":
-                await state.conversation.stop_ptt()
-            elif command == "ptt_cancel":
-                await state.conversation.cancel_ptt()
-            elif command == "browser_ptt_cancel":
-                await state.conversation.cancel_browser_ptt()
-            elif command == "stop_tts":
-                await state.conversation.stop_current_tts()
-                await state.events.broadcast("tts_stopped", {"source": "manual"})
-    except WebSocketDisconnect:
-        await state.events.disconnect(token, websocket)
-        if state.conversation.mode == "ptt":
-            # A disconnected hold-to-talk controller must not leave the host mic recording.
-            await asyncio.sleep(1.0)
-            if not state.controller.validate(token, touch=False):
-                await state.conversation.cancel_ptt()
-    except Exception:
-        LOGGER.exception("WebSocket client failed")
-        await state.events.disconnect(token, websocket)
 
 
 # Bootstrap and status
@@ -844,6 +743,11 @@ async def reset_one_plugin_metrics(plugin_id: str, token: Token) -> dict[str, An
     result = plugin_payload()
     await state.events.broadcast("plugins_changed", result)
     return result
+
+
+@app.get("/api/plugins/actions")
+async def plugin_action_audit(token: Token, limit: int = 100) -> dict[str, Any]:
+    return {"actions": state.tools.action_audit(limit), "limit": max(1, min(int(limit), 250))}
 
 
 # Agents

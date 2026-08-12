@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. The Windows application and online installer are currently in the v0.7.x beta line. Validate installer/model behavior on the target PC before production deployment.
+> **Project status:** active development. v0.7.7 is the pre-major hardening release for the Windows application/installer foundation. Validate installer/model behavior on the target PC before production deployment.
 
 ---
 
@@ -60,6 +60,8 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Built-in plugins
   - External plugins
   - Plugin manifests, validation, metrics, hardening, and reload support
+  - Permission-aware capability gateway foundation
+  - Verified action results, action IDs/idempotency, and capability audit logging
   - Template and example plugin included
 
 - **Windows application**
@@ -74,9 +76,18 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Standard Program Files installation
   - Upgrade-aware application identity
   - Persistent user data outside Program Files
-  - Optional component/model setup
+  - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.7.7 pre-major hardening**
+  - Strict chat Auto-scroll lock with persistent preference and new-message jump control
+  - Active language/STT/TTS/model context in the Conversation header
+  - PIN login throttling and one-time WebSocket tickets
+  - Numbered database migration foundation
+  - Auth API router split to keep `app/main.py` from continuing to grow monolithically
+  - Isolated `verbanode-build` Conda environment with pinned Windows packaging dependencies
+  - Ruff correctness checks and dashboard JavaScript syntax checks in CI
 
 ---
 
@@ -322,10 +333,10 @@ build_windows.bat
 The build script:
 
 1. locates Conda
-2. reuses the `verbanode` environment when available
-3. creates it when missing
-4. installs packaging requirements
-5. performs a clean PyInstaller build
+2. uses a separate `verbanode-build` Conda environment by default
+3. creates that build environment when missing
+4. installs the application requirements plus pinned packaging requirements
+5. performs a clean PyInstaller build without modifying the normal development environment
 
 Output:
 
@@ -520,6 +531,8 @@ Keep these rules in mind:
 - never commit `.env`
 - never commit generated private certificate keys
 - keep dashboard PINs private
+- repeated failed PIN logins are throttled, but the dashboard should still only be exposed to trusted networks
+- controller WebSockets use short-lived one-time tickets instead of placing the main session token in the WebSocket URL
 - only expose the dashboard to trusted networks
 - review external plugins before enabling them
 - remember that Edge TTS is an online service
@@ -531,15 +544,18 @@ See `SECURITY.md` for project security guidance.
 
 ## Current Direction
 
-The v0.7.x line focuses on completing the assistant and Windows deployment foundation:
+The v0.7.x line completes the assistant and Windows deployment foundation. v0.7.7 adds the final pre-major hardening layer:
 
 - bilingual English / Bahasa Indonesia operation
-- stable audio and AI engine isolation
+- stable Audio Engine and AI Engine isolation
 - selective memory
 - modular plugins
 - native Windows launcher
-- packaged application
-- upgrade-safe online installer
+- packaged application and upgrade-safe online installer
+- strict conversation Auto-scroll control
+- hardened controller authentication/WebSocket setup
+- numbered DB migration foundation
+- verified capability results, idempotency IDs, and action audit logging
 
 The next major development area is the **robot capability layer**, where VerbaNode plugins can expose verified robot actions such as status, display control, navigation, photobooth, and other physical capabilities without allowing the LLM to claim an action succeeded unless the backend confirms it.
 

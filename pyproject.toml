@@ -1,0 +1,8 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Keep CI focused on high-signal correctness checks while the existing codebase
+# is gradually brought under broader style enforcement.
+select = ["E9", "F601", "F811", "F821"]

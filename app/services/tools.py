@@ -57,8 +57,10 @@ class ToolService:
         self,
         name: str,
         arguments: dict[str, Any] | None = None,
+        *,
+        action_id: str | None = None,
     ) -> dict[str, Any]:
-        return await self.manager.execute(name, arguments)
+        return await self.manager.execute(name, arguments, action_id=action_id)
 
     def format_result(
         self,
@@ -86,6 +88,9 @@ class ToolService:
 
     def plugin_summary(self) -> dict[str, Any]:
         return self.manager.summary()
+
+    def action_audit(self, limit: int = 100) -> list[dict[str, Any]]:
+        return self.manager.action_audit(limit)
 
 
 # Compatibility exports for code that imports the old module-level constants.

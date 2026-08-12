@@ -31,6 +31,7 @@ from app.defaults import (
     ROPI_TEMPERATURE,
     ROPI_TOP_P,
 )
+from app.migrations import apply_migrations
 from app.services.kokoro_voices import voice_name
 
 
@@ -203,6 +204,7 @@ class Database:
             for column, declaration in script_migrations.items():
                 if column not in script_columns:
                     conn.execute(f"ALTER TABLE scripts ADD COLUMN {column} {declaration}")
+            apply_migrations(conn)
         self._seed()
 
     def _seed(self) -> None:
