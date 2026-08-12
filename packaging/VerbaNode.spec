@@ -18,6 +18,9 @@ datas = [
     (str(ROOT / ".env.example"), "."),
     (str(ROOT / "plugins"), "plugins"),
     (str(ROOT / "packaging" / "assets" / "VerbaNode.png"), "packaging/assets"),
+    # Dedicated launcher copy. Keeping this at the bundle resource root makes
+    # the native header logo independent of the web/static directory layout.
+    (str(ROOT / "packaging" / "assets" / "VerbaNode.png"), "."),
 ]
 binaries = []
 hiddenimports = [
@@ -45,6 +48,7 @@ for package in (
     "ollama",
     "cryptography",
     "customtkinter",
+    "PIL",
 ):
     package_datas, package_binaries, package_hidden = safe_collect(package)
     datas += package_datas

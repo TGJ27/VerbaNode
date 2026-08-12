@@ -11,7 +11,10 @@ def test_launcher_uses_dashboard_style_customtkinter() -> None:
     assert "import customtkinter as ctk" in source
     assert '"background": "#F2F6FF"' in source
     assert '"primary": "#5363F5"' in source
+    assert 'resource_path("VerbaNode.png")' in source
+    assert 'resource_path("app", "static", "VerbaNode.png")' in source
     assert 'resource_path("packaging", "assets", "VerbaNode.png")' in source
+    assert 'text="VN"' not in source
     assert 'self.brand_image = self._load_brand_image(52)' in source
     assert '"Dashboard addresses"' in source
     assert 'text="Copy PIN"' in source
@@ -23,9 +26,26 @@ def test_packaging_includes_customtkinter_and_brand_assets() -> None:
     requirements = (ROOT / "packaging" / "requirements-packaging.txt").read_text(encoding="utf-8")
     spec = (ROOT / "packaging" / "VerbaNode.spec").read_text(encoding="utf-8")
     assert "customtkinter==6.0.0" in requirements
+    assert "pillow==12.3.0" in requirements.lower()
     assert '"customtkinter"' in spec
+    assert '"PIL"' in spec
     assert '"VerbaNode.png"' in spec
     assert '"packaging/assets"' in spec
+    assert '(str(ROOT / "packaging" / "assets" / "VerbaNode.png"), ".")' in spec
+
+
+def test_launcher_has_png_fallback_without_pillow() -> None:
+    source = (ROOT / "launcher.py").read_text(encoding="utf-8")
+    assert "self.tk.PhotoImage(file=str(image_path))" in source
+    assert "image.subsample(subsample, subsample)" in source
+
+
+def test_launcher_rounds_brand_image_corners() -> None:
+    source = (ROOT / "launcher.py").read_text(encoding="utf-8")
+    assert 'from PIL import ImageChops, ImageDraw' in source
+    assert 'min(image.size) * 0.22' in source
+    assert 'ImageDraw.Draw(corner_mask).rounded_rectangle(' in source
+    assert 'image.putalpha(ImageChops.multiply(existing_alpha, corner_mask))' in source
 
 
 def test_launcher_is_fixed_and_screen_aware() -> None:

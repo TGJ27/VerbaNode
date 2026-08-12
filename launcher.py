@@ -300,19 +300,70 @@ class WindowsLauncher:
         return self.ctk.CTkFont(family="Segoe UI", size=scaled_size, weight=weight)
 
     def _load_brand_image(self, size: int = 48):
-        """Load the packaged VerbaNode brand mark for the native launcher."""
+        """Load the VerbaNode application logo for the native launcher.
+
+        Frozen builds include a dedicated root-level copy of the logo so the
+        launcher does not depend on the web/static directory layout. The two
+        historical locations remain fallbacks for source-mode compatibility.
+        Pillow/CTkImage is preferred for high-quality DPI-aware resizing. A
+        Tk PhotoImage fallback keeps the logo visible even if Pillow cannot be
+        imported in a damaged or partially packaged runtime.
+        """
+        image_paths = (
+            resource_path("VerbaNode.png"),
+            resource_path("app", "static", "VerbaNode.png"),
+            resource_path("packaging", "assets", "VerbaNode.png"),
+        )
+
         try:
             from PIL import Image
-
-            image_path = resource_path("packaging", "assets", "VerbaNode.png")
-            image = Image.open(image_path).convert("RGBA")
-            return self.ctk.CTkImage(
-                light_image=image,
-                dark_image=image,
-                size=(size, size),
-            )
         except Exception:
-            return None
+            Image = None
+
+        if Image is not None:
+            for image_path in image_paths:
+                try:
+                    from PIL import ImageChops, ImageDraw
+
+                    with Image.open(image_path) as source_image:
+                        image = source_image.convert("RGBA")
+
+                    # The source artwork is square, but the launcher presents
+                    # it as an app icon. Mask only the outer corners so the
+                    # logo gets a clean Windows-style rounded-square silhouette
+                    # while preserving the artwork and existing alpha channel.
+                    corner_radius = max(1, int(round(min(image.size) * 0.22)))
+                    corner_mask = Image.new("L", image.size, 0)
+                    ImageDraw.Draw(corner_mask).rounded_rectangle(
+                        (0, 0, image.width - 1, image.height - 1),
+                        radius=corner_radius,
+                        fill=255,
+                    )
+                    existing_alpha = image.getchannel("A")
+                    image.putalpha(ImageChops.multiply(existing_alpha, corner_mask))
+
+                    return self.ctk.CTkImage(
+                        light_image=image,
+                        dark_image=image,
+                        size=(size, size),
+                    )
+                except (OSError, ValueError):
+                    continue
+
+        # Tk 8.6 can decode PNG files directly. CustomTkinter accepts normal
+        # tkinter.PhotoImage objects for widget images, so this is a useful
+        # last-resort path that does not depend on Pillow.
+        for image_path in image_paths:
+            try:
+                image = self.tk.PhotoImage(file=str(image_path))
+                largest_side = max(int(image.width()), int(image.height()), 1)
+                subsample = max(1, int(round(largest_side / max(size, 1))))
+                if subsample > 1:
+                    image = image.subsample(subsample, subsample)
+                return image
+            except Exception:
+                continue
+        return None
 
     def _card(self, parent, *, corner_radius: int = 18):
         return self.ctk.CTkFrame(
@@ -377,15 +428,14 @@ class WindowsLauncher:
                 fg_color="transparent",
             )
         else:
+            # Preserve header alignment if a damaged/missing image somehow
+            # reaches runtime, but never fall back to the retired "VN" badge.
             logo = ctk.CTkLabel(
                 top,
-                text="VN",
-                width=48,
-                height=48,
-                corner_radius=12,
-                fg_color=self.COLORS["primary"],
-                text_color="#FFFFFF",
-                font=self._font(15, "bold"),
+                text="",
+                width=54,
+                height=54,
+                fg_color="transparent",
             )
         logo.pack(side="left")
         title_wrap = ctk.CTkFrame(top, fg_color="transparent")
