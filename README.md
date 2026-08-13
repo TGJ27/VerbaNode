@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.8.3 is the recovery-hardening release: database migration schema v4 adds durable migration history/identity and automatic pre-migration snapshots, while backup format v3 adds SHA-256/size verification and SQLite-native backup/restore with rollback safety. The v0.8.2 capability provider boundary remains intact. Pairing/LAN discovery and the mobile application remain intentionally deferred.
+> **Project status:** active development. v0.8.4 is the client-readiness release: the server now exposes an explicit public compatibility contract, client-aware controller session metadata, API/WebSocket version headers, protocol mismatch handling, and a more modular framework-free dashboard. The v0.8.3 recovery hardening and v0.8.2 capability-provider boundary remain intact. Pairing/LAN discovery and the mobile application remain intentionally deferred.
 
 ---
 
@@ -79,6 +79,16 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.8.4 client readiness**
+  - Public `/api/client-info` exposes non-secret server/API/WebSocket/auth compatibility metadata before login
+  - Login accepts optional client type/version/API metadata while preserving legacy browser/CLI compatibility
+  - Controller sessions have non-secret `session_id` values and authenticated `/api/session` metadata
+  - `/api/*` responses advertise VerbaNode/API/WebSocket versions and request correlation IDs
+  - Explicit unsupported REST API versions receive a structured compatibility error; explicit unsupported WebSocket protocols receive `protocol_error` + close code `4406`
+  - Dashboard transport/runtime/browser-microphone code is split into `runtime.js`, `client.js`, and `browser-ptt.js` without adding a frontend framework
+  - Current controller ownership remains single-active-controller; mobile pairing/discovery is still deferred
+  - 203 automated tests pass in the clean v0.8.4 source tree
 
 - **v0.8.3 recovery hardening**
   - Numbered migration schema v4 is now the sole home for legacy schema upgrades
@@ -562,17 +572,20 @@ See `SECURITY.md` for project security guidance.
 
 ## Current Direction
 
-The v0.8.x line is focused on **architecture before feature expansion**. v0.8.3 hardens state durability and recovery on top of the v0.8.2 provider boundary while keeping one client-neutral API surface for the website and a future mobile application.
+The v0.8.x line is focused on **architecture before feature expansion**. v0.8.4 makes the existing backend contract explicit enough for both the website and a future manually configured mobile client, on top of the v0.8.3 recovery layer and v0.8.2 provider boundary.
 
-Current v0.8.3 priorities:
+Current v0.8.4 priorities:
 
-- keep the existing web dashboard fully supported
+- keep the existing web dashboard fully supported while treating it as one client of the shared REST/WebSocket backend
 - keep `app/main.py` limited to application composition and lifecycle while product domains live in API routers
+- expose a stable, non-secret pre-auth client compatibility contract rather than forcing future clients to infer endpoints/protocols
+- keep controller session identity separate from authentication secrets and preserve one active-controller ownership policy for now
 - keep capability action identity/result state persistent in SQLite instead of relying on process memory
 - route future physical/service operations through registered capability providers rather than plugin-specific hardware imports
 - enforce capability permission namespaces, TTL/expiry, cancellation, and bounded provider concurrency
 - keep duplicate/replayed capability requests single-execution across concurrent callers and restarts
-- version the WebSocket wire format so future clients do not depend on dashboard-specific behavior
+- version the REST/WebSocket wire contracts so future clients do not depend on dashboard-specific behavior
+- continue splitting browser responsibilities incrementally without introducing a frontend framework rewrite
 - make database backup/restore bounded, checksum-verified, safety-backed-up, and SQLite-consistent
 - keep schema upgrades ordered through numbered migrations with durable history and pre-migration recovery snapshots
 

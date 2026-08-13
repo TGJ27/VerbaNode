@@ -11,6 +11,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
+from app.api.protocol import API_VERSION, PROTOCOL_VERSION
+from app.version import APP_VERSION
+
 _REQUEST_ID = contextvars.ContextVar("verbanode_request_id", default="-")
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,96}$")
 _LOG_RECORD_FACTORY_INSTALLED = False
@@ -50,6 +53,11 @@ async def request_context_middleware(request: Request, call_next) -> Response:
     try:
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
+        if request.url.path.startswith("/api/"):
+            response.headers["X-VerbaNode-Version"] = APP_VERSION
+            response.headers["X-VerbaNode-API-Version"] = str(API_VERSION)
+            response.headers["X-VerbaNode-WebSocket-Protocol"] = str(PROTOCOL_VERSION)
+            response.headers.setdefault("Cache-Control", "no-store")
         return response
     finally:
         _REQUEST_ID.reset(token)

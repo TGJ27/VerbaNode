@@ -139,8 +139,8 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
 
 
 def test_v082_capability_expiry_survives_current_schema(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.3"
-    assert BUILD_LABEL == "recovery-hardening"
+    assert APP_VERSION == "0.8.4"
+    assert BUILD_LABEL == "client-readiness"
 
     settings = _settings(tmp_path)
     db = Database(settings)
@@ -303,13 +303,14 @@ def test_capability_api_and_deferred_mobile_scope_are_explicit() -> None:
     capability_api = (ROOT / "app" / "api" / "capabilities.py").read_text(encoding="utf-8")
     actions_api = (ROOT / "app" / "api" / "actions.py").read_text(encoding="utf-8")
     system_api = (ROOT / "app" / "api" / "system.py").read_text(encoding="utf-8")
+    client_contract = (ROOT / "app" / "api" / "client_contract.py").read_text(encoding="utf-8")
 
     assert "app.include_router(capabilities_router)" in main
     assert '@router.get("/api/capabilities")' in capability_api
     assert 'actions/{operation_id}/cancel' in capability_api
     assert '@router.post("/api/actions/{action_id}/cancel")' in actions_api
-    assert '"capability_provider_framework": True' in system_api
-    assert '"capability_action_expiry": True' in system_api
-    assert '"capability_cancellation": True' in system_api
-    assert '"mobile_pairing": False' in system_api
-    assert '"lan_discovery": False' in system_api
+    assert '"capability_provider_framework": True' in client_contract
+    assert '"capability_action_expiry": True' in client_contract
+    assert '"capability_cancellation": True' in client_contract
+    assert '"mobile_pairing": False' in client_contract
+    assert '"lan_discovery": False' in client_contract

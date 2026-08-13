@@ -7,11 +7,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
+from app.api.client_contract import client_info_payload
 from app.api.deps import Token
-from app.api.protocol import event_envelope, parse_command
+from app.api.protocol import API_VERSION, MIN_API_VERSION, PROTOCOL_VERSION, event_envelope, parse_command
 from app.http import api_error_response
 from app.schemas import LoginRequest
 from app.state import state
+from app.version import APP_VERSION
 
 LOGGER = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,11 +21,26 @@ router = APIRouter()
 
 @router.post("/api/auth/login")
 async def login(payload: LoginRequest, request: Request) -> JSONResponse:
+    if payload.api_version is not None and not (MIN_API_VERSION <= payload.api_version <= API_VERSION):
+        return api_error_response(
+            request,
+            status_code=409,
+            code="incompatible_api_version",
+            message=f"Client API version {payload.api_version} is not supported",
+            extra={
+                "supported_api_versions": list(range(MIN_API_VERSION, API_VERSION + 1)),
+                "client_info": client_info_payload(),
+            },
+        )
+
     client_key = request.client.host if request.client else "unknown"
     result = state.controller.login(
         payload.pin,
         payload.client_name,
         client_key=client_key,
+        client_type=payload.client_type,
+        client_version=payload.client_version,
+        api_version=payload.api_version,
     )
     if result["status"] == "rate_limited":
         retry = int(result.get("retry_after_seconds") or 1)
@@ -56,6 +73,14 @@ async def login(payload: LoginRequest, request: Request) -> JSONResponse:
             },
         )
         await state.events.disconnect(old_token)
+    result.update(
+        {
+            "server_version": APP_VERSION,
+            "api_version": API_VERSION,
+            "websocket_protocol_version": PROTOCOL_VERSION,
+            "session": state.controller.active_info(),
+        }
+    )
     return JSONResponse(result)
 
 
@@ -82,6 +107,17 @@ async def heartbeat(token: Token) -> dict[str, Any]:
     return {"ok": True, "active": state.controller.active_info()}
 
 
+@router.get("/api/session")
+async def session_info(token: Token) -> dict[str, Any]:
+    return {
+        "authenticated": True,
+        "session": state.controller.active_info(),
+        "server_version": APP_VERSION,
+        "api_version": API_VERSION,
+        "websocket_protocol_version": PROTOCOL_VERSION,
+    }
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, ticket: str = "") -> None:
     token = state.controller.consume_ws_ticket(ticket)
@@ -89,10 +125,35 @@ async def websocket_endpoint(websocket: WebSocket, ticket: str = "") -> None:
         await websocket.close(code=4401)
         return
     await state.events.connect(token, websocket)
-    await state.events.send(token, "connected", {"mode": state.conversation.mode})
+    await state.events.send(
+        token,
+        "connected",
+        {
+            "mode": state.conversation.mode,
+            "server_version": APP_VERSION,
+            "api_version": API_VERSION,
+            "websocket_protocol_version": PROTOCOL_VERSION,
+            "session": state.controller.active_info(),
+        },
+    )
     try:
         while True:
             payload = await websocket.receive_json()
+            request_id = str(payload.get("request_id")) if isinstance(payload, dict) and payload.get("request_id") else None
+            supplied_protocol = payload.get("protocol") if isinstance(payload, dict) else None
+            if supplied_protocol is not None and supplied_protocol != PROTOCOL_VERSION:
+                await websocket.send_json(
+                    event_envelope(
+                        "protocol_error",
+                        {
+                            "message": f"WebSocket protocol {supplied_protocol} is not supported",
+                            "supported_protocol_version": PROTOCOL_VERSION,
+                        },
+                        request_id=request_id,
+                    )
+                )
+                await websocket.close(code=4406)
+                return
             command, _command_data, request_id = parse_command(payload)
             if not state.controller.validate(token):
                 await websocket.send_json(event_envelope("control_revoked", {}, request_id=request_id))

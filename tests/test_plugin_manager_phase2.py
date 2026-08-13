@@ -76,6 +76,7 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     css = (ROOT / "app" / "static" / "styles.css").read_text(encoding="utf-8")
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     system_api = (ROOT / "app" / "api" / "system.py").read_text(encoding="utf-8")
+    client_contract = (ROOT / "app" / "api" / "client_contract.py").read_text(encoding="utf-8")
     plugins_api = (ROOT / "app" / "api" / "plugins.py").read_text(encoding="utf-8")
 
     assert 'data-page="plugins"' in html
@@ -87,6 +88,6 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     assert '.get("/api/plugins")' in plugins_api
     assert '.put("/api/plugins/{plugin_id}")' in plugins_api
     assert 'app.include_router(plugins_router)' in main
-    assert '"plugin_manager": True' in system_api
-    assert APP_VERSION == "0.8.3"
-    assert BUILD_LABEL == "recovery-hardening"
+    assert '"plugin_manager": True' in client_contract
+    assert APP_VERSION == "0.8.4"
+    assert BUILD_LABEL == "client-readiness"

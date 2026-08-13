@@ -1,36 +1,42 @@
-# VerbaNode v0.8.3 — Recovery Hardening
+# VerbaNode v0.8.4 — Client Readiness
 
-v0.8.3 focuses on database durability, upgrade safety, backup verification, and recovery. It builds on the v0.8.0 architecture foundation, v0.8.1 modularization, and v0.8.2 capability-provider foundation without expanding into mobile pairing/discovery or robot-specific hardware.
+v0.8.4 makes the v0.8 backend contract easier to consume from both the existing dashboard and a future mobile client, while continuing to defer LAN discovery and device pairing until the mobile phase.
 
-## Migration schema v4
+## Public compatibility handshake
 
-The remaining ad-hoc legacy column upgrades have been moved into numbered migration v4. The migration registry is validated for ordered, contiguous versions and each migration runs under its own SQLite savepoint.
+A new unauthenticated `GET /api/client-info` endpoint exposes only non-secret compatibility metadata: server version/build, REST API version, WebSocket protocol version, PIN/session authentication contract, controller policy, stable endpoint paths, and feature flags.
 
-Databases now carry three coordinated forms of schema identity:
+The endpoint intentionally does not expose the PIN, controller token, agents, conversations, settings, plugin data, or other authenticated state.
 
-- the existing `settings.schema_version`
-- SQLite `PRAGMA user_version`
-- a `schema_migrations` history table containing version, name, fingerprint, and timestamp
+## Client-aware controller sessions
 
-VerbaNode also sets a dedicated SQLite `application_id`. A database claiming a schema newer than the running build is rejected rather than being modified by an older release.
+Login remains backwards compatible with older request bodies, but clients can now optionally declare `client_type`, `client_version`, and `api_version`. Controller sessions receive a random non-secret `session_id` and retain that metadata for diagnostics/client UX.
 
-Before an existing older database is upgraded, VerbaNode automatically creates a `pre-migration-*.db` recovery snapshot. Automatic pre-migration/pre-restore snapshots have bounded retention.
+Authenticated `GET /api/session` exposes the current sanitized session metadata and server protocol versions. Login and initial WebSocket connection payloads now provide the same compatibility information.
 
-## Backup format v3
+Clients that explicitly request an unsupported REST API version receive a structured `409 incompatible_api_version` response. Clients that omit the field continue to work.
 
-New ZIP backups record the database byte size and SHA-256 digest in `backup.json`. Restore verifies those values before accepting the database.
+## Stable API and WebSocket compatibility signals
 
-Restore validation now rejects unsafe ZIP paths, duplicate members, symlinks, oversized payloads, invalid SQLite databases, failed integrity checks, foreign application IDs, inconsistent schema metadata, and unsupported/newer backup formats. Existing v1/v2 VerbaNode backups remain supported when they validate successfully.
+All `/api/*` responses now advertise VerbaNode server/API/WebSocket versions in headers alongside the existing request correlation ID. API responses default to `Cache-Control: no-store`.
 
-## SQLite-native backup and restore
+WebSocket protocol v1 remains backwards compatible with legacy command objects that omit a protocol field. Explicit unsupported protocol versions now receive a `protocol_error` event and socket close code `4406` instead of being processed ambiguously.
 
-Database snapshots now use SQLite's online backup API instead of filesystem-copying the WAL-backed database. Restore uses the same SQLite mechanism, creating a pre-restore safety snapshot first and automatically rolling back to it if replacement/migration fails.
+## Browser dashboard modularization
 
-Authenticated `GET /api/backup/status` exposes backup-format/schema status and the inventory of automatic recovery snapshots.
+The browser remains framework-free, but its transport/runtime responsibilities are no longer concentrated in the main script. v0.8.4 adds:
+
+- `static/js/runtime.js`
+- `static/js/client.js`
+- `static/js/browser-ptt.js`
+
+alongside the existing `static/js/diagnostics.js`. The remaining `app.js` falls below 1,800 lines.
+
+The extracted API client also fixes structured-error parsing so error metadata is available after JSON parsing rather than referencing a block-scoped variable.
 
 ## Existing v0.8 platform retained
 
-v0.8.3 retains the modular REST routers, WebSocket protocol v1, persistent action ledger/idempotency, structured API errors and request IDs, capability provider boundary, TTL/expiry, cancellation, and the single source `run.bat` workflow.
+v0.8.4 preserves the recovery-hardening schema/backup format from v0.8.3, capability-provider foundation from v0.8.2, persistent action ledger, request IDs, modular backend routers, WebSocket protocol v1, and the single `run.bat` source workflow.
 
 ## Deferred scope
 
@@ -40,9 +46,10 @@ Still intentionally not included:
 - mDNS/Bonjour LAN discovery
 - QR/device pairing
 - trusted-device credentials and revocation
+- multi-controller concurrency
 - cloud relay / Internet remote control
 - robot-specific hardware providers
 
 ## Validation
 
-The clean v0.8.3 source tree passes **197 automated tests** and is validated with Python compilation, dashboard JavaScript syntax checks, duplicate-route checks, patch/full-source equivalence, and ZIP integrity before packaging. Windows source/EXE/installer smoke testing should still be performed on the target machine before publishing the release.
+The clean v0.8.4 source tree passes **203 automated tests** and is validated with Python compilation, dashboard JavaScript syntax checks for every split script, duplicate-route checks, patch/full-source equivalence, and ZIP integrity before packaging. Windows source/EXE/installer smoke testing should still be performed on the target machine before publishing the release.

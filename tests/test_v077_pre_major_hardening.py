@@ -146,7 +146,10 @@ def test_database_has_numbered_schema_version(tmp_path: Path) -> None:
 def test_v077_hardening_layout_and_ci_are_present() -> None:
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     auth = (ROOT / "app" / "api" / "auth.py").read_text(encoding="utf-8")
-    javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    javascript = "\n".join(
+        (ROOT / "app" / "static" / path).read_text(encoding="utf-8")
+        for path in ("app.js", "js/client.js")
+    )
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     build_windows = (ROOT / "build_windows.bat").read_text(encoding="utf-8")
@@ -155,8 +158,8 @@ def test_v077_hardening_layout_and_ci_are_present() -> None:
     index_html = (ROOT / "app" / "static" / "index.html").read_text(encoding="utf-8")
     styles = (ROOT / "app" / "static" / "styles.css").read_text(encoding="utf-8")
 
-    assert APP_VERSION == "0.8.3"
-    assert BUILD_LABEL == "recovery-hardening"
+    assert APP_VERSION == "0.8.4"
+    assert BUILD_LABEL == "client-readiness"
     assert "app.include_router(auth_router)" in main
     assert '@router.post("/api/auth/ws-ticket")' in auth
     assert '@router.websocket("/ws")' in auth
@@ -168,10 +171,10 @@ def test_v077_hardening_layout_and_ci_are_present() -> None:
     assert 'findstr /B /C:"APP_VERSION =" app\\version.py' in build_windows
     assert "/DMyAppVersion=%APP_VERSION%" in build_installer
     assert "#ifndef MyAppVersion" in installer
-    assert '/static/VerbaNode.png?v=0.8.3' in index_html
-    assert 'styles.css?v=0.8.3' in index_html
-    assert 'app.js?v=0.8.3' in index_html
-    assert 'id="appVersion">v0.8.3<' in index_html
+    assert '/static/VerbaNode.png?v=0.8.4' in index_html
+    assert 'styles.css?v=0.8.4' in index_html
+    assert 'app.js?v=0.8.4' in index_html
+    assert 'id="appVersion">v0.8.4<' in index_html
     assert 'class="brand-mark large">VN<' not in index_html
     assert 'class="brand-mark">VN<' not in index_html
     assert ".brand-mark img" in styles

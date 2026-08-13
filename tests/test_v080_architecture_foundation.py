@@ -57,8 +57,8 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v080_metadata_and_schema_migration(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.3"
-    assert BUILD_LABEL == "recovery-hardening"
+    assert APP_VERSION == "0.8.4"
+    assert BUILD_LABEL == "client-readiness"
 
     db = Database(_settings(tmp_path))
     db.initialize()
@@ -163,7 +163,11 @@ def test_main_is_router_oriented_and_mobile_ready_protocol_is_present() -> None:
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     auth = (ROOT / "app" / "api" / "auth.py").read_text(encoding="utf-8")
     system_api = (ROOT / "app" / "api" / "system.py").read_text(encoding="utf-8")
-    javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    client_contract = (ROOT / "app" / "api" / "client_contract.py").read_text(encoding="utf-8")
+    javascript = "\n".join(
+        (ROOT / "app" / "static" / path).read_text(encoding="utf-8")
+        for path in ("app.js", "js/client.js")
+    )
 
     for router_name in (
         "actions_router",
@@ -180,12 +184,12 @@ def test_main_is_router_oriented_and_mobile_ready_protocol_is_present() -> None:
     assert '@app.get("/api/agents")' not in main
     assert '@app.get("/api/plugins")' not in main
     assert '@app.get("/api/backup")' not in main
-    assert '"websocket_protocol_version": 1' in system_api
-    assert '"persistent_action_ledger": True' in system_api
-    assert '"mobile_pairing": False' in system_api
-    assert '"lan_discovery": False' in system_api
+    assert '"websocket_protocol_version": PROTOCOL_VERSION' in client_contract
+    assert '"persistent_action_ledger": True' in client_contract
+    assert '"mobile_pairing": False' in client_contract
+    assert '"lan_discovery": False' in client_contract
     assert "parse_command(payload)" in auth
-    assert "protocol: 1" in javascript
+    assert "protocol: WEBSOCKET_PROTOCOL_VERSION" in javascript
     assert "type: `command.${command}`" in javascript
 
 

@@ -50,8 +50,8 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v081_metadata_and_router_split() -> None:
-    assert APP_VERSION == "0.8.3"
-    assert BUILD_LABEL == "recovery-hardening"
+    assert APP_VERSION == "0.8.4"
+    assert BUILD_LABEL == "client-readiness"
 
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     assert len(main.splitlines()) < 180
@@ -75,15 +75,16 @@ def test_legacy_takeover_approval_flow_is_removed() -> None:
     controller = (ROOT / "app" / "services" / "controller.py").read_text(encoding="utf-8")
     schemas = (ROOT / "app" / "schemas.py").read_text(encoding="utf-8")
     javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    client_js = (ROOT / "app" / "static" / "js" / "client.js").read_text(encoding="utf-8")
 
-    combined = "\n".join((auth, controller, schemas, javascript))
+    combined = "\n".join((auth, controller, schemas, javascript, client_js))
     assert "/api/auth/takeover" not in combined
     assert "takeover_request" not in combined
     assert "TakeoverRequest" not in combined
     assert "TakeoverResponse" not in combined
     assert "force_takeover" not in combined
     # Valid PIN control transfer is intentionally retained as the one policy.
-    assert '"takeover": True' in controller
+    assert '"takeover": old_token is not None' in controller
     assert '"automatic_takeover"' in auth
 
 
@@ -153,8 +154,8 @@ def test_dashboard_diagnostics_is_split_into_a_separate_script() -> None:
         encoding="utf-8"
     )
 
-    diagnostics_tag = '/static/js/diagnostics.js?v=0.8.3'
-    app_tag = '/static/app.js?v=0.8.3'
+    diagnostics_tag = '/static/js/diagnostics.js?v=0.8.4'
+    app_tag = '/static/app.js?v=0.8.4'
     assert diagnostics_tag in index
     assert index.index(diagnostics_tag) < index.index(app_tag)
     assert "function renderDiagnostics(" not in app_js
@@ -163,7 +164,7 @@ def test_dashboard_diagnostics_is_split_into_a_separate_script() -> None:
 
 
 def test_frontend_understands_structured_api_error_metadata() -> None:
-    javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    javascript = (ROOT / "app" / "static" / "js" / "client.js").read_text(encoding="utf-8")
     assert "payload.error?.message" in javascript
     assert "error.requestId" in javascript
     assert "error.code" in javascript

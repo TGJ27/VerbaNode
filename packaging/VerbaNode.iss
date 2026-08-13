@@ -1,6 +1,6 @@
 #define MyAppName "VerbaNode"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.8.3"
+  #define MyAppVersion "0.8.4"
 #endif
 #define MyAppPublisher "Sari Teknologi"
 #define MyAppExeName "VerbaNode.exe"

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.8.4 - Client readiness
+
+- Added public non-secret `/api/client-info` compatibility metadata for the existing web dashboard and future manually configured mobile clients.
+- Centralized REST API/WebSocket protocol constants and client-facing feature negotiation metadata.
+- Extended controller login with optional client type/version/API metadata while preserving legacy request compatibility.
+- Added random non-secret controller `session_id` values and authenticated `/api/session` metadata.
+- Added explicit `409 incompatible_api_version` negotiation failures for clients that request unsupported REST API versions.
+- Added VerbaNode version/API/WebSocket compatibility headers and no-store policy to `/api/*` responses.
+- Added explicit WebSocket protocol mismatch handling with `protocol_error` and close code `4406`, while retaining legacy commands that omit a protocol field.
+- Split dashboard runtime/client transport/browser microphone logic into `runtime.js`, `client.js`, and `browser-ptt.js`; the framework-free `app.js` is now under 1,800 lines.
+- Fixed dashboard structured API-error parsing so parsed error metadata remains in scope when constructing client errors.
+- 203 automated tests passing in the clean v0.8.4 source tree.
+- Kept the controller policy single-active-controller and continued to defer mobile pairing, LAN discovery, trusted-device credentials, cloud relay, and robot-specific hardware providers.
+
 ## v0.8.3 - Recovery hardening
 
 - Advanced the numbered database migration system to schema v4 and moved remaining legacy column upgrades out of `Database.initialize()`.

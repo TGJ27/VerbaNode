@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_information_and_plugin_explorer_views_are_present() -> None:
     html = (ROOT / "app" / "static" / "index.html").read_text(encoding="utf-8")
-    javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    javascript = (ROOT / "app" / "static" / "js" / "runtime.js").read_text(encoding="utf-8")
     css = (ROOT / "app" / "static" / "styles.css").read_text(encoding="utf-8")
 
     for target in ("information", "plugins"):

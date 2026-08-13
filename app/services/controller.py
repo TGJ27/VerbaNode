@@ -14,7 +14,11 @@ from app.config import Settings
 @dataclass
 class ControllerSession:
     token: str
+    session_id: str
     client_name: str
+    client_type: str
+    client_version: str | None
+    api_version: int | None
     created_at: float
     last_seen: float
 
@@ -86,6 +90,9 @@ class ControllerManager:
         client_name: str,
         *,
         client_key: str = "local",
+        client_type: str = "unknown",
+        client_version: str | None = None,
+        api_version: int | None = None,
     ) -> dict[str, Any]:
         client_key = str(client_key or "unknown")
         with self._lock:
@@ -99,22 +106,35 @@ class ControllerManager:
 
             if self._active_is_stale():
                 self.active = None
-            if self.active is None:
-                token = self._new_token()
-                self.active = ControllerSession(token, client_name, now, now)
-                return {"status": "granted", "token": token, "takeover": False}
 
-            previous_client = self.active.client_name
-            old_token = self.active.token
+            previous_client = self.active.client_name if self.active else None
+            old_token = self.active.token if self.active else None
             token = self._new_token()
-            self.active = ControllerSession(token, client_name, now, now)
-            return {
+            session_id = secrets.token_hex(12)
+            self.active = ControllerSession(
+                token=token,
+                session_id=session_id,
+                client_name=str(client_name),
+                client_type=str(client_type or "unknown"),
+                client_version=str(client_version) if client_version else None,
+                api_version=int(api_version) if api_version is not None else None,
+                created_at=now,
+                last_seen=now,
+            )
+            result: dict[str, Any] = {
                 "status": "granted",
                 "token": token,
-                "takeover": True,
-                "old_token": old_token,
-                "previous_client": previous_client,
+                "session_id": session_id,
+                "takeover": old_token is not None,
             }
+            if old_token is not None:
+                result.update(
+                    {
+                        "old_token": old_token,
+                        "previous_client": previous_client,
+                    }
+                )
+            return result
 
     def validate(self, token: str | None, touch: bool = True) -> bool:
         if not token:
@@ -173,7 +193,11 @@ class ControllerManager:
             if not self.active:
                 return None
             return {
+                "session_id": self.active.session_id,
                 "client_name": self.active.client_name,
+                "client_type": self.active.client_type,
+                "client_version": self.active.client_version,
+                "api_version": self.active.api_version,
                 "connected_seconds": int(time.monotonic() - self.active.created_at),
             }
 

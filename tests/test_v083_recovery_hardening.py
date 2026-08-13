@@ -34,8 +34,8 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v083_metadata_schema_identity_and_history(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.3"
-    assert BUILD_LABEL == "recovery-hardening"
+    assert APP_VERSION == "0.8.4"
+    assert BUILD_LABEL == "client-readiness"
     assert CURRENT_SCHEMA_VERSION == 4
     assert BACKUP_FORMAT_VERSION == 3
 

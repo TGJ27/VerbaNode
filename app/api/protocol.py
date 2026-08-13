@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+API_VERSION = 1
+MIN_API_VERSION = 1
 PROTOCOL_VERSION = 1
 
 
@@ -50,4 +52,4 @@ def parse_command(payload: Any) -> tuple[str | None, dict[str, Any], str | None]
     return command, dict(data) if isinstance(data, dict) else {}, request_id
 
 
-__all__ = ["PROTOCOL_VERSION", "event_envelope", "parse_command"]
+__all__ = ["API_VERSION", "MIN_API_VERSION", "PROTOCOL_VERSION", "event_envelope", "parse_command"]

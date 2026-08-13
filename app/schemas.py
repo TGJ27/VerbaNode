@@ -17,7 +17,10 @@ from app.defaults import (
 
 class LoginRequest(BaseModel):
     pin: str
-    client_name: str = "Browser"
+    client_name: str = Field(default="Browser", min_length=1, max_length=120)
+    client_type: str = Field(default="unknown", min_length=1, max_length=32)
+    client_version: str | None = Field(default=None, max_length=64)
+    api_version: int | None = Field(default=None, ge=1, le=1000)
 
 
 class AgentCreate(BaseModel):

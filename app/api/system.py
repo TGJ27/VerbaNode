@@ -7,12 +7,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from app.api.client_contract import client_info_payload, feature_manifest
 from app.api.deps import Token
 from app.api.plugins import plugin_payload
 from app.api.runtime_payloads import audio_device_payload, hardware_status
 from app.config import ROOT_DIR
-from app.migrations import CURRENT_SCHEMA_VERSION
-from app.services.backup import BACKUP_FORMAT_VERSION
 from app.paths import CERT_DIR
 from app.process_control import request_shutdown
 from app.services.kokoro_voices import KOKORO_VOICES
@@ -88,6 +87,13 @@ async def launcher_health() -> dict[str, Any]:
         },
     }
 
+
+
+@router.get("/api/client-info")
+async def client_info() -> dict[str, Any]:
+    """Public compatibility metadata for browser, CLI, and future mobile clients."""
+    return client_info_payload()
+
 @router.get("/api/bootstrap")
 async def bootstrap(token: Token) -> dict[str, Any]:
     agent = state.conversation.active_agent()
@@ -101,27 +107,7 @@ async def bootstrap(token: Token) -> dict[str, Any]:
     return {
         "version": APP_VERSION,
         "build": BUILD_LABEL,
-        "features": {
-            "api_version": 1,
-            "websocket_protocol_version": 1,
-            "diagnostics": True,
-            "diagnostics_api_version": 1,
-            "plugin_manager": True,
-            "plugin_manager_api_version": 2,
-            "external_plugins": True,
-            "persistent_action_ledger": True,
-            "action_ledger_schema_version": 3,
-            "database_schema_version": CURRENT_SCHEMA_VERSION,
-            "backup_format_version": BACKUP_FORMAT_VERSION,
-            "migration_history": True,
-            "recovery_snapshots": True,
-            "capability_provider_framework": True,
-            "capability_provider_api_version": 1,
-            "capability_action_expiry": True,
-            "capability_cancellation": True,
-            "mobile_pairing": False,
-            "lan_discovery": False,
-        },
+        "features": feature_manifest(),
         "kokoro_voices": KOKORO_VOICES,
         "edge_voices": state.tts.edge.cached_voice_payload(),
         "agents": state.db.list_agents(),
