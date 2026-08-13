@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.api.deps import Token
+from app.api.uploads import read_upload_limited
 from app.services.audio import AudioUnavailable, decode_pcm_wav
 from app.state import state
 
@@ -130,9 +131,11 @@ async def benchmark_ai_asr(
     """
     if state.ai_engine is None:
         raise HTTPException(status_code=400, detail="AI Engine process isolation is disabled")
-    payload = await file.read()
-    if len(payload) > 12 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="ASR benchmark WAV is too large")
+    payload = await read_upload_limited(
+        file,
+        max_bytes=12 * 1024 * 1024,
+        too_large_message="ASR benchmark WAV is too large",
+    )
     try:
         samples = decode_pcm_wav(payload, state.settings.sample_rate)
     except AudioUnavailable as exc:

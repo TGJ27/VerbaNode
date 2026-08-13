@@ -139,8 +139,8 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
 
 
 def test_v082_capability_expiry_survives_current_schema(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.4"
-    assert BUILD_LABEL == "client-readiness"
+    assert APP_VERSION == "0.8.5"
+    assert BUILD_LABEL == "stabilization"
 
     settings = _settings(tmp_path)
     db = Database(settings)

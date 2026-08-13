@@ -57,7 +57,10 @@ def test_script_and_preview_normalize_language_voice_profiles() -> None:
 
 def test_bilingual_stabilization_ui_controls_exist() -> None:
     html = Path("app/static/index.html").read_text(encoding="utf-8")
-    js = Path("app/static/app.js").read_text(encoding="utf-8")
+    js = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in ("app/static/app.js", "app/static/js/settings.js")
+    )
     assert 'id="asrModelCache"' in html
     assert 'id="testLanguageProfileBtn"' in html
     assert "/api/ai/test-language-profile" in js

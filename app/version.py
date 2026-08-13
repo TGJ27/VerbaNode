@@ -1,2 +1,2 @@
-APP_VERSION = "0.8.4"
-BUILD_LABEL = "client-readiness"
+APP_VERSION = "0.8.5"
+BUILD_LABEL = "stabilization"

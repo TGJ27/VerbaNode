@@ -18,9 +18,7 @@ jobs:
           pip install -r requirements-core.txt -r requirements-dev.txt numpy soundfile sounddevice
       - name: Ruff correctness checks
         run: python -m ruff check app scripts tests
-      - name: Compile Python
-        run: python -m compileall app scripts tests
-      - name: Check dashboard JavaScript syntax
-        run: node --check app/static/app.js
+      - name: Release invariants and syntax
+        run: python scripts/release/verify_release.py
       - name: Test
         run: python -m pytest -q

@@ -7,6 +7,11 @@ API_VERSION = 1
 MIN_API_VERSION = 1
 PROTOCOL_VERSION = 1
 
+WS_CLOSE_UNAUTHORIZED = 4401
+WS_CLOSE_ORIGIN_REJECTED = 4403
+WS_CLOSE_PROTOCOL_UNSUPPORTED = 4406
+WS_CLOSE_HEARTBEAT_TIMEOUT = 4408
+
 
 def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -52,4 +57,14 @@ def parse_command(payload: Any) -> tuple[str | None, dict[str, Any], str | None]
     return command, dict(data) if isinstance(data, dict) else {}, request_id
 
 
-__all__ = ["API_VERSION", "MIN_API_VERSION", "PROTOCOL_VERSION", "event_envelope", "parse_command"]
+__all__ = [
+    "API_VERSION",
+    "MIN_API_VERSION",
+    "PROTOCOL_VERSION",
+    "WS_CLOSE_HEARTBEAT_TIMEOUT",
+    "WS_CLOSE_ORIGIN_REJECTED",
+    "WS_CLOSE_PROTOCOL_UNSUPPORTED",
+    "WS_CLOSE_UNAUTHORIZED",
+    "event_envelope",
+    "parse_command",
+]

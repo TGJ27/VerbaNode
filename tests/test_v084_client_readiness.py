@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_v084_metadata_and_public_client_contract() -> None:
-    assert APP_VERSION == "0.8.4"
-    assert BUILD_LABEL == "client-readiness"
+    assert APP_VERSION == "0.8.5"
+    assert BUILD_LABEL == "stabilization"
     assert API_VERSION == 1
     assert MIN_API_VERSION == 1
     assert PROTOCOL_VERSION == 1
@@ -26,7 +26,7 @@ def test_v084_metadata_and_public_client_contract() -> None:
     payload = client_info_payload()
     assert payload["contract_version"] == 1
     assert payload["product"] == "VerbaNode"
-    assert payload["server"] == {"version": "0.8.4", "build": "client-readiness"}
+    assert payload["server"] == {"version": "0.8.5", "build": "stabilization"}
     assert payload["api"]["version"] == 1
     assert payload["authentication"]["mode"] == "pin_session"
     assert payload["authentication"]["session_header"] == "X-Session-Token"
@@ -100,7 +100,7 @@ def test_api_responses_expose_client_compatibility_headers() -> None:
     client = TestClient(app)
     response = client.get("/api/example")
     assert response.status_code == 200
-    assert response.headers["X-VerbaNode-Version"] == "0.8.4"
+    assert response.headers["X-VerbaNode-Version"] == "0.8.5"
     assert response.headers["X-VerbaNode-API-Version"] == "1"
     assert response.headers["X-VerbaNode-WebSocket-Protocol"] == "1"
     assert response.headers["Cache-Control"] == "no-store"
@@ -117,7 +117,7 @@ def test_client_readiness_endpoints_and_protocol_guard_are_present() -> None:
     assert '@router.get("/api/client-info")' in system_api
     assert '@router.get("/api/session")' in auth_api
     assert 'code="incompatible_api_version"' in auth_api
-    assert 'websocket.close(code=4406)' in auth_api
+    assert 'websocket.close(code=WS_CLOSE_PROTOCOL_UNSUPPORTED)' in auth_api
     assert '"protocol_error"' in auth_api
     assert "client_type=payload.client_type" in auth_api
     assert "client_version=payload.client_version" in auth_api
@@ -132,16 +132,16 @@ def test_dashboard_is_split_into_ordered_client_modules() -> None:
     app_js = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
 
     tags = [
-        '/static/js/runtime.js?v=0.8.4',
-        '/static/js/client.js?v=0.8.4',
-        '/static/js/browser-ptt.js?v=0.8.4',
-        '/static/js/diagnostics.js?v=0.8.4',
-        '/static/app.js?v=0.8.4',
+        '/static/js/runtime.js?v=0.8.5',
+        '/static/js/client.js?v=0.8.5',
+        '/static/js/browser-ptt.js?v=0.8.5',
+        '/static/js/diagnostics.js?v=0.8.5',
+        '/static/app.js?v=0.8.5',
     ]
     positions = [index.index(tag) for tag in tags]
     assert positions == sorted(positions)
 
-    assert "const FRONTEND_VERSION = '0.8.4'" in runtime
+    assert "const FRONTEND_VERSION = '0.8.5'" in runtime
     assert "const CLIENT_API_VERSION = 1" in runtime
     assert "const WEBSOCKET_PROTOCOL_VERSION = 1" in runtime
     assert "async function api(" in client

@@ -55,7 +55,10 @@ class Settings(BaseSettings):
     open_browser: bool = True
     ssl_certfile: Path | None = None
     ssl_keyfile: Path | None = None
-    controller_timeout_seconds: int = 45
+    controller_timeout_seconds: int = Field(default=90, ge=30, le=3600)
+    websocket_heartbeat_interval_seconds: float = Field(default=15.0, ge=5.0, le=120.0)
+    websocket_heartbeat_timeout_seconds: float = Field(default=45.0, ge=15.0, le=600.0)
+    api_max_json_body_bytes: int = Field(default=2097152, ge=65536, le=16777216)
     login_max_attempts: int = Field(default=5, ge=2, le=20)
     login_attempt_window_seconds: float = Field(default=60.0, ge=10.0, le=600.0)
     login_lockout_base_seconds: float = Field(default=5.0, ge=1.0, le=120.0)

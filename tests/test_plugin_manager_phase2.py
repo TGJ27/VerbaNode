@@ -72,7 +72,10 @@ def test_plugin_state_schema_and_metadata(tmp_path: Path) -> None:
 
 def test_plugin_manager_dashboard_and_api_are_present() -> None:
     html = (ROOT / "app" / "static" / "index.html").read_text(encoding="utf-8")
-    javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    javascript = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in ("app/static/js/plugins.js", "app/static/app.js")
+    )
     css = (ROOT / "app" / "static" / "styles.css").read_text(encoding="utf-8")
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     system_api = (ROOT / "app" / "api" / "system.py").read_text(encoding="utf-8")
@@ -89,5 +92,5 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     assert '.put("/api/plugins/{plugin_id}")' in plugins_api
     assert 'app.include_router(plugins_router)' in main
     assert '"plugin_manager": True' in client_contract
-    assert APP_VERSION == "0.8.4"
-    assert BUILD_LABEL == "client-readiness"
+    assert APP_VERSION == "0.8.5"
+    assert BUILD_LABEL == "stabilization"

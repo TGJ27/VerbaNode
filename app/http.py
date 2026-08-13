@@ -17,6 +17,22 @@ from app.version import APP_VERSION
 _REQUEST_ID = contextvars.ContextVar("verbanode_request_id", default="-")
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,96}$")
 _LOG_RECORD_FACTORY_INSTALLED = False
+_DEFAULT_MAX_JSON_BODY_BYTES = 2 * 1024 * 1024
+
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), geolocation=(), microphone=(self)",
+    "Content-Security-Policy": (
+        "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "form-action 'self'; img-src 'self' data:; font-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+        "connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'self' blob:"
+    ),
+}
 
 
 def current_request_id() -> str:
@@ -51,8 +67,39 @@ async def request_context_middleware(request: Request, call_next) -> Response:
     request.state.request_id = request_id
     token = _REQUEST_ID.set(request_id)
     try:
-        response = await call_next(request)
+        response: Response
+        max_json_body_bytes = int(
+            getattr(
+                request.app.state,
+                "verbanode_max_json_body_bytes",
+                _DEFAULT_MAX_JSON_BODY_BYTES,
+            )
+        )
+        content_type = (request.headers.get("content-type") or "").lower()
+        content_length = request.headers.get("content-length")
+        too_large = False
+        if content_type.startswith("application/json") and content_length:
+            try:
+                too_large = int(content_length) > max_json_body_bytes
+            except ValueError:
+                too_large = False
+
+        if too_large:
+            response = JSONResponse(
+                _error_payload(
+                    code="request_too_large",
+                    message="JSON request body is too large",
+                    request_id=request_id,
+                    details={"max_bytes": max_json_body_bytes},
+                ),
+                status_code=413,
+            )
+        else:
+            response = await call_next(request)
+
         response.headers["X-Request-ID"] = request_id
+        for name, value in _SECURITY_HEADERS.items():
+            response.headers.setdefault(name, value)
         if request.url.path.startswith("/api/"):
             response.headers["X-VerbaNode-Version"] = APP_VERSION
             response.headers["X-VerbaNode-API-Version"] = str(API_VERSION)
@@ -133,7 +180,12 @@ async def validation_exception_handler(
     )
 
 
-def install_http_hardening(app: FastAPI) -> None:
+def install_http_hardening(
+    app: FastAPI,
+    *,
+    max_json_body_bytes: int = _DEFAULT_MAX_JSON_BODY_BYTES,
+) -> None:
+    app.state.verbanode_max_json_body_bytes = max(65536, int(max_json_body_bytes))
     install_request_id_logging()
     app.middleware("http")(request_context_middleware)
     app.add_exception_handler(HTTPException, http_exception_handler)

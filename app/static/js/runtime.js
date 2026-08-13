@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.8.4';
+const FRONTEND_VERSION = '0.8.5';
 const CLIENT_API_VERSION = 1;
 const WEBSOCKET_PROTOCOL_VERSION = 1;
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
@@ -9,6 +9,11 @@ const appState = {
   token: sessionStorage.getItem('verbanode_token') || '',
   ws: null,
   reconnectTimer: null,
+  reconnectAttempt: 0,
+  heartbeatTimer: null,
+  heartbeatWatchdogTimer: null,
+  lastWebSocketActivityAt: 0,
+  connectionGeneration: 0,
   data: null,
   agents: [],
   information: [],

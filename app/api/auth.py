@@ -3,13 +3,24 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from app.api.client_contract import client_info_payload
 from app.api.deps import Token
-from app.api.protocol import API_VERSION, MIN_API_VERSION, PROTOCOL_VERSION, event_envelope, parse_command
+from app.api.protocol import (
+    API_VERSION,
+    MIN_API_VERSION,
+    PROTOCOL_VERSION,
+    WS_CLOSE_HEARTBEAT_TIMEOUT,
+    WS_CLOSE_ORIGIN_REJECTED,
+    WS_CLOSE_PROTOCOL_UNSUPPORTED,
+    WS_CLOSE_UNAUTHORIZED,
+    event_envelope,
+    parse_command,
+)
 from app.http import api_error_response
 from app.schemas import LoginRequest
 from app.state import state
@@ -17,6 +28,21 @@ from app.version import APP_VERSION
 
 LOGGER = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def websocket_origin_allowed(websocket: WebSocket) -> bool:
+    """Reject cross-site browser sockets while allowing native/originless clients."""
+    origin = (websocket.headers.get("origin") or "").strip()
+    if not origin:
+        return True
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (websocket.headers.get("host") or "").strip().lower()
+    return bool(host) and parsed.netloc.lower() == host
 
 
 @router.post("/api/auth/login")
@@ -78,6 +104,8 @@ async def login(payload: LoginRequest, request: Request) -> JSONResponse:
             "server_version": APP_VERSION,
             "api_version": API_VERSION,
             "websocket_protocol_version": PROTOCOL_VERSION,
+            "heartbeat_interval_seconds": float(state.settings.websocket_heartbeat_interval_seconds),
+            "heartbeat_timeout_seconds": float(state.settings.websocket_heartbeat_timeout_seconds),
             "session": state.controller.active_info(),
         }
     )
@@ -115,14 +143,19 @@ async def session_info(token: Token) -> dict[str, Any]:
         "server_version": APP_VERSION,
         "api_version": API_VERSION,
         "websocket_protocol_version": PROTOCOL_VERSION,
+        "heartbeat_interval_seconds": float(state.settings.websocket_heartbeat_interval_seconds),
+        "heartbeat_timeout_seconds": float(state.settings.websocket_heartbeat_timeout_seconds),
     }
 
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, ticket: str = "") -> None:
+    if not websocket_origin_allowed(websocket):
+        await websocket.close(code=WS_CLOSE_ORIGIN_REJECTED)
+        return
     token = state.controller.consume_ws_ticket(ticket)
     if not token:
-        await websocket.close(code=4401)
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
         return
     await state.events.connect(token, websocket)
     await state.events.send(
@@ -133,12 +166,21 @@ async def websocket_endpoint(websocket: WebSocket, ticket: str = "") -> None:
             "server_version": APP_VERSION,
             "api_version": API_VERSION,
             "websocket_protocol_version": PROTOCOL_VERSION,
+            "heartbeat_interval_seconds": float(state.settings.websocket_heartbeat_interval_seconds),
+            "heartbeat_timeout_seconds": float(state.settings.websocket_heartbeat_timeout_seconds),
             "session": state.controller.active_info(),
         },
     )
     try:
         while True:
-            payload = await websocket.receive_json()
+            try:
+                payload = await asyncio.wait_for(
+                    websocket.receive_json(),
+                    timeout=float(state.settings.websocket_heartbeat_timeout_seconds),
+                )
+            except asyncio.TimeoutError:
+                await websocket.close(code=WS_CLOSE_HEARTBEAT_TIMEOUT)
+                return
             request_id = str(payload.get("request_id")) if isinstance(payload, dict) and payload.get("request_id") else None
             supplied_protocol = payload.get("protocol") if isinstance(payload, dict) else None
             if supplied_protocol is not None and supplied_protocol != PROTOCOL_VERSION:
@@ -152,15 +194,24 @@ async def websocket_endpoint(websocket: WebSocket, ticket: str = "") -> None:
                         request_id=request_id,
                     )
                 )
-                await websocket.close(code=4406)
+                await websocket.close(code=WS_CLOSE_PROTOCOL_UNSUPPORTED)
                 return
             command, _command_data, request_id = parse_command(payload)
             if not state.controller.validate(token):
                 await websocket.send_json(event_envelope("control_revoked", {}, request_id=request_id))
-                await websocket.close(code=4401)
+                await websocket.close(code=WS_CLOSE_UNAUTHORIZED)
                 return
             if command == "heartbeat":
-                await websocket.send_json(event_envelope("heartbeat", {"ok": True}, request_id=request_id))
+                await websocket.send_json(
+                    event_envelope(
+                        "heartbeat",
+                        {
+                            "ok": True,
+                            "session_id": (state.controller.active_info() or {}).get("session_id"),
+                        },
+                        request_id=request_id,
+                    )
+                )
             elif command == "ptt_start":
                 await state.conversation.start_ptt()
             elif command == "ptt_stop":

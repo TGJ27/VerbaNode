@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.8.5 - Stabilization
+
+- Added WebSocket heartbeat watchdogs, bounded reconnect backoff, session revalidation, and connection-generation protection in the browser client.
+- Added server-side WebSocket idle timeout handling and same-origin browser WebSocket enforcement while retaining originless/native-client support.
+- Added deterministic stale controller/session cleanup and one-time WebSocket ticket invalidation.
+- Added startup reconciliation for inherited `pending`/`running` actions: expired deadlines become `expired`; remaining orphaned work becomes `interrupted`.
+- Added security headers/CSP and configurable early limits for declared JSON request bodies.
+- Replaced unbounded browser-PTT and ASR benchmark upload reads with bounded incremental reads.
+- Hardened clean source first run by seeding `.env` and generating a random six-digit PIN when the configured PIN is blank or placeholder.
+- Split the framework-free dashboard further into chat, agents, plugins, settings, data-recovery, runtime, client, browser-PTT, and diagnostics modules; `app.js` is now below 1,000 lines.
+- Added backup/recovery status and restore-progress UX with correlated request IDs on errors.
+- Added `scripts/release/verify_release.py` and wired release checks into CI and the Windows packaging flow.
+- Fixed Windows short-TTL action classification so deadline-limited execution is persisted as `expired` rather than occasionally `timed_out`.
+- Fixed a capability-cancellation race so provider `cancel()` hooks are invoked even when an operation task is cancelled before its first execution slice.
+- Expanded stabilization coverage to 215 automated tests in the clean v0.8.5 source tree.
+- Continued to defer mobile discovery/pairing, trusted-device credentials, cloud relay, and robot-specific hardware providers.
+
 ## v0.8.4 - Client readiness
 
 - Added public non-secret `/api/client-info` compatibility metadata for the existing web dashboard and future manually configured mobile clients.

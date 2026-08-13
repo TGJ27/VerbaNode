@@ -55,6 +55,7 @@ class CapabilityService:
         )
         self._provider_semaphores: dict[str, asyncio.Semaphore] = {}
         self._active: dict[str, _ActiveOperation] = {}
+        self._provider_cancel_requests: set[str] = set()
         self._lock = asyncio.Lock()
 
     def register(self, provider: CapabilityProvider) -> None:
@@ -188,6 +189,7 @@ class CapabilityService:
         finally:
             async with self._lock:
                 self._active.pop(operation_id, None)
+            self._provider_cancel_requests.discard(operation_id)
 
     async def _run(
         self,
@@ -250,10 +252,11 @@ class CapabilityService:
                             provider.execute(request), timeout=base_timeout
                         )
                     except asyncio.TimeoutError:
-                        await self._cancel_provider(provider, request.operation_id)
-                        expired = deadline_limited and (
-                            expiry is not None and expiry <= _utc_now()
-                        )
+                        await self._cancel_provider_once(provider, request.operation_id)
+                        # A timeout caused by the request deadline is expiry.
+                        # Avoid a second wall-clock comparison because Windows
+                        # timers may wake just before the nominal deadline.
+                        expired = bool(deadline_limited and expiry is not None)
                         return self._terminal(
                             request,
                             provider,
@@ -268,7 +271,7 @@ class CapabilityService:
                             ),
                         )
                     except asyncio.CancelledError:
-                        await self._cancel_provider(provider, request.operation_id)
+                        await self._cancel_provider_once(provider, request.operation_id)
                         raise
                     except Exception as exc:
                         LOGGER.exception(
@@ -306,6 +309,10 @@ class CapabilityService:
             return False
         if not active.task.done():
             active.task.cancel()
+        # Notify the provider explicitly. A task can be cancelled before its
+        # coroutine gets a first execution slice, in which case _run() never
+        # gets a chance to catch CancelledError and call provider.cancel().
+        await self._cancel_provider_once(active.provider, active.request.operation_id)
         if active.task is not asyncio.current_task():
             await asyncio.gather(active.task, return_exceptions=True)
         return True
@@ -345,6 +352,17 @@ class CapabilityService:
                 LOGGER.warning("Capability provider '%s' shutdown timed out", provider.id)
             except Exception:
                 LOGGER.exception("Capability provider '%s' shutdown failed", provider.id)
+
+    async def _cancel_provider_once(
+        self, provider: CapabilityProvider, operation_id: str
+    ) -> None:
+        # Mark before awaiting so concurrent cancellation paths on the same
+        # event loop cannot notify a provider twice for one operation.
+        resolved = str(operation_id)
+        if resolved in self._provider_cancel_requests:
+            return
+        self._provider_cancel_requests.add(resolved)
+        await self._cancel_provider(provider, resolved)
 
     async def _cancel_provider(self, provider: CapabilityProvider, operation_id: str) -> None:
         try:

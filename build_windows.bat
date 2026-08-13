@@ -12,7 +12,7 @@ echo VerbaNode v%APP_VERSION% Windows application build
 echo ============================================================
 echo.
 
-echo [1/7] Locating Conda...
+echo [1/8] Locating Conda...
 call :find_conda
 if errorlevel 1 (
   echo.
@@ -30,7 +30,7 @@ echo Using Conda: "%CONDA_BAT%"
 echo Target environment: %VERBANODE_CONDA_ENV%
 echo.
 
-echo [2/7] Checking Conda environment...
+echo [2/8] Checking Conda environment...
 call "%CONDA_BAT%" run -n "%VERBANODE_CONDA_ENV%" python -c "import sys" >nul 2>nul
 if errorlevel 1 (
   echo Environment "%VERBANODE_CONDA_ENV%" was not found.
@@ -46,7 +46,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [3/7] Activating Conda environment...
+echo [3/8] Activating Conda environment...
 call "%CONDA_BAT%" activate "%VERBANODE_CONDA_ENV%"
 if errorlevel 1 (
   echo Failed to activate Conda environment "%VERBANODE_CONDA_ENV%".
@@ -73,20 +73,25 @@ if errorlevel 1 (
 )
 
 echo.
-echo [4/7] Verifying isolated build environment...
+echo [4/8] Verifying isolated build environment...
 echo Development environments are not modified by this build.
 python -m pip --version
 if errorlevel 1 goto :fail
 
 echo.
-echo [5/7] Installing VerbaNode and pinned packaging dependencies...
+echo [5/8] Installing VerbaNode and pinned packaging dependencies...
 python -m pip install -r requirements.txt
 if errorlevel 1 goto :fail
 python -m pip install -r packaging\requirements-packaging.txt
 if errorlevel 1 goto :fail
 
 echo.
-echo [6/7] Cleaning previous build output...
+echo [6/8] Verifying release invariants...
+python scripts\release\verify_release.py
+if errorlevel 1 goto :fail
+
+echo.
+echo [7/8] Cleaning previous build output...
 tasklist /FI "IMAGENAME eq VerbaNode.exe" 2^>nul | find /I "VerbaNode.exe" >nul
 if not errorlevel 1 (
   echo.
@@ -105,7 +110,7 @@ if exist dist\VerbaNode (
 )
 
 echo.
-echo [7/7] Building VerbaNode.exe...
+echo [8/8] Building VerbaNode.exe...
 python -m PyInstaller --noconfirm --clean packaging\VerbaNode.spec
 if errorlevel 1 goto :fail
 

@@ -102,7 +102,14 @@ class PluginManager:
         self.action_ledger = ActionLedger(
             self.settings.db_path, stale_after_seconds=action_stale_seconds
         )
-        self.action_ledger.recover_stale(action_stale_seconds)
+        startup_recovery = self.action_ledger.recover_active_on_startup()
+        if startup_recovery["total"]:
+            LOGGER.warning(
+                "Recovered %d inherited action(s) at startup: interrupted=%d expired=%d",
+                startup_recovery["total"],
+                startup_recovery["interrupted"],
+                startup_recovery["expired"],
+            )
         self._inflight_actions: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._action_audit_lock = threading.RLock()
         self._execution_semaphore = asyncio.Semaphore(
@@ -322,6 +329,11 @@ class PluginManager:
             self._active_tasks.setdefault(plugin_id, set()).add(task)
             self._action_tasks[resolved_action_id] = task
         runtime.active_executions += 1
+        LOGGER.info(
+            "Action started action_id=%s plugin_id=%s",
+            resolved_action_id,
+            plugin_id,
+        )
 
         execution_timeout = float(self.settings.plugin_execution_timeout_seconds)
         deadline_limited = False
@@ -385,11 +397,11 @@ class PluginManager:
             response_payload = payload
             return payload
         except asyncio.TimeoutError:
-            expired = bool(
-                deadline_limited
-                and expiry_dt is not None
-                and expiry_dt <= datetime.now(timezone.utc)
-            )
+            # If the effective timeout was shortened by the action deadline,
+            # this terminal state is expiry regardless of whether the platform
+            # timer wakes a fraction early. Windows timer granularity can
+            # otherwise misclassify short-TTL actions as a normal plugin timeout.
+            expired = bool(deadline_limited and expiry_dt is not None)
             if expired:
                 message = f"Tool '{plugin_id}' action expired before completion"
                 audit_status = "expired"
@@ -464,6 +476,14 @@ class PluginManager:
                 result=response_payload,
                 error=audit_error,
                 latency_ms=latency_ms,
+            )
+            LOGGER.info(
+                "Action finished action_id=%s plugin_id=%s status=%s verified=%s latency_ms=%.2f",
+                resolved_action_id,
+                plugin_id,
+                audit_status,
+                verified,
+                latency_ms,
             )
             self._record_action_audit(
                 plugin_id=plugin_id,

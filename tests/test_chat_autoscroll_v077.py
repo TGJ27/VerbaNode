@@ -7,7 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_chat_has_strict_autoscroll_lock_and_new_message_jump() -> None:
     html = (ROOT / "app" / "static" / "index.html").read_text(encoding="utf-8")
-    javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    javascript = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            "app/static/js/runtime.js",
+            "app/static/js/chat.js",
+            "app/static/app.js",
+        )
+    )
     css = (ROOT / "app" / "static" / "styles.css").read_text(encoding="utf-8")
 
     assert 'id="autoScrollToggle"' in html

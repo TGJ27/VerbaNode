@@ -36,7 +36,7 @@ logging.basicConfig(
 LOGGER = logging.getLogger(__name__)
 
 app = FastAPI(title="VerbaNode Standalone", version=APP_VERSION)
-install_http_hardening(app)
+install_http_hardening(app, max_json_body_bytes=state.settings.api_max_json_body_bytes)
 
 STATIC_DIR = ROOT_DIR / "app" / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

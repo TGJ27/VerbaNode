@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.8.4 is the client-readiness release: the server now exposes an explicit public compatibility contract, client-aware controller session metadata, API/WebSocket version headers, protocol mismatch handling, and a more modular framework-free dashboard. The v0.8.3 recovery hardening and v0.8.2 capability-provider boundary remain intact. Pairing/LAN discovery and the mobile application remain intentionally deferred.
+> **Project status:** active development. v0.8.5 is the stabilization release that closes the v0.8 architecture sequence: client transport/reconnect behavior, controller expiry, crash-time action reconciliation, input bounds, browser security defaults, first-run PIN handling, frontend modularization, and release verification are hardened on top of the v0.8.4 client contract. Pairing/LAN discovery and the mobile application remain intentionally deferred.
 
 ---
 
@@ -79,6 +79,16 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.8.5 stabilization**
+  - WebSocket heartbeat/watchdog, bounded reconnect backoff, session revalidation, and same-origin browser WebSocket guard
+  - Stale controller cleanup invalidates outstanding one-time WebSocket tickets
+  - Startup reconciles orphaned persistent actions to `expired` or `interrupted` instead of leaving false `running` state
+  - Baseline browser security headers/CSP plus configurable JSON-body limits and bounded speech uploads
+  - Clean source first run seeds `.env` and generates a random PIN when the configured value is blank/placeholder
+  - Dashboard split further into chat, agents, plugins, settings, data-recovery, transport/runtime, browser-PTT, and diagnostics modules; `app.js` is below 1,000 lines
+  - Release verifier is shared by local development, CI, and Windows packaging
+  - 215 automated tests pass in the clean v0.8.5 source tree
 
 - **v0.8.4 client readiness**
   - Public `/api/client-info` exposes non-secret server/API/WebSocket/auth compatibility metadata before login
@@ -572,26 +582,25 @@ See `SECURITY.md` for project security guidance.
 
 ## Current Direction
 
-The v0.8.x line is focused on **architecture before feature expansion**. v0.8.4 makes the existing backend contract explicit enough for both the website and a future manually configured mobile client, on top of the v0.8.3 recovery layer and v0.8.2 provider boundary.
+The v0.8.x line is the **architecture-before-feature-expansion** sequence. v0.8.5 closes that sequence by stabilizing the contracts and recovery behavior introduced from v0.8.0 through v0.8.4.
 
-Current v0.8.4 priorities:
+Current v0.8.5 guarantees/priorities:
 
-- keep the existing web dashboard fully supported while treating it as one client of the shared REST/WebSocket backend
+- keep the existing web dashboard fully supported as one client of the shared REST/WebSocket backend
 - keep `app/main.py` limited to application composition and lifecycle while product domains live in API routers
-- expose a stable, non-secret pre-auth client compatibility contract rather than forcing future clients to infer endpoints/protocols
-- keep controller session identity separate from authentication secrets and preserve one active-controller ownership policy for now
-- keep capability action identity/result state persistent in SQLite instead of relying on process memory
-- route future physical/service operations through registered capability providers rather than plugin-specific hardware imports
-- enforce capability permission namespaces, TTL/expiry, cancellation, and bounded provider concurrency
-- keep duplicate/replayed capability requests single-execution across concurrent callers and restarts
-- version the REST/WebSocket wire contracts so future clients do not depend on dashboard-specific behavior
-- continue splitting browser responsibilities incrementally without introducing a frontend framework rewrite
-- make database backup/restore bounded, checksum-verified, safety-backed-up, and SQLite-consistent
-- keep schema upgrades ordered through numbered migrations with durable history and pre-migration recovery snapshots
+- preserve explicit REST API v1 and WebSocket Protocol v1 compatibility metadata for future clients
+- preserve one active-controller ownership policy while making expiry/ticket cleanup deterministic
+- keep action identity/result state persistent in SQLite and reconcile process-local active work after crashes/restarts
+- route future physical/service operations through registered capability providers with permission, TTL, timeout, cancellation, and concurrency controls
+- keep database upgrades ordered, recoverable, and downgrade-safe
+- keep backup/restore bounded, checksum-verified, safety-backed-up, and SQLite-consistent
+- keep browser inputs bounded and browser/WebSocket origin behavior explicit
+- keep frontend responsibilities modular without a framework rewrite
+- run one release verifier locally, in CI, and before Windows packaging to catch version/route/source-tree regressions
 
-**Intentionally deferred:** mobile application implementation, mDNS/Bonjour discovery, QR pairing, trusted-device credentials, cloud relay, and remote access. Those should be designed together with the mobile client rather than guessed into the backend early.
+**Intentionally deferred:** mobile application implementation, mDNS/Bonjour discovery, QR pairing, trusted-device credentials, cloud relay, multi-controller ownership, and remote access. Those should be designed together with the next client phase rather than guessed into the v0.8 backend.
 
-After the v0.8 architecture line stabilizes, VerbaNode can build the robot capability layer on top of the persistent action contract and capability gateway.
+The next development line can build new client/device functionality on top of this stabilized backend rather than continuing architectural churn inside v0.8.
 
 ---
 

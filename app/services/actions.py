@@ -110,6 +110,41 @@ class ActionLedger:
                 "ON action_ledger(expires_at)"
             )
 
+    def recover_active_on_startup(self) -> dict[str, int]:
+        """Terminalize every action that was active before this process started.
+
+        A task cannot survive a VerbaNode process restart. Leaving a recent row
+        in ``pending``/``running`` for an arbitrary grace period makes a duplicate
+        client request look live even though no executor exists. Startup recovery
+        therefore marks all inherited active rows interrupted, or expired when
+        their persisted deadline has already passed.
+        """
+        counts = {"interrupted": 0, "expired": 0, "total": 0}
+        now_dt = datetime.now(timezone.utc)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT action_id, expires_at FROM action_ledger "
+                "WHERE status IN ('pending','running')"
+            ).fetchall()
+            for row in rows:
+                expiry = _parse_time(row["expires_at"])
+                status = "expired" if expiry is not None and expiry <= now_dt else "interrupted"
+                error = (
+                    "Action expired before VerbaNode restarted"
+                    if status == "expired"
+                    else "Previous VerbaNode process ended before this action completed"
+                )
+                now = _utc_now()
+                cursor = conn.execute(
+                    "UPDATE action_ledger SET status=?, error=?, completed_at=?, updated_at=? "
+                    "WHERE action_id=? AND status IN ('pending','running')",
+                    (status, error, now, now, str(row["action_id"])),
+                )
+                changed = int(cursor.rowcount or 0)
+                counts[status] += changed
+                counts["total"] += changed
+        return counts
+
     def recover_stale(self, older_than_seconds: float) -> int:
         """Mark abandoned active rows as interrupted without re-executing them."""
         cutoff = datetime.now(timezone.utc).timestamp() - max(1.0, float(older_than_seconds))

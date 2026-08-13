@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.api.deps import Token
+from app.api.uploads import read_upload_limited
 from app.schemas import ConversationCreate, TextMessageRequest
 from app.services.audio import AudioUnavailable, decode_pcm_wav
 from app.state import state
@@ -59,10 +60,15 @@ async def browser_ptt_audio(
     token: Token,
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
-    payload = await file.read()
-    if len(payload) > 12 * 1024 * 1024:
+    try:
+        payload = await read_upload_limited(
+            file,
+            max_bytes=12 * 1024 * 1024,
+            too_large_message="Dashboard microphone recording is too large",
+        )
+    except HTTPException:
         await state.conversation.cancel_browser_ptt()
-        raise HTTPException(status_code=413, detail="Dashboard microphone recording is too large")
+        raise
     try:
         samples = decode_pcm_wav(payload, state.settings.sample_rate)
     except AudioUnavailable as exc:

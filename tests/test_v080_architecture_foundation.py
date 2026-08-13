@@ -57,8 +57,8 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v080_metadata_and_schema_migration(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.4"
-    assert BUILD_LABEL == "client-readiness"
+    assert APP_VERSION == "0.8.5"
+    assert BUILD_LABEL == "stabilization"
 
     db = Database(_settings(tmp_path))
     db.initialize()

@@ -37,11 +37,13 @@ BACKUP_DIR = USER_DATA_ROOT / "backups"
 LOG_DIR = USER_DATA_ROOT / "logs"
 
 
-def _ensure_frozen_env(env_file: Path, env_example: Path) -> None:
-    """Seed frozen config once and ensure it has a usable controller PIN.
+def _ensure_env_file(env_file: Path, env_example: Path) -> None:
+    """Seed config once and ensure it has a non-placeholder controller PIN.
 
     Existing user configuration is never replaced. The only value repaired in
-    an existing file is the shipped placeholder/blank controller PIN.
+    an existing file is the shipped placeholder/blank controller PIN. This is
+    used by both clean source runs and frozen installs so a fresh LAN-bound
+    VerbaNode instance never silently falls back to a well-known PIN.
     """
     if not env_file.exists():
         if env_example.exists():
@@ -78,6 +80,11 @@ def _ensure_frozen_env(env_file: Path, env_example: Path) -> None:
         return
 
 
+def _ensure_frozen_env(env_file: Path, env_example: Path) -> None:
+    """Backward-compatible wrapper retained for packaging/tests."""
+    _ensure_env_file(env_file, env_example)
+
+
 def resource_path(*parts: str) -> Path:
     return RESOURCE_ROOT.joinpath(*parts)
 
@@ -97,12 +104,12 @@ def ensure_runtime_layout() -> None:
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
-    if not IS_FROZEN:
-        return
-
     env_file = CONFIG_DIR / ".env"
     env_example = resource_path(".env.example")
-    _ensure_frozen_env(env_file, env_example)
+    _ensure_env_file(env_file, env_example)
+
+    if not IS_FROZEN:
+        return
 
     # Seed documentation/template/reference plugins only when absent. Existing
     # plugins are never overwritten by an application upgrade.

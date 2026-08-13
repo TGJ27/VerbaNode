@@ -150,7 +150,10 @@ def test_edge_voice_dropdown_and_preview_controls_are_in_agent_editor() -> None:
 
     root = Path(__file__).resolve().parents[1]
     html = (root / "app" / "static" / "index.html").read_text(encoding="utf-8")
-    javascript = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    javascript = "\n".join(
+        (root / path).read_text(encoding="utf-8")
+        for path in ("app/static/js/agents.js", "app/static/app.js")
+    )
     main = (root / "app" / "main.py").read_text(encoding="utf-8")
     tts_api = (root / "app" / "api" / "tts.py").read_text(encoding="utf-8")
     assert 'id="edgeVoiceSelect"' in html

@@ -42,6 +42,19 @@ class ControllerManager:
             and time.monotonic() - self.active.last_seen > self.settings.controller_timeout_seconds
         )
 
+    def _clear_ws_tickets_for_token(self, token: str) -> None:
+        for ticket, (ticket_token, _expires_at) in list(self._ws_tickets.items()):
+            if secrets.compare_digest(ticket_token, token):
+                self._ws_tickets.pop(ticket, None)
+
+    def _expire_active_if_stale(self) -> bool:
+        if not self._active_is_stale() or self.active is None:
+            return False
+        token = self.active.token
+        self.active = None
+        self._clear_ws_tickets_for_token(token)
+        return True
+
     def _prune_login_failures(self, client_key: str, now: float) -> deque[float]:
         failures = self._login_failures.setdefault(client_key, deque())
         window = float(self.settings.login_attempt_window_seconds)
@@ -104,8 +117,7 @@ class ControllerManager:
                 return self._record_invalid_pin(client_key, now)
             self._clear_login_failures(client_key)
 
-            if self._active_is_stale():
-                self.active = None
+            self._expire_active_if_stale()
 
             previous_client = self.active.client_name if self.active else None
             old_token = self.active.token if self.active else None
@@ -140,8 +152,7 @@ class ControllerManager:
         if not token:
             return False
         with self._lock:
-            if self._active_is_stale():
-                self.active = None
+            if self._expire_active_if_stale():
                 return False
             if self.active and secrets.compare_digest(self.active.token, token):
                 if touch:
@@ -184,12 +195,17 @@ class ControllerManager:
 
     def active_token(self) -> str | None:
         with self._lock:
+            self._expire_active_if_stale()
             return self.active.token if self.active else None
+
+    def expire_stale(self) -> bool:
+        """Expire an idle controller session and its outstanding WebSocket tickets."""
+        with self._lock:
+            return self._expire_active_if_stale()
 
     def active_info(self) -> dict[str, Any] | None:
         with self._lock:
-            if self._active_is_stale():
-                self.active = None
+            self._expire_active_if_stale()
             if not self.active:
                 return None
             return {
@@ -205,6 +221,4 @@ class ControllerManager:
         with self._lock:
             if self.active and secrets.compare_digest(self.active.token, token):
                 self.active = None
-            for ticket, (ticket_token, _expires_at) in list(self._ws_tickets.items()):
-                if secrets.compare_digest(ticket_token, token):
-                    self._ws_tickets.pop(ticket, None)
+            self._clear_ws_tickets_for_token(token)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.api.protocol import API_VERSION, MIN_API_VERSION, PROTOCOL_VERSION
+from app.config import get_settings
 from app.migrations import CURRENT_SCHEMA_VERSION
 from app.services.backup import BACKUP_FORMAT_VERSION
 from app.version import APP_VERSION, BUILD_LABEL
@@ -35,6 +36,10 @@ def feature_manifest() -> dict[str, Any]:
         "capability_cancellation": True,
         "client_metadata": True,
         "modular_web_client": True,
+        "websocket_heartbeat": True,
+        "same_origin_websocket_guard": True,
+        "security_headers": True,
+        "bounded_uploads": True,
         # Explicitly deferred until the dedicated mobile phase.
         "mobile_pairing": False,
         "lan_discovery": False,
@@ -43,6 +48,7 @@ def feature_manifest() -> dict[str, Any]:
 
 def client_info_payload() -> dict[str, Any]:
     """Public, non-secret contract used before a client authenticates."""
+    settings = get_settings()
     return {
         "contract_version": CLIENT_INFO_VERSION,
         "product": "VerbaNode",
@@ -62,12 +68,17 @@ def client_info_payload() -> dict[str, Any]:
             "logout_endpoint": "/api/auth/logout",
             "session_header": SESSION_HEADER,
             "controller_policy": CONTROLLER_POLICY,
+            "idle_timeout_seconds": int(settings.controller_timeout_seconds),
         },
         "websocket": {
             "endpoint": "/ws",
             "protocol_version": PROTOCOL_VERSION,
             "ticket_endpoint": "/api/auth/ws-ticket",
             "ticket_required": True,
+            "heartbeat_interval_seconds": float(settings.websocket_heartbeat_interval_seconds),
+            "heartbeat_timeout_seconds": float(settings.websocket_heartbeat_timeout_seconds),
+            "same_origin_browser_required": True,
+            "originless_native_clients_allowed": True,
         },
         "endpoints": {
             "bootstrap": "/api/bootstrap",

@@ -1,5 +1,10 @@
 'use strict';
 
+const WS_CLOSE_UNAUTHORIZED = 4401;
+const WS_CLOSE_ORIGIN_REJECTED = 4403;
+const WS_CLOSE_PROTOCOL_UNSUPPORTED = 4406;
+const WS_CLOSE_HEARTBEAT_TIMEOUT = 4408;
+
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (appState.token) headers.set('X-Session-Token', appState.token);
@@ -31,9 +36,21 @@ async function api(path, options = {}) {
   return response;
 }
 
+function clearWebSocketTimers() {
+  clearTimeout(appState.reconnectTimer);
+  clearInterval(appState.heartbeatTimer);
+  clearInterval(appState.heartbeatWatchdogTimer);
+  appState.reconnectTimer = null;
+  appState.heartbeatTimer = null;
+  appState.heartbeatWatchdogTimer = null;
+}
+
 function resetToLogin(message = '') {
   sessionStorage.removeItem('verbanode_token');
   appState.token = '';
+  appState.session = null;
+  appState.connectionGeneration += 1;
+  clearWebSocketTimers();
   if (appState.ws) { try { appState.ws.close(); } catch (_) {} }
   try { appState.browserPttStream?.getTracks().forEach(track => track.stop()); } catch (_) {}
   appState.browserPttStream = null;
@@ -44,6 +61,23 @@ function resetToLogin(message = '') {
     $('#loginStatus').textContent = message;
     $('#loginStatus').classList.remove('hidden');
   }
+}
+
+async function loadClientInfo() {
+  const response = await fetch('/api/client-info', { method: 'GET', cache: 'no-store' });
+  if (!response.ok) throw new Error(`Client compatibility check failed (${response.status})`);
+  const info = await response.json();
+  appState.clientInfo = info;
+  appState.backendVersion = info.server?.version || appState.backendVersion;
+  const apiVersion = Number(info.api?.version || 0);
+  const wsVersion = Number(info.websocket?.protocol_version || 0);
+  if (apiVersion && apiVersion !== CLIENT_API_VERSION) {
+    throw new Error(`Dashboard API v${CLIENT_API_VERSION} is incompatible with server API v${apiVersion}.`);
+  }
+  if (wsVersion && wsVersion !== WEBSOCKET_PROTOCOL_VERSION) {
+    throw new Error(`Dashboard WebSocket v${WEBSOCKET_PROTOCOL_VERSION} is incompatible with server WebSocket v${wsVersion}.`);
+  }
+  return info;
 }
 
 async function login(pin, clientName) {
@@ -70,7 +104,7 @@ async function login(pin, clientName) {
   if (payload.takeover) toast(`Control transferred from ${payload.previous_client || 'the previous device'}.`);
 }
 
-async function validateStoredSession() {
+async function validateStoredSession(clearOnNetworkError = true) {
   if (!appState.token) return false;
   try {
     const response = await fetch('/api/session', {
@@ -88,7 +122,7 @@ async function validateStoredSession() {
     appState.backendVersion = payload.server_version || appState.backendVersion;
     return true;
   } catch (error) {
-    resetToLogin('Could not validate the saved session. Enter the PIN again.');
+    if (clearOnNetworkError) resetToLogin('Could not validate the saved session. Enter the PIN again.');
     return false;
   }
 }
@@ -109,59 +143,128 @@ async function completeLogin(token, validateFirst = false) {
   }
 }
 
+function heartbeatIntervalMs() {
+  return Math.max(5000, Number(appState.clientInfo?.websocket?.heartbeat_interval_seconds || 15) * 1000);
+}
+
+function heartbeatTimeoutMs() {
+  const configured = Number(appState.clientInfo?.websocket?.heartbeat_timeout_seconds || 45) * 1000;
+  return Math.max(heartbeatIntervalMs() * 2, configured);
+}
+
+function noteWebSocketActivity() {
+  appState.lastWebSocketActivityAt = Date.now();
+}
+
+function startWebSocketHeartbeat(ws) {
+  clearInterval(appState.heartbeatTimer);
+  clearInterval(appState.heartbeatWatchdogTimer);
+  noteWebSocketActivity();
+  appState.heartbeatTimer = setInterval(() => {
+    if (appState.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
+    wsCommand('heartbeat', {}, { quiet: true });
+  }, heartbeatIntervalMs());
+  appState.heartbeatWatchdogTimer = setInterval(() => {
+    if (appState.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - appState.lastWebSocketActivityAt > heartbeatTimeoutMs()) {
+      try { ws.close(WS_CLOSE_HEARTBEAT_TIMEOUT, 'heartbeat timeout'); } catch (_) {}
+    }
+  }, Math.min(5000, heartbeatIntervalMs()));
+}
+
+function reconnectDelayMs() {
+  const attempt = Math.max(0, appState.reconnectAttempt);
+  const base = Math.min(10000, 500 * (2 ** Math.min(attempt, 5)));
+  const jitter = Math.floor(Math.random() * 250);
+  return base + jitter;
+}
+
+function scheduleWebSocketReconnect(delayOverride = null) {
+  if (!appState.token) return;
+  clearTimeout(appState.reconnectTimer);
+  const delay = delayOverride === null ? reconnectDelayMs() : Math.max(0, Number(delayOverride));
+  appState.reconnectAttempt += 1;
+  $('#connectionDot').classList.remove('online');
+  $('#connectionLabel').textContent = 'Reconnecting…';
+  appState.reconnectTimer = setTimeout(reconnectWebSocketAfterValidation, delay);
+}
+
 async function reconnectWebSocketAfterValidation() {
   if (!appState.token) return;
-  if (!(await validateStoredSession())) return;
+  const valid = await validateStoredSession(false);
+  if (!appState.token) return;
+  if (!valid) {
+    scheduleWebSocketReconnect();
+    return;
+  }
   connectWebSocket();
 }
 
 async function connectWebSocket() {
   if (!appState.token) return;
-  if (appState.ws) { try { appState.ws.close(); } catch (_) {} }
+  const generation = ++appState.connectionGeneration;
+  clearTimeout(appState.reconnectTimer);
+  clearWebSocketTimers();
+  const previousWs = appState.ws;
+  appState.ws = null;
+  if (previousWs) { try { previousWs.close(); } catch (_) {} }
   let ticketPayload;
   try {
     ticketPayload = await api('/api/auth/ws-ticket', { method: 'POST' });
   } catch (error) {
-    if (!appState.token) return;
-    $('#connectionDot').classList.remove('online');
-    $('#connectionLabel').textContent = 'Reconnecting…';
-    clearTimeout(appState.reconnectTimer);
-    appState.reconnectTimer = setTimeout(reconnectWebSocketAfterValidation, 1500);
+    if (!appState.token || generation !== appState.connectionGeneration) return;
+    scheduleWebSocketReconnect();
     return;
   }
-  if (!appState.token || !ticketPayload?.ticket) return;
+  if (!appState.token || !ticketPayload?.ticket || generation !== appState.connectionGeneration) return;
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${protocol}//${location.host}/ws?ticket=${encodeURIComponent(ticketPayload.ticket)}`);
   appState.ws = ws;
   ws.onopen = () => {
+    if (appState.ws !== ws) return;
+    appState.reconnectAttempt = 0;
     $('#connectionDot').classList.add('online');
     $('#connectionLabel').textContent = 'Connected';
+    startWebSocketHeartbeat(ws);
   };
   ws.onclose = event => {
+    if (appState.ws !== ws) return;
+    appState.ws = null;
+    clearInterval(appState.heartbeatTimer);
+    clearInterval(appState.heartbeatWatchdogTimer);
+    appState.heartbeatTimer = null;
+    appState.heartbeatWatchdogTimer = null;
     $('#connectionDot').classList.remove('online');
     if (!appState.token) {
       $('#connectionLabel').textContent = 'Disconnected';
       return;
     }
-    if (event.code === 4401) {
-      $('#connectionLabel').textContent = 'Reconnecting…';
-      clearTimeout(appState.reconnectTimer);
-      appState.reconnectTimer = setTimeout(reconnectWebSocketAfterValidation, 500);
+    if (event.code === WS_CLOSE_PROTOCOL_UNSUPPORTED) {
+      $('#connectionLabel').textContent = 'Update required';
+      toast('Dashboard and backend WebSocket versions do not match. Restart VerbaNode after updating all files.', 'error');
       return;
     }
-    $('#connectionLabel').textContent = 'Reconnecting…';
-    clearTimeout(appState.reconnectTimer);
-    appState.reconnectTimer = setTimeout(reconnectWebSocketAfterValidation, 1500);
+    if (event.code === WS_CLOSE_ORIGIN_REJECTED) {
+      $('#connectionLabel').textContent = 'Connection blocked';
+      toast('The server rejected this browser WebSocket origin.', 'error');
+      return;
+    }
+    if (event.code === WS_CLOSE_UNAUTHORIZED) {
+      scheduleWebSocketReconnect(500);
+      return;
+    }
+    scheduleWebSocketReconnect();
   };
-  ws.onerror = () => ws.close();
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };
   ws.onmessage = event => {
+    noteWebSocketActivity();
     try { handleEvent(JSON.parse(event.data)); } catch (error) { console.error(error); }
   };
 }
 
-function wsCommand(command, data = {}) {
+function wsCommand(command, data = {}, options = {}) {
   if (!appState.ws || appState.ws.readyState !== WebSocket.OPEN) {
-    toast('Live connection is not ready.', 'error');
+    if (!options.quiet) toast('Live connection is not ready.', 'error');
     return false;
   }
   const requestId = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -174,4 +277,20 @@ function wsCommand(command, data = {}) {
   return true;
 }
 
-
+async function initializeClientTransport() {
+  try {
+    await loadClientInfo();
+  } catch (error) {
+    const status = $('#loginStatus');
+    if (status) {
+      status.textContent = error.message;
+      status.classList.remove('hidden');
+    }
+  }
+  if (appState.token) {
+    const status = $('#loginStatus');
+    status.textContent = 'Checking saved controller session…';
+    status.classList.remove('hidden');
+    await completeLogin(appState.token, true);
+  }
+}

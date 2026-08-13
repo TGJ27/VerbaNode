@@ -787,3 +787,16 @@ input:focus,textarea:focus,select:focus { border-color: #8ab5ff; box-shadow: 0 0
 @media (max-width: 480px) {
   #autoScrollToggle { display: inline-flex; align-items: center; justify-content: center; }
 }
+
+
+/* v0.8.5 recovery-status presentation */
+.data-recovery-status{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+.data-recovery-status>div{display:flex;flex-direction:column;gap:3px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-soft,#f8faff)}
+.data-recovery-status small{color:var(--muted);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+.data-recovery-status strong{font-size:.95rem}
+.data-recovery-status span{color:var(--muted);font-size:.78rem;overflow-wrap:anywhere}
+.restore-status{display:block;min-height:1.2em;margin-top:10px;color:var(--muted)}
+.restore-status[data-kind="working"]{color:#8a6200}
+.restore-status[data-kind="success"]{color:#188653}
+.restore-status[data-kind="error"]{color:#c83d56}
+@media (max-width:760px){.data-recovery-status{grid-template-columns:1fr}}
