@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     plugin_manifest_max_bytes: int = Field(default=65536, ge=1024, le=1048576)
     plugin_entry_max_bytes: int = Field(default=2097152, ge=4096, le=16777216)
     capability_audit_path: Path = LOG_DIR / "capability-actions.jsonl"
+    capability_execution_timeout_seconds: float = Field(default=10.0, ge=0.1, le=120.0)
+    capability_cancel_timeout_seconds: float = Field(default=2.0, ge=0.1, le=30.0)
+    capability_provider_shutdown_timeout_seconds: float = Field(default=5.0, ge=0.5, le=30.0)
+    capability_max_concurrent_executions: int = Field(default=4, ge=1, le=32)
+    capability_provider_max_concurrent_executions: int = Field(default=2, ge=1, le=16)
+    capability_max_arguments_bytes: int = Field(default=65536, ge=1024, le=1048576)
+    capability_default_ttl_seconds: float = Field(default=30.0, ge=0.1, le=3600.0)
+    capability_max_ttl_seconds: float = Field(default=300.0, ge=1.0, le=86400.0)
 
     @property
     def external_plugins_dir(self) -> Path:

@@ -18,3 +18,8 @@ v0.6.3 adds:
 ## Operator responsibility
 
 Review source code before installation. Do not install unknown plugins on a robot or system that has access to movement, cameras, microphones, credentials, files, networks, or shell commands. Permission declarations are informational and do not prevent undeclared access.
+
+
+## v0.8.2 capability providers
+
+First-party robot/device/service integrations should expose namespaced operations through `CapabilityProvider` and be invoked by plugins through `PluginContext.gateway.invoke(...)`. The gateway validates declared permissions and the provider service adds bounded concurrency, timeout, TTL/expiry, and cancellation handling. This is an application architecture boundary; it does not make arbitrary external Python plugins untrusted or sandboxed.

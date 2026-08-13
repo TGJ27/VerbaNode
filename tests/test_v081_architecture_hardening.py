@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class _ImmediatePlugin(Plugin):
     id = "v081_immediate"
-    name = "v0.8.1 immediate action"
+    name = "v0.8.2 immediate action"
     description = "Exercises same-loop action leader reservation."
     permissions = ("robot",)
     schema = {
@@ -50,8 +50,8 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v081_metadata_and_router_split() -> None:
-    assert APP_VERSION == "0.8.1"
-    assert BUILD_LABEL == "architecture-hardening"
+    assert APP_VERSION == "0.8.2"
+    assert BUILD_LABEL == "capability-foundation"
 
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     assert len(main.splitlines()) < 180
@@ -153,8 +153,8 @@ def test_dashboard_diagnostics_is_split_into_a_separate_script() -> None:
         encoding="utf-8"
     )
 
-    diagnostics_tag = '/static/js/diagnostics.js?v=0.8.1'
-    app_tag = '/static/app.js?v=0.8.1'
+    diagnostics_tag = '/static/js/diagnostics.js?v=0.8.2'
+    app_tag = '/static/app.js?v=0.8.2'
     assert diagnostics_tag in index
     assert index.index(diagnostics_tag) < index.index(app_tag)
     assert "function renderDiagnostics(" not in app_js

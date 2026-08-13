@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.8.2 - Capability foundation
+
+- Added a provider-neutral `app/capabilities` layer with provider interface, registry, requests/results, namespace validation, and bounded execution service.
+- Extended `CapabilityGateway` with async provider invocation while preserving explicit plugin manifest permission checks.
+- Added deterministic capability-to-permission mapping for robot, display, camera, microphone, serial, MQTT, network, internet, shell, and filesystem namespaces.
+- Added global/per-provider execution limits, provider timeouts, argument-size limits, TTL/expiry, cancellation hooks, and provider shutdown handling.
+- Added authenticated capability metadata and active-operation cancellation APIs.
+- Added authenticated parent action cancellation that propagates into active provider operations.
+- Advanced the persistent action ledger to schema v3 with `expires_at`; expired actions are terminal and are not re-executed after a deadline or restart.
+- Added v0.8.2 provider, permission, concurrency, expiry, cancellation, migration, and API regression tests.
+- Kept mobile discovery/pairing and robot-specific hardware providers intentionally out of scope.
+- 187 automated tests passing in the clean v0.8.2 source tree.
+
 ## v0.8.1 - Architecture hardening
 
 - Reduced `app/main.py` from roughly 1,100 lines in early v0.8 work to about 100 lines by extracting system/bootstrap, diagnostics, audio/runtime settings, AI, and TTS APIs into dedicated routers.

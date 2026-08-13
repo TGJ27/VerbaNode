@@ -49,9 +49,22 @@ def _persistent_action_ledger_v2(conn: sqlite3.Connection) -> None:
     )
 
 
+def _capability_action_expiry_v3(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(action_ledger)").fetchall()
+    }
+    if "expires_at" not in columns:
+        conn.execute("ALTER TABLE action_ledger ADD COLUMN expires_at TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_action_ledger_expires_at "
+        "ON action_ledger(expires_at)"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "numbered_migration_foundation", _foundation_v1),
     Migration(2, "persistent_action_ledger", _persistent_action_ledger_v2),
+    Migration(3, "capability_action_expiry", _capability_action_expiry_v3),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 

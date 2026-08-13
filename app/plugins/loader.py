@@ -10,6 +10,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from app.capabilities.permissions import ALLOWED_PERMISSIONS
 from app.plugins.base import Plugin
 from app.plugins.exceptions import (
     PluginCompatibilityError,
@@ -25,21 +26,6 @@ FOLDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 SEMVER_PATTERN = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
-)
-ALLOWED_PERMISSIONS = frozenset(
-    {
-        "internet",
-        "network",
-        "filesystem_read",
-        "filesystem_write",
-        "camera",
-        "microphone",
-        "display",
-        "robot",
-        "serial",
-        "mqtt",
-        "shell",
-    }
 )
 ALLOWED_MANIFEST_FIELDS = frozenset(
     {

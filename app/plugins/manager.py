@@ -8,11 +8,13 @@ import threading
 import time
 import uuid
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.capabilities.provider import CapabilityProvider
+from app.capabilities.service import CapabilityService
 from app.config import Settings
 from app.plugins.base import Plugin
 from app.plugins.capabilities import CapabilityGateway
@@ -77,9 +79,15 @@ class PluginManager:
     sandbox.
     """
 
-    def __init__(self, settings: Settings, registry: PluginRegistry | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        registry: PluginRegistry | None = None,
+        capability_service: CapabilityService | None = None,
+    ) -> None:
         self.settings = settings
         self.registry = registry or PluginRegistry()
+        self.capability_service = capability_service or CapabilityService(settings)
         self._metrics: dict[str, PluginMetrics] = {}
         self._runtime: dict[str, PluginRuntimeState] = {}
         self._disabled_ids: set[str] = set()
@@ -87,6 +95,7 @@ class PluginManager:
         self._external_loaded: dict[str, LoadedExternalPlugin] = {}
         self._external_failures: dict[str, ExternalPluginFailure] = {}
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
+        self._action_tasks: dict[str, asyncio.Task[Any]] = {}
         self._reload_locks: dict[str, asyncio.Lock] = {}
         self._action_audit: deque[dict[str, Any]] = deque(maxlen=250)
         action_stale_seconds = max(30.0, float(self.settings.plugin_execution_timeout_seconds) * 2.0)
@@ -198,6 +207,7 @@ class PluginManager:
         arguments: dict[str, Any] | None = None,
         *,
         action_id: str | None = None,
+        expires_in_seconds: float | None = None,
     ) -> dict[str, Any]:
         plugin = self.registry.get(plugin_id)
         if plugin is None:
@@ -218,6 +228,13 @@ class PluginManager:
 
         resolved_action_id = str(action_id or uuid.uuid4())
         resolved_arguments = dict(arguments or {})
+        expires_at: str | None = None
+        expiry_dt: datetime | None = None
+        if expires_in_seconds is not None:
+            ttl = max(0.0, float(expires_in_seconds))
+            ttl = min(ttl, float(self.settings.capability_max_ttl_seconds))
+            expiry_dt = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+            expires_at = expiry_dt.isoformat(timespec="milliseconds")
 
         # Reserve the in-process completion future *before* touching SQLite.
         # There is no await between the lookup and assignment, so two callers on
@@ -232,7 +249,10 @@ class PluginManager:
         self._inflight_actions[resolved_action_id] = completion
         try:
             claim = self.action_ledger.claim(
-                resolved_action_id, plugin_id, resolved_arguments
+                resolved_action_id,
+                plugin_id,
+                resolved_arguments,
+                expires_at=expires_at,
             )
             if claim.state == "conflict":
                 response = {
@@ -272,8 +292,6 @@ class PluginManager:
         except Exception as exc:
             if not completion.done():
                 completion.set_exception(exc)
-                # This leader is the only consumer when claiming itself fails;
-                # retrieve the exception so asyncio does not report it as lost.
                 try:
                     completion.exception()
                 except Exception:
@@ -281,7 +299,20 @@ class PluginManager:
             self._inflight_actions.pop(resolved_action_id, None)
             raise
 
-        self.action_ledger.mark_running(resolved_action_id)
+        if not self.action_ledger.mark_running(resolved_action_id):
+            current = self.action_ledger.get(resolved_action_id)
+            response = self.action_ledger.replay_payload(
+                current
+                or {
+                    "action_id": resolved_action_id,
+                    "status": "expired",
+                    "verified": False,
+                    "error": "Action expired before execution",
+                }
+            )
+            completion.set_result(dict(response))
+            self._inflight_actions.pop(resolved_action_id, None)
+            return response
 
         metric = self._metrics.setdefault(plugin_id, PluginMetrics())
         started = time.perf_counter()
@@ -289,16 +320,41 @@ class PluginManager:
         task = asyncio.current_task()
         if task is not None:
             self._active_tasks.setdefault(plugin_id, set()).add(task)
+            self._action_tasks[resolved_action_id] = task
         runtime.active_executions += 1
+
+        execution_timeout = float(self.settings.plugin_execution_timeout_seconds)
+        deadline_limited = False
+        if expiry_dt is not None:
+            remaining = max(
+                0.0,
+                (expiry_dt - datetime.now(timezone.utc)).total_seconds(),
+            )
+            if remaining <= execution_timeout:
+                deadline_limited = True
+            execution_timeout = min(execution_timeout, remaining)
 
         audit_status = "failed"
         audit_error: str | None = None
         verified = False
         response_payload: dict[str, Any] | None = None
         try:
+            if execution_timeout <= 0:
+                audit_status = "expired"
+                audit_error = "Action expired before execution"
+                response_payload = {
+                    "error": audit_error,
+                    "_action": {
+                        "id": resolved_action_id,
+                        "success": False,
+                        "status": "expired",
+                        "verified": False,
+                    },
+                }
+                return response_payload
             result = await asyncio.wait_for(
                 self._execute_bounded(plugin, resolved_arguments, resolved_action_id),
-                timeout=float(self.settings.plugin_execution_timeout_seconds),
+                timeout=execution_timeout,
             )
             metric.successes += 1
             metric.consecutive_failures = 0
@@ -329,21 +385,30 @@ class PluginManager:
             response_payload = payload
             return payload
         except asyncio.TimeoutError:
-            message = (
-                f"Tool '{plugin_id}' timed out after "
-                f"{self.settings.plugin_execution_timeout_seconds:g} seconds"
+            expired = bool(
+                deadline_limited
+                and expiry_dt is not None
+                and expiry_dt <= datetime.now(timezone.utc)
             )
-            metric.timeouts += 1
-            self._record_failure(plugin_id, message, increment_error=True)
-            LOGGER.error(message)
-            audit_status = "timed_out"
+            if expired:
+                message = f"Tool '{plugin_id}' action expired before completion"
+                audit_status = "expired"
+            else:
+                message = (
+                    f"Tool '{plugin_id}' timed out after "
+                    f"{self.settings.plugin_execution_timeout_seconds:g} seconds"
+                )
+                audit_status = "timed_out"
+                metric.timeouts += 1
+                self._record_failure(plugin_id, message, increment_error=True)
+                LOGGER.error(message)
             audit_error = message
             response_payload = {
                 "error": message,
                 "_action": {
                     "id": resolved_action_id,
                     "success": False,
-                    "status": "timed_out",
+                    "status": audit_status,
                     "verified": False,
                 },
             }
@@ -390,6 +455,8 @@ class PluginManager:
                     tasks.discard(task)
                     if not tasks:
                         self._active_tasks.pop(plugin_id, None)
+                if self._action_tasks.get(resolved_action_id) is task:
+                    self._action_tasks.pop(resolved_action_id, None)
             self.action_ledger.complete(
                 resolved_action_id,
                 status=audit_status,
@@ -409,14 +476,20 @@ class PluginManager:
                 error=audit_error,
             )
             if not completion.done():
-                completion.set_result(dict(response_payload or self.action_ledger.replay_payload(
-                    self.action_ledger.get(resolved_action_id) or {
-                        "action_id": resolved_action_id,
-                        "status": audit_status,
-                        "verified": verified,
-                        "error": audit_error,
-                    }
-                )))
+                completion.set_result(
+                    dict(
+                        response_payload
+                        or self.action_ledger.replay_payload(
+                            self.action_ledger.get(resolved_action_id)
+                            or {
+                                "action_id": resolved_action_id,
+                                "status": audit_status,
+                                "verified": verified,
+                                "error": audit_error,
+                            }
+                        )
+                    )
+                )
             self._inflight_actions.pop(resolved_action_id, None)
 
     def _record_action_audit(
@@ -471,15 +544,42 @@ class PluginManager:
                     arguments=dict(arguments or {}),
                     metadata={"plugin_id": plugin.id, "action_id": action_id},
                     action_id=action_id,
-                    gateway=CapabilityGateway(plugin.id, frozenset(plugin.permissions)),
+                    gateway=CapabilityGateway(
+                        plugin.id,
+                        frozenset(plugin.permissions),
+                        service=self.capability_service,
+                        action_id=action_id,
+                    ),
                 )
             )
+
+    async def cancel_action(self, action_id: str) -> dict[str, Any] | None:
+        resolved = str(action_id)
+        current = asyncio.current_task()
+        await self.capability_service.cancel_parent(resolved)
+        task = self._action_tasks.get(resolved)
+        if task is not None and task is not current and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        return self.action_ledger.get(resolved)
+
+    async def cancel_capability_operation(self, operation_id: str) -> bool:
+        return await self.capability_service.cancel_operation(operation_id)
+
+    def capability_status(self) -> dict[str, Any]:
+        payload = self.capability_service.describe()
+        payload["active_operations"] = self.capability_service.active_operations()
+        return payload
+
+    def register_capability_provider(self, provider: CapabilityProvider) -> None:
+        self.capability_service.register(provider)
 
     async def cancel_active(self, plugin_id: str | None = None) -> int:
         current = asyncio.current_task()
         selected: list[asyncio.Task[Any]] = []
         plugin_ids = [plugin_id] if plugin_id else list(self._active_tasks)
         for selected_id in plugin_ids:
+            await self.capability_service.cancel_plugin(selected_id)
             for task in list(self._active_tasks.get(selected_id, set())):
                 if task is not current and not task.done():
                     task.cancel()
@@ -581,6 +681,7 @@ class PluginManager:
         await self.cancel_active()
         for plugin_id in list(self._external_loaded):
             await self._unload_external(plugin_id)
+        await self.capability_service.shutdown()
 
     def external_directory(self) -> Path:
         return (self._external_dir or self.settings.external_plugins_dir).resolve()

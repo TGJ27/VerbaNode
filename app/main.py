@@ -12,6 +12,7 @@ from app.api.ai import router as ai_router
 from app.api.audio import router as audio_router
 from app.api.auth import router as auth_router
 from app.api.backup import router as backup_router
+from app.api.capabilities import router as capabilities_router
 from app.api.conversations import router as conversations_router
 from app.api.diagnostics import router as diagnostics_router
 from app.api.information import router as information_router
@@ -46,6 +47,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(system_router)
 app.include_router(auth_router)
 app.include_router(actions_router)
+app.include_router(capabilities_router)
 app.include_router(agents_router)
 app.include_router(information_router)
 app.include_router(scripts_router)

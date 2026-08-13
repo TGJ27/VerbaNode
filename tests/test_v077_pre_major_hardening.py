@@ -140,7 +140,7 @@ async def test_capability_gateway_rejects_undeclared_permission(tmp_path: Path) 
 def test_database_has_numbered_schema_version(tmp_path: Path) -> None:
     db = Database(Settings(db_path=tmp_path / "versioned.db", open_browser=False))
     db.initialize()
-    assert db.get_setting("schema_version") == "2"
+    assert db.get_setting("schema_version") == "3"
 
 
 def test_v077_hardening_layout_and_ci_are_present() -> None:
@@ -155,8 +155,8 @@ def test_v077_hardening_layout_and_ci_are_present() -> None:
     index_html = (ROOT / "app" / "static" / "index.html").read_text(encoding="utf-8")
     styles = (ROOT / "app" / "static" / "styles.css").read_text(encoding="utf-8")
 
-    assert APP_VERSION == "0.8.1"
-    assert BUILD_LABEL == "architecture-hardening"
+    assert APP_VERSION == "0.8.2"
+    assert BUILD_LABEL == "capability-foundation"
     assert "app.include_router(auth_router)" in main
     assert '@router.post("/api/auth/ws-ticket")' in auth
     assert '@router.websocket("/ws")' in auth
@@ -168,10 +168,10 @@ def test_v077_hardening_layout_and_ci_are_present() -> None:
     assert 'findstr /B /C:"APP_VERSION =" app\\version.py' in build_windows
     assert "/DMyAppVersion=%APP_VERSION%" in build_installer
     assert "#ifndef MyAppVersion" in installer
-    assert '/static/VerbaNode.png?v=0.8.1' in index_html
-    assert 'styles.css?v=0.8.1' in index_html
-    assert 'app.js?v=0.8.1' in index_html
-    assert 'id="appVersion">v0.8.1<' in index_html
+    assert '/static/VerbaNode.png?v=0.8.2' in index_html
+    assert 'styles.css?v=0.8.2' in index_html
+    assert 'app.js?v=0.8.2' in index_html
+    assert 'id="appVersion">v0.8.2<' in index_html
     assert 'class="brand-mark large">VN<' not in index_html
     assert 'class="brand-mark">VN<' not in index_html
     assert ".brand-mark img" in styles

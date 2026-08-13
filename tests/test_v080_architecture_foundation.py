@@ -57,12 +57,12 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v080_metadata_and_schema_migration(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.1"
-    assert BUILD_LABEL == "architecture-hardening"
+    assert APP_VERSION == "0.8.2"
+    assert BUILD_LABEL == "capability-foundation"
 
     db = Database(_settings(tmp_path))
     db.initialize()
-    assert db.get_setting("schema_version") == "2"
+    assert db.get_setting("schema_version") == "3"
     with sqlite3.connect(tmp_path / "verbanode.db") as conn:
         tables = {
             row[0]

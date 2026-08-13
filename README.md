@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.8.1 is the architecture-hardening release: the remaining runtime-heavy API domains are split out of the FastAPI entry point, controller takeover behavior is reduced to one deterministic valid-PIN policy, REST requests gain correlation IDs and structured error envelopes, duplicate action execution is tightened, and the dashboard begins splitting into independent JavaScript modules. Pairing/LAN discovery and the mobile application remain intentionally deferred.
+> **Project status:** active development. v0.8.2 is the capability-foundation release: plugins can now route future robot/display/camera/serial/MQTT operations through a provider registry and bounded capability service with permission validation, cancellation, TTL/expiry, and execution limits. The persistent action ledger advances to schema v3 with action expiry. Pairing/LAN discovery and the mobile application remain intentionally deferred.
 
 ---
 
@@ -79,6 +79,16 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.8.2 capability foundation**
+  - New `app/capabilities` provider contract and registry for future robot/device/service integrations
+  - Capability names map deterministically to plugin manifest permissions before provider execution
+  - Provider execution is bounded globally and per provider, with configurable timeouts and argument limits
+  - Capability requests have TTL/expiry and best-effort provider cancellation hooks
+  - Parent plugin actions can be cancelled through the authenticated action API, propagating cancellation into active provider work
+  - Persistent action ledger schema v3 stores `expires_at` and treats expired actions as terminal/non-retryable
+  - Authenticated `/api/capabilities` metadata exposes providers, limits, and currently active provider operations
+  - No robot-specific hardware provider, mobile pairing, or LAN discovery is included yet
 
 - **v0.8.1 architecture hardening**
   - `app/main.py` reduced to application composition/lifecycle; system, diagnostics, audio, AI, and TTS endpoints now live in dedicated routers
@@ -543,13 +553,15 @@ See `SECURITY.md` for project security guidance.
 
 ## Current Direction
 
-The v0.8.x line is focused on **architecture before feature expansion**. v0.8.1 continues the v0.8.0 foundation and keeps one client-neutral API surface that the existing website and a future mobile application can both use.
+The v0.8.x line is focused on **architecture before feature expansion**. v0.8.2 adds the provider boundary that future physical capabilities will use while keeping one client-neutral API surface for the website and a future mobile application.
 
-Current v0.8.1 priorities:
+Current v0.8.2 priorities:
 
 - keep the existing web dashboard fully supported
 - keep `app/main.py` limited to application composition and lifecycle while product domains live in API routers
 - keep capability action identity/result state persistent in SQLite instead of relying on process memory
+- route future physical/service operations through registered capability providers rather than plugin-specific hardware imports
+- enforce capability permission namespaces, TTL/expiry, cancellation, and bounded provider concurrency
 - keep duplicate/replayed capability requests single-execution across concurrent callers and restarts
 - version the WebSocket wire format so future clients do not depend on dashboard-specific behavior
 - make database restore bounded, validated, safety-backed-up, and atomic

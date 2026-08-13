@@ -1,68 +1,70 @@
-# VerbaNode v0.8.1 — Architecture Hardening
+# VerbaNode v0.8.2 — Capability Foundation
 
-v0.8.1 is a stabilization release on top of the v0.8.0 architecture foundation. It does not add mobile discovery/pairing or robot hardware providers. The goal is to make the existing backend easier to maintain and safer for multiple future clients before new platform features are added.
+v0.8.2 builds on the v0.8.0 architecture foundation and v0.8.1 hardening work. This release introduces the provider boundary needed for future robot, display, camera, serial, MQTT, filesystem, network, and other controlled capabilities without implementing any specific robot hardware yet.
 
-## API modularization
+## Capability provider framework
 
-`app/main.py` is now primarily application composition and lifecycle code. The runtime-heavy endpoint groups have been extracted into dedicated routers:
+A new `app/capabilities` package provides:
 
-- `app/api/system.py` — root, health, launcher control, bootstrap, system status, and pipeline status
-- `app/api/diagnostics.py` — diagnostics snapshot, self-test, logs, export, and soak testing
-- `app/api/audio.py` — device discovery/refresh, audio engine controls, device tests, and conversation runtime settings
-- `app/api/ai.py` — AI engine restart, ASR reload/profile test/benchmark, and Kokoro reload
-- `app/api/tts.py` — Edge voice catalogue/preview and script TTS preview
-- `app/api/runtime_payloads.py` — shared audio-device and hardware payload helpers
+- `CapabilityProvider` — stable asynchronous provider interface
+- `CapabilityRegistry` — duplicate-safe capability/provider registration
+- `CapabilityService` — bounded execution, timeout, expiry, cancellation, active-operation tracking, and provider lifecycle
+- provider-neutral capability descriptors, requests, and normalized results
+- namespaced permission validation
 
-The existing routers for authentication, actions, agents, information, scripts, plugins, conversations, models, and backup/restore remain unchanged as the public client-neutral API surface.
+Plugins can now use `PluginContext.gateway.invoke(...)` to request a registered capability. Capability names enforce manifest permissions before execution; for example, `robot.navigate` requires `robot`, `display.show` requires `display`, and `camera.capture` requires `camera`.
 
-## Request correlation and API errors
+External Python plugins are still trusted code. This provider boundary is the supported architecture for first-party physical/service integrations, not an operating-system sandbox.
 
-- Every REST request receives an `X-Request-ID` response header.
-- A valid caller-supplied `X-Request-ID` is preserved, allowing a future mobile client to correlate its request with VerbaNode logs.
-- Missing or unsafe IDs are replaced with a generated request ID.
-- HTTP and validation failures now include a structured `error` object with `code`, `message`, and `request_id`; validation failures also include details.
-- The legacy top-level `detail` field is retained so the current browser and older clients continue to work.
-- The standard backend log format includes the current request ID.
-- PIN login throttling/invalid-PIN responses now use the same structured error metadata while retaining `status` and `retry_after_seconds` compatibility fields.
+## Execution limits and cancellation
 
-## Controller policy cleanup
+Capability execution now has configurable:
 
-The old takeover approval flow was no longer part of the actual authorization policy, so v0.8.1 removes its dead code:
+- global concurrency limit
+- per-provider concurrency ceiling
+- execution timeout
+- cancellation-hook timeout
+- provider shutdown timeout
+- maximum argument payload size
+- default and maximum TTL
 
-- removed takeover request storage and timeout handling
-- removed `/api/auth/takeover/...` polling/respond routes
-- removed takeover request/response schemas
-- removed the dashboard waiting loop and approval modal
-- removed the unused `force_takeover` field
+Active provider operations are tied to their parent plugin action. Cancelling an active action propagates into its provider operation, and providers can implement their own best-effort hardware/service cancellation hook.
 
-The policy is now explicit: VerbaNode has one active controller session, and a client that supplies the correct PIN may obtain control immediately. The previous active controller is notified and disconnected.
+Authenticated APIs added:
 
-This is still the temporary LAN controller policy. Trusted-device pairing and revocation are intentionally deferred until the mobile-client phase.
+- `GET /api/capabilities`
+- `POST /api/capabilities/actions/{operation_id}/cancel`
+- `POST /api/actions/{action_id}/cancel`
 
-## Action concurrency hardening
+No generic remote capability-execution API is added in this release.
 
-The v0.8.0 SQLite action ledger remains the persistent authority. v0.8.1 closes an in-process race window by reserving the action completion future before claiming the action in SQLite. Multiple same-loop callers with the same explicit `action_id` therefore share one leader execution reliably.
+## Persistent action expiry / migration v3
 
-Late completion also no longer overwrites an action that has already left `pending`/`running`, protecting interrupted/terminal ledger state from stale workers.
+The action ledger advances to schema version 3 and adds `expires_at`. Expired actions become terminal and are not executed after their deadline. Expiry is also considered during stale-action recovery, preventing old physical commands from becoming valid again after a restart.
 
-## Browser modularization
+## Existing 0.8 architecture retained
 
-The dashboard remains plain browser JavaScript—no framework migration. Diagnostics rendering and refresh logic has moved into `app/static/js/diagnostics.js`, loaded before the main dashboard script. This is the first incremental split of the large `app.js` while keeping existing behavior and deployment unchanged.
+v0.8.2 retains:
 
-## Mobile/discovery scope
+- modular FastAPI routers
+- WebSocket protocol v1
+- restart-safe SQLite action idempotency
+- structured API errors and `X-Request-ID`
+- hardened backup/restore
+- one source `run.bat`
+- existing browser dashboard behavior
 
-Still intentionally **not included** in v0.8.1:
+## Deferred scope
 
-- mobile application
+Still intentionally not included:
+
+- mobile app
 - mDNS/Bonjour LAN discovery
 - QR/device pairing
-- trusted-device credentials/revocation
-- Bluetooth discovery
+- trusted-device credentials and revocation
 - cloud relay / Internet remote control
 - robot-specific hardware providers
 
-Both the web dashboard and future mobile application should continue to target the same REST and WebSocket contracts.
-
 ## Validation status
 
-The clean v0.8.1 source tree passes **178 automated tests**, Python compilation, dashboard JavaScript syntax validation, router duplication checks, and source-helper import checks. A final target-machine test of `run.bat`, `build_windows.bat`, the generated EXE, and the installer is still recommended before publishing the release.
+The clean v0.8.2 source tree passes **187 automated tests** and Python compilation in the build environment used to assemble this update. Dashboard JavaScript syntax and Windows target-machine source/EXE/installer smoke tests should still be run before publishing the release.

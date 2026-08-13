@@ -59,8 +59,14 @@ class ToolService:
         arguments: dict[str, Any] | None = None,
         *,
         action_id: str | None = None,
+        expires_in_seconds: float | None = None,
     ) -> dict[str, Any]:
-        return await self.manager.execute(name, arguments, action_id=action_id)
+        return await self.manager.execute(
+            name,
+            arguments,
+            action_id=action_id,
+            expires_in_seconds=expires_in_seconds,
+        )
 
     def format_result(
         self,
@@ -94,6 +100,18 @@ class ToolService:
 
     def action_status(self, action_id: str) -> dict[str, Any] | None:
         return self.manager.action_status(action_id)
+
+    async def cancel_action(self, action_id: str) -> dict[str, Any] | None:
+        return await self.manager.cancel_action(action_id)
+
+    def capability_status(self) -> dict[str, Any]:
+        return self.manager.capability_status()
+
+    async def cancel_capability_operation(self, operation_id: str) -> bool:
+        return await self.manager.cancel_capability_operation(operation_id)
+
+    def register_capability_provider(self, provider: Any) -> None:
+        self.manager.register_capability_provider(provider)
 
 
 # Compatibility exports for code that imports the old module-level constants.
