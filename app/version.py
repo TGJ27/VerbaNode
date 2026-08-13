@@ -1,2 +1,2 @@
-APP_VERSION = "0.7.7"
-BUILD_LABEL = "pre-major-hardening"
+APP_VERSION = "0.8.1"
+BUILD_LABEL = "architecture-hardening"

@@ -16,3 +16,10 @@ Report security issues privately to the repository maintainer rather than openin
 - External plugins are trusted local Python code. Manifest permissions and the capability gateway establish the supported permission-checked API path, but they do not create a Python security sandbox.
 - Review external plugin source before enabling capabilities such as `robot`, `shell`, `filesystem_write`, `camera`, `microphone`, `serial`, or `mqtt`.
 - Capability action audit logs can contain tool arguments and operational metadata; treat them as potentially sensitive local logs.
+
+## v0.8 action and restore safety
+
+- Capability `action_id` values are persisted in SQLite and bound to the plugin plus canonical argument payload. Do not reuse an action ID for a different physical command.
+- The action ledger can contain capability arguments, results, errors, and operational timestamps. Protect the VerbaNode database as sensitive local state.
+- An action left unfinished by a crashed process is treated conservatively and is not automatically re-executed. Use a new action ID only after the operator/backend has determined the real hardware state.
+- Backup restore accepts only bounded ZIP/database sizes, validates the manifest/schema and SQLite integrity, creates a pre-restore safety backup, and uses an atomic replacement path. Keep backup files private because they contain agents, conversations, settings, and other local state.

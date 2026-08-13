@@ -152,9 +152,10 @@ def test_edge_voice_dropdown_and_preview_controls_are_in_agent_editor() -> None:
     html = (root / "app" / "static" / "index.html").read_text(encoding="utf-8")
     javascript = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
     main = (root / "app" / "main.py").read_text(encoding="utf-8")
+    tts_api = (root / "app" / "api" / "tts.py").read_text(encoding="utf-8")
     assert 'id="edgeVoiceSelect"' in html
     assert 'id="edgeVoiceLocaleFilter"' in html
     assert 'id="previewEdgeVoiceBtn"' in html
     assert "function renderEdgeVoiceOptions" in javascript
-    assert '"/api/tts/edge-voices"' in main
-    assert '"/api/tts/edge-voice-preview"' in main
+    assert '"/api/tts/edge-voices"' in tts_api
+    assert '"/api/tts/edge-voice-preview"' in tts_api

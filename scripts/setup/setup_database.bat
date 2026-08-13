@@ -2,6 +2,12 @@
 setlocal EnableExtensions
 cd /d "%~dp0..\.."
 
+if defined PYTHONPATH (
+  set "PYTHONPATH=%CD%;%PYTHONPATH%"
+) else (
+  set "PYTHONPATH=%CD%"
+)
+
 if not defined VERBANODE_CONDA_ENV set "VERBANODE_CONDA_ENV=verbanode"
 call :find_conda
 if errorlevel 1 (

@@ -54,7 +54,6 @@ class Settings(BaseSettings):
     ssl_certfile: Path | None = None
     ssl_keyfile: Path | None = None
     controller_timeout_seconds: int = 45
-    takeover_timeout_seconds: int = 30
     login_max_attempts: int = Field(default=5, ge=2, le=20)
     login_attempt_window_seconds: float = Field(default=60.0, ge=10.0, le=600.0)
     login_lockout_base_seconds: float = Field(default=5.0, ge=1.0, le=120.0)

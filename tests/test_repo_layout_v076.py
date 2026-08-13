@@ -48,6 +48,12 @@ def test_build_scripts_follow_clean_packaging_layout() -> None:
     assert "ROOT = Path(SPECPATH).resolve().parent" in spec
 
 
-def test_https_launcher_uses_reorganized_certificate_helper() -> None:
-    run_https = (ROOT / "run_https.bat").read_text(encoding="utf-8")
-    assert "scripts\\windows\\generate_local_cert.py" in run_https
+def test_source_launcher_is_single_import_safe_entrypoint() -> None:
+    assert (ROOT / "run.bat").exists()
+    assert not (ROOT / "run_http.bat").exists()
+    assert not (ROOT / "run_https.bat").exists()
+
+    run = (ROOT / "run.bat").read_text(encoding="utf-8")
+    assert "PYTHONPATH=%CD%" in run
+    assert 'python -c "import app"' in run
+    assert "python launcher.py" in run

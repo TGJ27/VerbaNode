@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import WebSocket
 
+from app.api.protocol import event_envelope
+
 
 class EventHub:
+    """Fan-out hub for versioned WebSocket events.
+
+    Protocol v1 keeps the legacy ``event`` field so the v0.7 dashboard and new
+    clients can coexist while mobile/native clients consume ``protocol`` and
+    ``type`` explicitly.
+    """
+
     def __init__(self) -> None:
         self._clients: dict[str, WebSocket] = {}
         self._lock = asyncio.Lock()
@@ -30,13 +38,25 @@ class EventHub:
             if websocket is None or current is websocket:
                 self._clients.pop(token, None)
 
-    async def send(self, token: str, event: str, data: Any = None) -> bool:
+    async def send(
+        self,
+        token: str,
+        event: str,
+        data: Any = None,
+        *,
+        request_id: str | None = None,
+    ) -> bool:
         async with self._lock:
             ws = self._clients.get(token)
         if ws is None:
             return False
         try:
-            await ws.send_text(json.dumps({"event": event, "data": data}, ensure_ascii=False))
+            await ws.send_text(
+                json.dumps(
+                    event_envelope(event, data, request_id=request_id),
+                    ensure_ascii=False,
+                )
+            )
             return True
         except Exception:
             await self.disconnect(token, ws)
@@ -45,7 +65,7 @@ class EventHub:
     async def broadcast(self, event: str, data: Any = None) -> None:
         async with self._lock:
             items = list(self._clients.items())
-        payload = json.dumps({"event": event, "data": data}, ensure_ascii=False)
+        payload = json.dumps(event_envelope(event, data), ensure_ascii=False)
         stale: list[tuple[str, WebSocket]] = []
         for token, ws in items:
             try:

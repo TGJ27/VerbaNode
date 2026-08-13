@@ -8,7 +8,9 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from fastapi.responses import JSONResponse
 
 from app.api.deps import Token
-from app.schemas import LoginRequest, TakeoverResponse
+from app.api.protocol import event_envelope, parse_command
+from app.http import api_error_response
+from app.schemas import LoginRequest
 from app.state import state
 
 LOGGER = logging.getLogger(__name__)
@@ -21,13 +23,28 @@ async def login(payload: LoginRequest, request: Request) -> JSONResponse:
     result = state.controller.login(
         payload.pin,
         payload.client_name,
-        payload.force_takeover,
         client_key=client_key,
     )
     if result["status"] == "rate_limited":
-        return JSONResponse(result, status_code=429)
+        retry = int(result.get("retry_after_seconds") or 1)
+        return api_error_response(
+            request,
+            status_code=429,
+            code="auth_rate_limited",
+            message="Too many PIN attempts",
+            extra={"status": "rate_limited", "retry_after_seconds": retry},
+        )
     if result["status"] == "invalid_pin":
-        return JSONResponse(result, status_code=401)
+        extra = {"status": "invalid_pin"}
+        if result.get("retry_after_seconds"):
+            extra["retry_after_seconds"] = int(result["retry_after_seconds"])
+        return api_error_response(
+            request,
+            status_code=401,
+            code="invalid_pin",
+            message="Incorrect PIN",
+            extra=extra,
+        )
     old_token = result.pop("old_token", None)
     if old_token:
         await state.events.send(
@@ -40,24 +57,6 @@ async def login(payload: LoginRequest, request: Request) -> JSONResponse:
         )
         await state.events.disconnect(old_token)
     return JSONResponse(result)
-
-
-@router.get("/api/auth/takeover/{request_id}")
-async def takeover_status(request_id: str) -> dict[str, Any]:
-    return state.controller.pending_status(request_id)
-
-
-@router.post("/api/auth/takeover/respond")
-async def takeover_respond(payload: TakeoverResponse, token: Token) -> dict[str, Any]:
-    result = state.controller.respond(token, payload.request_id, payload.approve)
-    if result["status"] == "unauthorized":
-        raise HTTPException(status_code=401, detail="Controller session is not active")
-    if result["status"] == "not_found":
-        raise HTTPException(status_code=404, detail="Takeover request not found")
-    old_token = result.pop("old_token", None)
-    if payload.approve and old_token:
-        await state.events.send(old_token, "control_revoked", {"reason": "takeover_approved"})
-    return result
 
 
 @router.post("/api/auth/logout")
@@ -94,13 +93,13 @@ async def websocket_endpoint(websocket: WebSocket, ticket: str = "") -> None:
     try:
         while True:
             payload = await websocket.receive_json()
+            command, _command_data, request_id = parse_command(payload)
             if not state.controller.validate(token):
-                await websocket.send_json({"event": "control_revoked", "data": {}})
+                await websocket.send_json(event_envelope("control_revoked", {}, request_id=request_id))
                 await websocket.close(code=4401)
                 return
-            command = payload.get("command")
             if command == "heartbeat":
-                await websocket.send_json({"event": "heartbeat", "data": {"ok": True}})
+                await websocket.send_json(event_envelope("heartbeat", {"ok": True}, request_id=request_id))
             elif command == "ptt_start":
                 await state.conversation.start_ptt()
             elif command == "ptt_stop":

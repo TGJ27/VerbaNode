@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.8.1 - Architecture hardening
+
+- Reduced `app/main.py` from roughly 1,100 lines in early v0.8 work to about 100 lines by extracting system/bootstrap, diagnostics, audio/runtime settings, AI, and TTS APIs into dedicated routers.
+- Added request correlation IDs to REST responses through `X-Request-ID`; safe caller-supplied IDs are preserved and invalid/missing IDs are generated automatically.
+- Added structured HTTP/validation error envelopes with stable error codes, request IDs, and optional details while preserving the existing top-level `detail` field for compatibility.
+- Added request IDs to the standard Python log format so backend log entries can be correlated with REST failures.
+- Removed the unused takeover approval request/poll/respond implementation and dashboard takeover modal. Correct PIN authentication remains the single controller authorization boundary and transfers control deterministically.
+- Tightened same-process action idempotency by reserving an in-flight leader future before the SQLite claim; concurrent duplicate callers now reliably join the same execution.
+- Prevented terminal/interrupted ledger rows from being overwritten by late completions by restricting completion updates to active actions.
+- Moved diagnostics rendering/refresh code into `app/static/js/diagnostics.js`, beginning incremental browser modularization without introducing a framework.
+- Updated the dashboard API client to understand structured error metadata (`code`, `request_id`, and details).
+- Kept mobile app, mDNS/Bonjour discovery, QR pairing, trusted-device credentials, cloud relay, and robot-specific hardware providers out of scope.
+- 178 automated tests passing in the clean v0.8.1 source tree.
+
+## v0.8.0 - Architecture foundation
+
+- Consolidated source startup into one root `run.bat`; removed the redundant `run_http.bat` and `run_https.bat` wrappers.
+- Fixed nested source helpers so `scripts/windows/generate_local_cert.py`, `scripts/windows/test_audio.py`, and `scripts/setup/setup_database.py` can always import `app.*` from the repository root.
+- Added explicit repository `PYTHONPATH` bootstrapping and source-runner regression tests to prevent `ModuleNotFoundError: No module named 'app'` from returning.
+- Added a persistent SQLite action ledger with globally bound action IDs, canonical argument hashes, terminal result replay, and crash-safe non-retry semantics.
+- Prevented concurrent duplicate explicit action IDs from executing the same capability twice.
+- Added authenticated action history/status APIs.
+- Added migration schema version 2 for the action ledger.
+- Split agents, information, scripts/queue, conversations, plugins, models, actions, and backup/restore into FastAPI routers, reducing the `app/main.py` monolith.
+- Added versioned WebSocket protocol v1 with request IDs and backwards-compatible event/legacy-command support.
+- Updated the web dashboard to send protocol-v1 WebSocket commands.
+- Hardened restore with streaming upload, bounded sizes, backup manifest/schema validation, SQLite integrity checks, automatic safety backup, and atomic database replacement.
+- Kept mobile app, LAN discovery, pairing, trusted-device credentials, cloud relay, and robot-specific providers explicitly out of scope for this release.
+- 171 automated tests passing in the assembled clean v0.8.0 source tree.
+
 ## v0.7.7 - Pre-major hardening and conversation UX
 
 - Added strict persistent chat Auto-scroll lock and new-message jump control.

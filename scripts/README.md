@@ -19,6 +19,6 @@ Python helpers live beside the corresponding BAT wrappers.
 
 - `scripts/windows/allow_firewall.bat` — add the private-network development firewall rule (run as Administrator).
 - `scripts/windows/test_audio.bat` — run the host audio diagnostic.
-- `scripts/windows/generate_local_cert.py` — HTTPS certificate helper used by `run_https.bat`.
+- `scripts/windows/generate_local_cert.py` — standalone HTTPS certificate helper; source startup normally lets `launcher.py` manage certificates automatically.
 
-Primary entry points intentionally remain in the repository root: `run.bat`, `run_http.bat`, `run_https.bat`, `build_windows.bat`, and `build_installer.bat`.
+Primary entry points intentionally remain in the repository root: `run.bat`, `build_windows.bat`, and `build_installer.bat`. `run.bat` is the only source-development launcher.

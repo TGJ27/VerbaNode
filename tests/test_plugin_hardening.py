@@ -160,9 +160,11 @@ def test_invalid_permissions_and_schema_are_rejected(tmp_path: Path) -> None:
 def test_hardening_api_and_ui_are_present() -> None:
     root = Path(__file__).resolve().parents[1]
     main = (root / "app" / "main.py").read_text(encoding="utf-8")
+    plugins_api = (root / "app" / "api" / "plugins.py").read_text(encoding="utf-8")
     javascript = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
     env = (root / ".env.example").read_text(encoding="utf-8")
-    assert '@app.post("/api/plugins/{plugin_id}/recover")' in main
+    assert '@router.post("/api/plugins/{plugin_id}/recover")' in plugins_api
+    assert "app.include_router(plugins_router)" in main
     assert "dataset.recoverPlugin" in javascript
     assert "VERBANODE_PLUGIN_FAILURE_THRESHOLD" in env
     assert "VERBANODE_PLUGIN_EXECUTION_TIMEOUT_SECONDS" in env

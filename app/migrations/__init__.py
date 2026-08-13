@@ -21,8 +21,37 @@ def _foundation_v1(_conn: sqlite3.Connection) -> None:
     """Baseline marker for databases created before numbered migrations existed."""
 
 
+def _persistent_action_ledger_v2(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS action_ledger (
+            action_id TEXT PRIMARY KEY,
+            plugin_id TEXT NOT NULL,
+            arguments_json TEXT NOT NULL,
+            arguments_hash TEXT NOT NULL,
+            status TEXT NOT NULL,
+            verified INTEGER NOT NULL DEFAULT 0,
+            result_json TEXT,
+            error TEXT,
+            latency_ms REAL,
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_action_ledger_created_at
+            ON action_ledger(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_action_ledger_plugin_created
+            ON action_ledger(plugin_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_action_ledger_status
+            ON action_ledger(status);
+        """
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "numbered_migration_foundation", _foundation_v1),
+    Migration(2, "persistent_action_ledger", _persistent_action_ledger_v2),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 

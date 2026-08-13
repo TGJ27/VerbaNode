@@ -14,8 +14,8 @@ from app.version import APP_VERSION, BUILD_LABEL
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_plugin_manager_can_disable_and_restore_a_capability() -> None:
-    service = ToolService(Settings(open_browser=False))
+def test_plugin_manager_can_disable_and_restore_a_capability(tmp_path: Path) -> None:
+    service = ToolService(Settings(db_path=tmp_path / "plugins.db", open_browser=False))
     all_ids = service.manager.registry.ids()
 
     disabled = service.set_plugin_enabled("get_current_time", False)
@@ -35,8 +35,8 @@ def test_plugin_manager_can_disable_and_restore_a_capability() -> None:
 
 
 @pytest.mark.asyncio
-async def test_disabled_plugin_cannot_execute_and_metrics_can_reset() -> None:
-    service = ToolService(Settings(open_browser=False))
+async def test_disabled_plugin_cannot_execute_and_metrics_can_reset(tmp_path: Path) -> None:
+    service = ToolService(Settings(db_path=tmp_path / "plugins.db", open_browser=False))
     service.set_plugin_enabled("get_location", False)
     assert await service.execute("get_location") == {
         "error": "Tool 'get_location' is disabled"
@@ -61,9 +61,9 @@ def test_disabled_plugin_ids_persist_in_existing_settings_table(tmp_path: Path) 
     assert json.loads(db.get_setting("disabled_builtin_plugins", "[]") or "[]") == disabled
 
 
-def test_plugin_state_schema_and_metadata() -> None:
+def test_plugin_state_schema_and_metadata(tmp_path: Path) -> None:
     assert PluginStateUpdate(enabled=False).enabled is False
-    service = ToolService(Settings(open_browser=False))
+    service = ToolService(Settings(db_path=tmp_path / "plugins.db", open_browser=False))
     weather = {item["id"]: item for item in service.plugin_health()}["get_weather"]
     assert weather["category"] == "Online information"
     assert weather["permissions"] == ["internet"]
@@ -75,6 +75,8 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
     css = (ROOT / "app" / "static" / "styles.css").read_text(encoding="utf-8")
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
+    system_api = (ROOT / "app" / "api" / "system.py").read_text(encoding="utf-8")
+    plugins_api = (ROOT / "app" / "api" / "plugins.py").read_text(encoding="utf-8")
 
     assert 'data-page="plugins"' in html
     assert 'id="page-plugins"' in html
@@ -82,8 +84,9 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     assert "function renderPlugins" in javascript
     assert "/api/plugins/reset-metrics" in javascript
     assert ".plugin-grid" in css
-    assert '.get("/api/plugins")' in main
-    assert '.put("/api/plugins/{plugin_id}")' in main
-    assert '"plugin_manager": True' in main
-    assert APP_VERSION == "0.7.7"
-    assert BUILD_LABEL == "pre-major-hardening"
+    assert '.get("/api/plugins")' in plugins_api
+    assert '.put("/api/plugins/{plugin_id}")' in plugins_api
+    assert 'app.include_router(plugins_router)' in main
+    assert '"plugin_manager": True' in system_api
+    assert APP_VERSION == "0.8.1"
+    assert BUILD_LABEL == "architecture-hardening"

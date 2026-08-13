@@ -1,6 +1,6 @@
 # VerbaNode Windows Application and Online Installer
 
-VerbaNode supports two parallel workflows: normal source development and a packaged Windows application. Packaging is intentionally additive; it does not replace the existing `run.bat` / `run_https.bat` development path.
+VerbaNode supports two parallel workflows: normal source development and a packaged Windows application. Packaging is intentionally additive; source development uses the single root `run.bat` entry point.
 
 ## Source development
 
@@ -10,7 +10,7 @@ Use:
 run.bat
 ```
 
-Source mode keeps repository-local development data paths and continues to use the HTTPS startup flow.
+Source mode keeps repository-local development data paths. `run.bat` exports the repository root for Python imports, activates the `verbanode` Conda environment, and starts `launcher.py`, which owns HTTPS certificate creation/refresh.
 
 ## Frozen Windows application
 

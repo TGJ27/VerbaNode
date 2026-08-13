@@ -108,8 +108,10 @@ def test_phase3_ui_and_endpoints_are_present() -> None:
     html = (root / "app" / "static" / "index.html").read_text(encoding="utf-8")
     javascript = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
     main = (root / "app" / "main.py").read_text(encoding="utf-8")
+    plugins_api = (root / "app" / "api" / "plugins.py").read_text(encoding="utf-8")
     assert 'id="reloadExternalPluginsBtn"' in html
     assert 'id="externalPluginDirectory"' in html
     assert "dataset.reloadPlugin" in javascript
-    assert '@app.post("/api/plugins/reload")' in main
-    assert '@app.post("/api/plugins/{plugin_id}/reload")' in main
+    assert '@router.post("/api/plugins/reload")' in plugins_api
+    assert '@router.post("/api/plugins/{plugin_id}/reload")' in plugins_api
+    assert "app.include_router(plugins_router)" in main

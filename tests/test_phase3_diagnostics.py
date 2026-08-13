@@ -116,16 +116,17 @@ def test_diagnostics_ui_and_endpoints_are_present() -> None:
     html = (ROOT / "app" / "static" / "index.html").read_text(encoding="utf-8")
     javascript = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
     main = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
+    diagnostics_api = (ROOT / "app" / "api" / "diagnostics.py").read_text(encoding="utf-8")
     assert 'data-settings-panel="diagnostics"' in html
     assert 'data-settings-panel-content="diagnostics"' in html
     assert 'id="runDiagnosticSelfTestBtn"' in html
     assert 'id="startSoakTestBtn"' in html
     assert 'id="downloadDiagnosticsBtn"' in html
     assert "function renderDiagnostics" in javascript
-    assert '@app.get("/api/diagnostics")' in main
-    assert '@app.post("/api/diagnostics/self-test")' in main
-    assert '@app.get("/api/diagnostics/export")' in main
-    assert APP_VERSION == "0.7.7"
+    assert '@router.get("/api/diagnostics")' in diagnostics_api
+    assert '@router.post("/api/diagnostics/self-test")' in diagnostics_api
+    assert '@router.get("/api/diagnostics/export")' in diagnostics_api
+    assert APP_VERSION == "0.8.1"
 
 
 def test_diagnostics_directory_is_runtime_only(tmp_path: Path) -> None:

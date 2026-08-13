@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 import uuid
-from collections import OrderedDict, deque
+from collections import deque
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +29,7 @@ from app.plugins.loader import (
 )
 from app.plugins.models import ExternalPluginFailure, PluginRuntimeState
 from app.plugins.registry import PluginRegistry
+from app.services.actions import ActionLedger
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,8 +88,13 @@ class PluginManager:
         self._external_failures: dict[str, ExternalPluginFailure] = {}
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
         self._reload_locks: dict[str, asyncio.Lock] = {}
-        self._action_cache: OrderedDict[tuple[str, str], dict[str, Any]] = OrderedDict()
         self._action_audit: deque[dict[str, Any]] = deque(maxlen=250)
+        action_stale_seconds = max(30.0, float(self.settings.plugin_execution_timeout_seconds) * 2.0)
+        self.action_ledger = ActionLedger(
+            self.settings.db_path, stale_after_seconds=action_stale_seconds
+        )
+        self.action_ledger.recover_stale(action_stale_seconds)
+        self._inflight_actions: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._action_audit_lock = threading.RLock()
         self._execution_semaphore = asyncio.Semaphore(
             int(self.settings.plugin_max_concurrent_executions)
@@ -211,12 +217,71 @@ class PluginManager:
             return {"error": f"Tool '{plugin_id}' is currently {runtime.status}"}
 
         resolved_action_id = str(action_id or uuid.uuid4())
-        cache_key = (plugin_id, resolved_action_id)
-        if action_id is not None:
-            cached = self._action_cache.get(cache_key)
-            if cached is not None:
-                self._action_cache.move_to_end(cache_key)
-                return dict(cached)
+        resolved_arguments = dict(arguments or {})
+
+        # Reserve the in-process completion future *before* touching SQLite.
+        # There is no await between the lookup and assignment, so two callers on
+        # the same event loop cannot both become the leader for one action ID.
+        # SQLite remains the cross-process/restart authority.
+        existing = self._inflight_actions.get(resolved_action_id)
+        if existing is not None:
+            return dict(await asyncio.shield(existing))
+
+        loop = asyncio.get_running_loop()
+        completion: asyncio.Future[dict[str, Any]] = loop.create_future()
+        self._inflight_actions[resolved_action_id] = completion
+        try:
+            claim = self.action_ledger.claim(
+                resolved_action_id, plugin_id, resolved_arguments
+            )
+            if claim.state == "conflict":
+                response = {
+                    "error": claim.detail or "action_id conflict",
+                    "_action": {
+                        "id": resolved_action_id,
+                        "success": False,
+                        "status": "conflict",
+                        "verified": False,
+                    },
+                }
+                completion.set_result(dict(response))
+                self._inflight_actions.pop(resolved_action_id, None)
+                return response
+            if claim.state == "replay" and claim.action is not None:
+                response = self.action_ledger.replay_payload(claim.action)
+                completion.set_result(dict(response))
+                self._inflight_actions.pop(resolved_action_id, None)
+                return response
+            if claim.state == "in_progress":
+                current = self.action_ledger.get(resolved_action_id)
+                if current is not None and current.get("status") not in {"pending", "running"}:
+                    response = self.action_ledger.replay_payload(current)
+                else:
+                    response = {
+                        "error": "Action is already in progress in another VerbaNode process",
+                        "_action": {
+                            "id": resolved_action_id,
+                            "success": False,
+                            "status": "running",
+                            "verified": False,
+                        },
+                    }
+                completion.set_result(dict(response))
+                self._inflight_actions.pop(resolved_action_id, None)
+                return response
+        except Exception as exc:
+            if not completion.done():
+                completion.set_exception(exc)
+                # This leader is the only consumer when claiming itself fails;
+                # retrieve the exception so asyncio does not report it as lost.
+                try:
+                    completion.exception()
+                except Exception:
+                    pass
+            self._inflight_actions.pop(resolved_action_id, None)
+            raise
+
+        self.action_ledger.mark_running(resolved_action_id)
 
         metric = self._metrics.setdefault(plugin_id, PluginMetrics())
         started = time.perf_counter()
@@ -228,10 +293,11 @@ class PluginManager:
 
         audit_status = "failed"
         audit_error: str | None = None
-        verified = True
+        verified = False
+        response_payload: dict[str, Any] | None = None
         try:
             result = await asyncio.wait_for(
-                self._execute_bounded(plugin, arguments, resolved_action_id),
+                self._execute_bounded(plugin, resolved_arguments, resolved_action_id),
                 timeout=float(self.settings.plugin_execution_timeout_seconds),
             )
             metric.successes += 1
@@ -243,7 +309,11 @@ class PluginManager:
             payload = result.as_tool_result()
             success = bool(result.success) and not bool(payload.get("error"))
             raw_status = str(result.status or "").strip()
-            status = "failed" if not success and raw_status in {"", "completed"} else (raw_status or "completed")
+            status = (
+                "failed"
+                if not success and raw_status in {"", "completed"}
+                else (raw_status or "completed")
+            )
             action_meta = {
                 "id": result.action_id or resolved_action_id,
                 "success": success,
@@ -256,8 +326,7 @@ class PluginManager:
             audit_status = status
             audit_error = str(payload.get("error")) if payload.get("error") else None
             verified = bool(result.verified)
-            if action_id is not None:
-                self._remember_action(cache_key, payload)
+            response_payload = payload
             return payload
         except asyncio.TimeoutError:
             message = (
@@ -269,11 +338,29 @@ class PluginManager:
             LOGGER.error(message)
             audit_status = "timed_out"
             audit_error = message
-            return {"error": message}
+            response_payload = {
+                "error": message,
+                "_action": {
+                    "id": resolved_action_id,
+                    "success": False,
+                    "status": "timed_out",
+                    "verified": False,
+                },
+            }
+            return response_payload
         except asyncio.CancelledError:
             metric.cancellations += 1
             audit_status = "cancelled"
             audit_error = "Execution cancelled"
+            response_payload = {
+                "error": audit_error,
+                "_action": {
+                    "id": resolved_action_id,
+                    "success": False,
+                    "status": "cancelled",
+                    "verified": False,
+                },
+            }
             raise
         except Exception as exc:
             message = f"Tool '{plugin_id}' failed: {exc}"
@@ -281,7 +368,16 @@ class PluginManager:
             LOGGER.exception("%s plugin '%s' failed", plugin.source.capitalize(), plugin_id)
             audit_status = "failed"
             audit_error = str(exc)
-            return {"error": message}
+            response_payload = {
+                "error": message,
+                "_action": {
+                    "id": resolved_action_id,
+                    "success": False,
+                    "status": "failed",
+                    "verified": False,
+                },
+            }
+            return response_payload
         finally:
             latency_ms = (time.perf_counter() - started) * 1000.0
             metric.executions += 1
@@ -294,22 +390,34 @@ class PluginManager:
                     tasks.discard(task)
                     if not tasks:
                         self._active_tasks.pop(plugin_id, None)
+            self.action_ledger.complete(
+                resolved_action_id,
+                status=audit_status,
+                verified=verified,
+                result=response_payload,
+                error=audit_error,
+                latency_ms=latency_ms,
+            )
             self._record_action_audit(
                 plugin_id=plugin_id,
                 action_id=resolved_action_id,
-                arguments=arguments or {},
+                arguments=resolved_arguments,
                 status=audit_status,
                 verified=verified,
                 latency_ms=latency_ms,
                 started_at=started_at,
                 error=audit_error,
             )
-
-    def _remember_action(self, key: tuple[str, str], payload: dict[str, Any]) -> None:
-        self._action_cache[key] = dict(payload)
-        self._action_cache.move_to_end(key)
-        while len(self._action_cache) > 256:
-            self._action_cache.popitem(last=False)
+            if not completion.done():
+                completion.set_result(dict(response_payload or self.action_ledger.replay_payload(
+                    self.action_ledger.get(resolved_action_id) or {
+                        "action_id": resolved_action_id,
+                        "status": audit_status,
+                        "verified": verified,
+                        "error": audit_error,
+                    }
+                )))
+            self._inflight_actions.pop(resolved_action_id, None)
 
     def _record_action_audit(
         self,
@@ -345,9 +453,10 @@ class PluginManager:
             LOGGER.debug("Could not append capability action audit log", exc_info=True)
 
     def action_audit(self, limit: int = 100) -> list[dict[str, Any]]:
-        with self._action_audit_lock:
-            items = list(self._action_audit)
-        return [dict(item) for item in items[-max(1, min(int(limit), 250)):]]
+        return self.action_ledger.list_recent(max(1, min(int(limit), 500)))
+
+    def action_status(self, action_id: str) -> dict[str, Any] | None:
+        return self.action_ledger.get(action_id)
 
     async def _execute_bounded(
         self,

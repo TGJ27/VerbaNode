@@ -120,9 +120,8 @@ def run_server() -> None:
 
 
 def run_source_mode() -> None:
-    # Preserve the existing developer workflow. run_https.bat still generates
-    # the certificate before invoking this file; this fallback also makes
-    # direct `python launcher.py` safe.
+    # Source mode owns HTTPS setup itself. The single root run.bat invokes this
+    # launcher directly, and direct `python launcher.py` remains safe as well.
     settings = get_settings()
     if not (
         settings.ssl_certfile

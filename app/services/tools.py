@@ -92,6 +92,9 @@ class ToolService:
     def action_audit(self, limit: int = 100) -> list[dict[str, Any]]:
         return self.manager.action_audit(limit)
 
+    def action_status(self, action_id: str) -> dict[str, Any] | None:
+        return self.manager.action_status(action_id)
+
 
 # Compatibility exports for code that imports the old module-level constants.
 _COMPATIBILITY_PLUGINS = builtin_plugins()

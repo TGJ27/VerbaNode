@@ -4,7 +4,6 @@ import math
 import secrets
 import threading
 import time
-import uuid
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -20,21 +19,12 @@ class ControllerSession:
     last_seen: float
 
 
-@dataclass
-class TakeoverRequest:
-    request_id: str
-    client_name: str
-    created_at: float
-    status: str = "pending"
-    token: str | None = None
-
 
 class ControllerManager:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._lock = threading.RLock()
         self.active: ControllerSession | None = None
-        self.pending: dict[str, TakeoverRequest] = {}
         self._login_failures: dict[str, deque[float]] = {}
         self._login_lock_until: dict[str, float] = {}
         self._ws_tickets: dict[str, tuple[str, float]] = {}
@@ -94,11 +84,9 @@ class ControllerManager:
         self,
         pin: str,
         client_name: str,
-        force_takeover: bool = False,
         *,
         client_key: str = "local",
     ) -> dict[str, Any]:
-        del force_takeover  # Correct PIN remains the authorization boundary.
         client_key = str(client_key or "unknown")
         with self._lock:
             now = time.monotonic()
@@ -120,7 +108,6 @@ class ControllerManager:
             old_token = self.active.token
             token = self._new_token()
             self.active = ControllerSession(token, client_name, now, now)
-            self.pending.clear()
             return {
                 "status": "granted",
                 "token": token,
@@ -189,40 +176,6 @@ class ControllerManager:
                 "client_name": self.active.client_name,
                 "connected_seconds": int(time.monotonic() - self.active.created_at),
             }
-
-    def pending_status(self, request_id: str) -> dict[str, Any]:
-        with self._lock:
-            req = self.pending.get(request_id)
-            if not req:
-                return {"status": "not_found"}
-            if (
-                req.status == "pending"
-                and time.monotonic() - req.created_at > self.settings.takeover_timeout_seconds
-            ):
-                req.status = "rejected"
-            result = {"status": req.status}
-            if req.status == "approved":
-                result["token"] = req.token
-                self.pending.pop(request_id, None)
-            return result
-
-    def respond(self, current_token: str, request_id: str, approve: bool) -> dict[str, Any]:
-        with self._lock:
-            if not self.validate(current_token):
-                return {"status": "unauthorized"}
-            req = self.pending.get(request_id)
-            if not req or req.status != "pending":
-                return {"status": "not_found"}
-            old_token = self.active.token if self.active else None
-            if approve:
-                new_token = self._new_token()
-                now = time.monotonic()
-                self.active = ControllerSession(new_token, req.client_name, now, now)
-                req.status = "approved"
-                req.token = new_token
-                return {"status": "approved", "old_token": old_token}
-            req.status = "rejected"
-            return {"status": "rejected"}
 
     def logout(self, token: str) -> None:
         with self._lock:

@@ -1,76 +1,68 @@
-# VerbaNode v0.7.7 — Pre-Major Hardening & Conversation UX
+# VerbaNode v0.8.1 — Architecture Hardening
 
-v0.7.7 is the final hardening/polish release before the next major capability-development phase. It keeps the existing Windows application, online installer, bilingual voice pipeline, plugin architecture, and development workflow while tightening chat UX, authentication, build reproducibility, database migration structure, and the future capability execution contract.
+v0.8.1 is a stabilization release on top of the v0.8.0 architecture foundation. It does not add mobile discovery/pairing or robot hardware providers. The goal is to make the existing backend easier to maintain and safer for multiple future clients before new platform features are added.
 
-### Web branding polish
+## API modularization
 
-- Replaced the legacy `VN` badge on the login screen and dashboard header with the VerbaNode application logo.
-- Aligned the dashboard favicon, static asset cache-busters, and HTML fallback version with v0.7.7.
+`app/main.py` is now primarily application composition and lifecycle code. The runtime-heavy endpoint groups have been extracted into dedicated routers:
 
-## Conversation UX
+- `app/api/system.py` — root, health, launcher control, bootstrap, system status, and pipeline status
+- `app/api/diagnostics.py` — diagnostics snapshot, self-test, logs, export, and soak testing
+- `app/api/audio.py` — device discovery/refresh, audio engine controls, device tests, and conversation runtime settings
+- `app/api/ai.py` — AI engine restart, ASR reload/profile test/benchmark, and Kokoro reload
+- `app/api/tts.py` — Edge voice catalogue/preview and script TTS preview
+- `app/api/runtime_payloads.py` — shared audio-device and hardware payload helpers
 
-- Added a persistent **Auto-scroll ON/OFF** control to the Conversation header.
-- **Auto-scroll ON** strictly locks the message history to the newest content; user scrolling is disabled while the lock is active.
-- **Auto-scroll OFF** unlocks normal mouse/trackpad/touch scrolling and new messages do not move the current viewport.
-- Added a floating **New messages** button while Auto-scroll is off; clicking it jumps to the newest content without re-enabling Auto-scroll.
-- The Auto-scroll preference is persisted in browser local storage.
-- Conversation header now exposes active agent language, STT model, TTS mode, and LLM context in compact chips.
-- Existing Listening / Transcribing / Thinking / Speaking status reporting remains visible above the message history.
+The existing routers for authentication, actions, agents, information, scripts, plugins, conversations, models, and backup/restore remain unchanged as the public client-neutral API surface.
 
-## Controller authentication hardening
+## Request correlation and API errors
 
-- Added per-client failed-PIN throttling with bounded exponential lockout.
-- Added configurable login attempt/window/lockout settings.
-- Removed the long-lived controller session token from the WebSocket URL.
-- Added short-lived, single-use WebSocket tickets created through an authenticated HTTPS endpoint.
-- WebSocket tickets are consumed once and cannot be replayed.
+- Every REST request receives an `X-Request-ID` response header.
+- A valid caller-supplied `X-Request-ID` is preserved, allowing a future mobile client to correlate its request with VerbaNode logs.
+- Missing or unsafe IDs are replaced with a generated request ID.
+- HTTP and validation failures now include a structured `error` object with `code`, `message`, and `request_id`; validation failures also include details.
+- The legacy top-level `detail` field is retained so the current browser and older clients continue to work.
+- The standard backend log format includes the current request ID.
+- PIN login throttling/invalid-PIN responses now use the same structured error metadata while retaining `status` and `retry_after_seconds` compatibility fields.
 
-## Plugin/capability execution foundation
+## Controller policy cleanup
 
-- Expanded `PluginResult` with verified action semantics while preserving the existing dictionary tool contract.
-- Every successful plugin execution now carries `_action` metadata with action ID, success state, status, and verification state.
-- Added explicit `action_id` support for idempotent retries; repeated execution with the same explicit action ID returns the cached verified result instead of performing the action again.
-- Added a permission-aware `CapabilityGateway` to `PluginContext` as the supported boundary for future robot/display/camera/device services.
-- Added persistent JSONL capability action audit logging plus an authenticated `/api/plugins/actions` endpoint.
-- Built-in weather now exercises the permission gateway for its declared `internet` capability.
+The old takeover approval flow was no longer part of the actual authorization policy, so v0.8.1 removes its dead code:
 
-> External plugins are still trusted local Python code and are not a security sandbox. The capability gateway establishes the supported permission-checked path for future physical capabilities.
+- removed takeover request storage and timeout handling
+- removed `/api/auth/takeover/...` polling/respond routes
+- removed takeover request/response schemas
+- removed the dashboard waiting loop and approval modal
+- removed the unused `force_takeover` field
 
-## Database migration foundation
+The policy is now explicit: VerbaNode has one active controller session, and a client that supplies the correct PIN may obtain control immediately. The previous active controller is notified and disconnected.
 
-- Added numbered schema migration infrastructure under `app/migrations/`.
-- Existing databases receive a `schema_version` marker without losing current data.
-- Existing legacy compatibility migrations remain in place; future schema changes can now be added as ordered numbered migrations.
+This is still the temporary LAN controller policy. Trusted-device pairing and revocation are intentionally deferred until the mobile-client phase.
 
-## Codebase hardening
+## Action concurrency hardening
 
-- Removed accidental duplicate SenseVoice cache helpers, duplicate Ollama checks, duplicate health-report keys, and a duplicate plugin-manager loop introduced during earlier patching.
-- Moved controller authentication and WebSocket endpoints from `app/main.py` into `app/api/auth.py` with shared auth dependencies under `app/api/deps.py`.
-- Added high-signal Ruff correctness checks to GitHub Actions.
-- Added dashboard JavaScript syntax validation to CI.
-- Full Python compile and regression tests remain part of CI.
+The v0.8.0 SQLite action ledger remains the persistent authority. v0.8.1 closes an in-process race window by reserving the action completion future before claiming the action in SQLite. Multiple same-loop callers with the same explicit `action_id` therefore share one leader execution reliably.
 
-## Reproducible Windows builds
+Late completion also no longer overwrites an action that has already left `pending`/`running`, protecting interrupted/terminal ledger state from stale workers.
 
-- `build_windows.bat` now uses a separate `verbanode-build` Conda environment by default, leaving the normal development environment untouched.
-- Windows packaging dependencies are pinned to the validated build versions.
-- `app/version.py` is the single application version source used by build scripts.
-- `build_installer.bat` reads `APP_VERSION` and passes it to Inno Setup, so the generated installer filename and metadata follow the application version automatically.
+## Browser modularization
 
-## Compatibility
+The dashboard remains plain browser JavaScript—no framework migration. Diagnostics rendering and refresh logic has moved into `app/static/js/diagnostics.js`, loaded before the main dashboard script. This is the first incremental split of the large `app.js` while keeping existing behavior and deployment unchanged.
 
-- Normal source development remains available through `run.bat` / `run_https.bat`.
-- Installed user data and model caches remain upgrade-safe.
-- Existing plugin result data fields and tool call behavior remain backwards compatible.
-- No user database reset is required.
+## Mobile/discovery scope
 
-## Validation
+Still intentionally **not included** in v0.8.1:
 
-- 160 automated tests passing.
-- Python compilation passes.
-- Dashboard JavaScript syntax check passes.
-- Application import/startup surface validates with FastAPI v0.7.7 metadata.
+- mobile application
+- mDNS/Bonjour LAN discovery
+- QR/device pairing
+- trusted-device credentials/revocation
+- Bluetooth discovery
+- cloud relay / Internet remote control
+- robot-specific hardware providers
 
-## Next
+Both the web dashboard and future mobile application should continue to target the same REST and WebSocket contracts.
 
-The next major release can build on the new verified action/capability contract for robot-specific functions such as status, display control, navigation, photobooth, and other physical integrations.
+## Validation status
+
+The clean v0.8.1 source tree passes **178 automated tests**, Python compilation, dashboard JavaScript syntax validation, router duplication checks, and source-helper import checks. A final target-machine test of `run.bat`, `build_windows.bat`, the generated EXE, and the installer is still recommended before publishing the release.

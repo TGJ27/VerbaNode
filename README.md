@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.7.7 is the pre-major hardening release for the Windows application/installer foundation. Validate installer/model behavior on the target PC before production deployment.
+> **Project status:** active development. v0.8.1 is the architecture-hardening release: the remaining runtime-heavy API domains are split out of the FastAPI entry point, controller takeover behavior is reduced to one deterministic valid-PIN policy, REST requests gain correlation IDs and structured error envelopes, duplicate action execution is tightened, and the dashboard begins splitting into independent JavaScript modules. Pairing/LAN discovery and the mobile application remain intentionally deferred.
 
 ---
 
@@ -79,6 +79,14 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.8.1 architecture hardening**
+  - `app/main.py` reduced to application composition/lifecycle; system, diagnostics, audio, AI, and TTS endpoints now live in dedicated routers
+  - REST correlation IDs (`X-Request-ID`) and structured API error envelopes while preserving the legacy `detail` field
+  - Same-event-loop duplicate action IDs reserve one leader before touching SQLite, with the persistent ledger remaining the cross-process authority
+  - Legacy takeover approval/polling routes and dashboard modal removed; a valid PIN deterministically transfers the single controller session
+  - Diagnostics dashboard code moved into `static/js/diagnostics.js` as the first browser modularization step
+  - v0.8.0 persistent action ledger, WebSocket protocol v1, migration v2, and hardened backup/restore remain the platform foundation
 
 - **v0.7.7 pre-major hardening**
   - Strict chat Auto-scroll lock with persistent preference and new-message jump control
@@ -283,14 +291,7 @@ Recommended development startup:
 run.bat
 ```
 
-`run.bat` uses the HTTPS development path so browser microphone access and LAN dashboard access behave consistently with the packaged application.
-
-Other development entry points:
-
-```powershell
-run_https.bat
-run_http.bat
-```
+`run.bat` is the single source-development entry point. It activates the `verbanode` Conda environment, makes the repository root importable, and starts `launcher.py`. The launcher creates or refreshes the local HTTPS certificate automatically so browser microphone access and LAN dashboard access behave consistently with the packaged application.
 
 ---
 
@@ -450,9 +451,7 @@ VerbaNode/
 ├── tests/                # Automated regression tests
 │
 ├── launcher.py           # Source/frozen launcher entry point
-├── run.bat               # Recommended development startup
-├── run_http.bat
-├── run_https.bat
+├── run.bat               # Single development startup entry point
 ├── build_windows.bat     # Build Windows application
 ├── build_installer.bat   # Build Windows installer
 │
@@ -544,20 +543,21 @@ See `SECURITY.md` for project security guidance.
 
 ## Current Direction
 
-The v0.7.x line completes the assistant and Windows deployment foundation. v0.7.7 adds the final pre-major hardening layer:
+The v0.8.x line is focused on **architecture before feature expansion**. v0.8.1 continues the v0.8.0 foundation and keeps one client-neutral API surface that the existing website and a future mobile application can both use.
 
-- bilingual English / Bahasa Indonesia operation
-- stable Audio Engine and AI Engine isolation
-- selective memory
-- modular plugins
-- native Windows launcher
-- packaged application and upgrade-safe online installer
-- strict conversation Auto-scroll control
-- hardened controller authentication/WebSocket setup
-- numbered DB migration foundation
-- verified capability results, idempotency IDs, and action audit logging
+Current v0.8.1 priorities:
 
-The next major development area is the **robot capability layer**, where VerbaNode plugins can expose verified robot actions such as status, display control, navigation, photobooth, and other physical capabilities without allowing the LLM to claim an action succeeded unless the backend confirms it.
+- keep the existing web dashboard fully supported
+- keep `app/main.py` limited to application composition and lifecycle while product domains live in API routers
+- keep capability action identity/result state persistent in SQLite instead of relying on process memory
+- keep duplicate/replayed capability requests single-execution across concurrent callers and restarts
+- version the WebSocket wire format so future clients do not depend on dashboard-specific behavior
+- make database restore bounded, validated, safety-backed-up, and atomic
+- keep schema upgrades ordered through numbered migrations
+
+**Intentionally deferred:** mobile application implementation, mDNS/Bonjour discovery, QR pairing, trusted-device credentials, cloud relay, and remote access. Those should be designed together with the mobile client rather than guessed into the backend early.
+
+After the v0.8 architecture line stabilizes, VerbaNode can build the robot capability layer on top of the persistent action contract and capability gateway.
 
 ---
 

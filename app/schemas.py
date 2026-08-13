@@ -18,12 +18,6 @@ from app.defaults import (
 class LoginRequest(BaseModel):
     pin: str
     client_name: str = "Browser"
-    force_takeover: bool = False
-
-
-class TakeoverResponse(BaseModel):
-    request_id: str
-    approve: bool
 
 
 class AgentCreate(BaseModel):
