@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.8.2 is the capability-foundation release: plugins can now route future robot/display/camera/serial/MQTT operations through a provider registry and bounded capability service with permission validation, cancellation, TTL/expiry, and execution limits. The persistent action ledger advances to schema v3 with action expiry. Pairing/LAN discovery and the mobile application remain intentionally deferred.
+> **Project status:** active development. v0.8.3 is the recovery-hardening release: database migration schema v4 adds durable migration history/identity and automatic pre-migration snapshots, while backup format v3 adds SHA-256/size verification and SQLite-native backup/restore with rollback safety. The v0.8.2 capability provider boundary remains intact. Pairing/LAN discovery and the mobile application remain intentionally deferred.
 
 ---
 
@@ -79,6 +79,15 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.8.3 recovery hardening**
+  - Numbered migration schema v4 is now the sole home for legacy schema upgrades
+  - SQLite `application_id`, `user_version`, and `schema_migrations` history make database identity/versioning explicit
+  - Existing older databases receive an automatic pre-migration recovery snapshot before upgrade
+  - Backup format v3 records database size and SHA-256 and verifies both on restore
+  - Restore rejects unsafe ZIP members, invalid/foreign/newer databases, and inconsistent schema metadata
+  - SQLite online backup is used for consistent WAL-safe snapshots and restore, with automatic pre-restore rollback
+  - Authenticated `/api/backup/status` exposes schema/backup format and automatic recovery snapshot inventory
 
 - **v0.8.2 capability foundation**
   - New `app/capabilities` provider contract and registry for future robot/device/service integrations
@@ -553,9 +562,9 @@ See `SECURITY.md` for project security guidance.
 
 ## Current Direction
 
-The v0.8.x line is focused on **architecture before feature expansion**. v0.8.2 adds the provider boundary that future physical capabilities will use while keeping one client-neutral API surface for the website and a future mobile application.
+The v0.8.x line is focused on **architecture before feature expansion**. v0.8.3 hardens state durability and recovery on top of the v0.8.2 provider boundary while keeping one client-neutral API surface for the website and a future mobile application.
 
-Current v0.8.2 priorities:
+Current v0.8.3 priorities:
 
 - keep the existing web dashboard fully supported
 - keep `app/main.py` limited to application composition and lifecycle while product domains live in API routers
@@ -564,8 +573,8 @@ Current v0.8.2 priorities:
 - enforce capability permission namespaces, TTL/expiry, cancellation, and bounded provider concurrency
 - keep duplicate/replayed capability requests single-execution across concurrent callers and restarts
 - version the WebSocket wire format so future clients do not depend on dashboard-specific behavior
-- make database restore bounded, validated, safety-backed-up, and atomic
-- keep schema upgrades ordered through numbered migrations
+- make database backup/restore bounded, checksum-verified, safety-backed-up, and SQLite-consistent
+- keep schema upgrades ordered through numbered migrations with durable history and pre-migration recovery snapshots
 
 **Intentionally deferred:** mobile application implementation, mDNS/Bonjour discovery, QR pairing, trusted-device credentials, cloud relay, and remote access. Those should be designed together with the mobile client rather than guessed into the backend early.
 

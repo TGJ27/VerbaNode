@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.8.3 - Recovery hardening
+
+- Advanced the numbered database migration system to schema v4 and moved remaining legacy column upgrades out of `Database.initialize()`.
+- Added ordered/contiguous migration registry validation, per-migration SQLite savepoints, downgrade refusal, `PRAGMA user_version`, VerbaNode `application_id`, and persistent `schema_migrations` history.
+- Added automatic pre-migration database recovery snapshots with bounded retention.
+- Upgraded ZIP backups to format v3 with database byte-size and SHA-256 integrity metadata while retaining validated v1/v2 restore compatibility.
+- Hardened restore archive parsing against path traversal, duplicate members, symlinks, oversized payloads, foreign databases, schema inconsistencies, and checksum/size tampering.
+- Replaced WAL file copying with SQLite-native online backup snapshots and SQLite-native restore with automatic pre-restore rollback.
+- Added authenticated `/api/backup/status` recovery/schema visibility.
+- Added v0.8.3 migration, backup-integrity, tamper, recovery-snapshot, restore, and retention regression coverage.
+- 197 automated tests passing in the clean v0.8.3 source tree.
+- Kept mobile discovery/pairing and robot-specific hardware providers intentionally out of scope.
+
 ## v0.8.2 - Capability foundation
 
 - Added a provider-neutral `app/capabilities` layer with provider interface, registry, requests/results, namespace validation, and bounded execution service.

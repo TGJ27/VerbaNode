@@ -11,6 +11,8 @@ from app.api.deps import Token
 from app.api.plugins import plugin_payload
 from app.api.runtime_payloads import audio_device_payload, hardware_status
 from app.config import ROOT_DIR
+from app.migrations import CURRENT_SCHEMA_VERSION
+from app.services.backup import BACKUP_FORMAT_VERSION
 from app.paths import CERT_DIR
 from app.process_control import request_shutdown
 from app.services.kokoro_voices import KOKORO_VOICES
@@ -109,6 +111,10 @@ async def bootstrap(token: Token) -> dict[str, Any]:
             "external_plugins": True,
             "persistent_action_ledger": True,
             "action_ledger_schema_version": 3,
+            "database_schema_version": CURRENT_SCHEMA_VERSION,
+            "backup_format_version": BACKUP_FORMAT_VERSION,
+            "migration_history": True,
+            "recovery_snapshots": True,
             "capability_provider_framework": True,
             "capability_provider_api_version": 1,
             "capability_action_expiry": True,

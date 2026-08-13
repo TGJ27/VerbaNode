@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -31,7 +30,13 @@ from app.defaults import (
     ROPI_TEMPERATURE,
     ROPI_TOP_P,
 )
-from app.migrations import apply_migrations
+from app.migrations import (
+    CURRENT_SCHEMA_VERSION,
+    MigrationError,
+    VERBANODE_APPLICATION_ID,
+    apply_migrations,
+    read_schema_version,
+)
 from app.services.kokoro_voices import voice_name
 
 
@@ -66,6 +71,18 @@ class Database:
             conn.close()
 
     def initialize(self) -> None:
+        preexisting = self.path.exists() and self.path.stat().st_size > 0
+        if preexisting:
+            self._validate_existing_identity()
+        pre_migration_version = self.schema_version() if preexisting else CURRENT_SCHEMA_VERSION
+        if preexisting and pre_migration_version < CURRENT_SCHEMA_VERSION:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+            recovery_path = self.settings.backup_dir / (
+                f"pre-migration-v{pre_migration_version}-to-v{CURRENT_SCHEMA_VERSION}-{stamp}.db"
+            )
+            self.backup_to(recovery_path)
+            self.prune_recovery_backups()
+
         schema = """
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
@@ -172,38 +189,6 @@ class Database:
         """
         with self._write_lock, self.connect() as conn:
             conn.executescript(schema)
-            message_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()
-            }
-            if "stt_confidence" not in message_columns:
-                conn.execute("ALTER TABLE messages ADD COLUMN stt_confidence REAL")
-            if "stt_confidence_source" not in message_columns:
-                conn.execute("ALTER TABLE messages ADD COLUMN stt_confidence_source TEXT")
-            agent_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(agents)").fetchall()
-            }
-            if "max_tokens" not in agent_columns:
-                conn.execute(
-                    "ALTER TABLE agents ADD COLUMN max_tokens INTEGER NOT NULL DEFAULT 224"
-                )
-            if "language" not in agent_columns:
-                conn.execute(
-                    "ALTER TABLE agents ADD COLUMN language TEXT NOT NULL DEFAULT 'en'"
-                )
-            script_columns = {
-                row["name"] for row in conn.execute("PRAGMA table_info(scripts)").fetchall()
-            }
-            script_migrations = {
-                "language": "TEXT NOT NULL DEFAULT 'en'",
-                "tts_mode": "TEXT NOT NULL DEFAULT 'edge'",
-                "edge_voice": "TEXT NOT NULL DEFAULT 'en-US-AriaNeural'",
-                "kokoro_voice_id": "INTEGER NOT NULL DEFAULT 0",
-                "tts_rate": "REAL NOT NULL DEFAULT 1.0",
-                "tts_volume": "REAL NOT NULL DEFAULT 1.0",
-            }
-            for column, declaration in script_migrations.items():
-                if column not in script_columns:
-                    conn.execute(f"ALTER TABLE scripts ADD COLUMN {column} {declaration}")
             apply_migrations(conn)
         self._seed()
 
@@ -1090,10 +1075,110 @@ class Database:
                 (agent_id, "New conversation", now, now),
             )
 
-    # Backup
+    # Backup / recovery
+    def _validate_existing_identity(self) -> None:
+        """Refuse to initialize over a database that is clearly not VerbaNode."""
+        try:
+            with sqlite3.connect(self.path) as conn:
+                application_id = int(conn.execute("PRAGMA application_id").fetchone()[0])
+                if application_id not in {0, VERBANODE_APPLICATION_ID}:
+                    raise MigrationError(
+                        "Database application_id belongs to a different application"
+                    )
+                tables = {
+                    str(row[0])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    ).fetchall()
+                }
+                # An existing empty SQLite file is safe to initialize. Any populated
+                # legacy VerbaNode database must already contain both core tables.
+                if tables and not {"settings", "agents"}.issubset(tables):
+                    raise MigrationError(
+                        "Existing database does not look like a VerbaNode database"
+                    )
+        except MigrationError:
+            raise
+        except sqlite3.DatabaseError as exc:
+            raise MigrationError("Existing database is not valid SQLite") from exc
+
+    def prune_recovery_backups(self, keep: int | None = None) -> None:
+        if keep is None:
+            keep = self.settings.recovery_backup_retention_count
+        candidates = sorted(
+            (
+                path
+                for path in self.settings.backup_dir.glob("pre-*.db")
+                if path.is_file()
+            ),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for stale in candidates[max(1, int(keep)) :]:
+            stale.unlink(missing_ok=True)
+
+    def schema_version(self) -> int:
+        if not self.path.exists() or self.path.stat().st_size == 0:
+            return 0
+        try:
+            with sqlite3.connect(self.path) as conn:
+                return read_schema_version(conn)
+        except sqlite3.DatabaseError:
+            return 0
+
     def backup_to(self, destination: Path) -> Path:
+        """Create a consistent SQLite snapshot, including databases using WAL."""
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with self._write_lock, self.connect() as conn:
-            conn.execute("PRAGMA wal_checkpoint(FULL)")
-        shutil.copy2(self.path, destination)
+        destination.unlink(missing_ok=True)
+        with self._write_lock:
+            source = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
+            target = sqlite3.connect(destination)
+            try:
+                source.execute("PRAGMA busy_timeout=30000")
+                source.backup(target)
+                target.commit()
+                integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
+                if integrity != "ok":
+                    raise sqlite3.DatabaseError(
+                        f"SQLite backup failed integrity check: {integrity}"
+                    )
+            finally:
+                target.close()
+                source.close()
         return destination
+
+    def restore_from(self, source_path: Path, safety_path: Path | None = None) -> Path | None:
+        """Restore a validated SQLite database using SQLite's online backup API.
+
+        The existing database is snapshotted first when ``safety_path`` is supplied.
+        If initialization/migration fails, that snapshot is restored automatically.
+        """
+        source_path = Path(source_path)
+        if not source_path.is_file():
+            raise FileNotFoundError(source_path)
+        with self._write_lock:
+            if safety_path is not None and self.path.exists():
+                self.backup_to(safety_path)
+            try:
+                source = sqlite3.connect(source_path)
+                destination = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
+                try:
+                    source.backup(destination)
+                    destination.commit()
+                finally:
+                    destination.close()
+                    source.close()
+                self.initialize()
+            except Exception:
+                if safety_path is not None and Path(safety_path).is_file():
+                    recovery = sqlite3.connect(safety_path)
+                    destination = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
+                    try:
+                        recovery.backup(destination)
+                        destination.commit()
+                    finally:
+                        destination.close()
+                        recovery.close()
+                    self.initialize()
+                raise
+        return safety_path

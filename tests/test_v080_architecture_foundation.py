@@ -57,12 +57,12 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v080_metadata_and_schema_migration(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.2"
-    assert BUILD_LABEL == "capability-foundation"
+    assert APP_VERSION == "0.8.3"
+    assert BUILD_LABEL == "recovery-hardening"
 
     db = Database(_settings(tmp_path))
     db.initialize()
-    assert db.get_setting("schema_version") == "3"
+    assert db.get_setting("schema_version") == "4"
     with sqlite3.connect(tmp_path / "verbanode.db") as conn:
         tables = {
             row[0]
@@ -189,11 +189,13 @@ def test_main_is_router_oriented_and_mobile_ready_protocol_is_present() -> None:
     assert "type: `command.${command}`" in javascript
 
 
-def test_backup_router_streams_restore_and_writes_v2_manifest() -> None:
-    source = (ROOT / "app" / "api" / "backup.py").read_text(encoding="utf-8")
-    assert "MAX_BACKUP_UPLOAD_BYTES" in source
-    assert "await file.read(1024 * 1024)" in source
-    assert "state.db.backup_to(safety_path)" in source
-    assert "os.replace(staged, destination)" in source
-    assert '"format_version": BACKUP_FORMAT_VERSION' in source
-    assert '"product": "VerbaNode"' in source
+def test_backup_router_streams_restore_through_validated_backup_service() -> None:
+    api_source = (ROOT / "app" / "api" / "backup.py").read_text(encoding="utf-8")
+    service_source = (ROOT / "app" / "services" / "backup.py").read_text(encoding="utf-8")
+    assert "MAX_BACKUP_UPLOAD_BYTES" in api_source
+    assert "await file.read(1024 * 1024)" in api_source
+    assert "validate_backup_archive" in api_source
+    assert "state.db.restore_from" in api_source
+    assert "BACKUP_FORMAT_VERSION = 3" in service_source
+    assert '"sha256"' in service_source
+    assert '"product": "VerbaNode"' in service_source

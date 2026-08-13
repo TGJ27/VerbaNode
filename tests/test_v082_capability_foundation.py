@@ -138,14 +138,14 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
     )
 
 
-def test_v082_metadata_and_schema_v3(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.2"
-    assert BUILD_LABEL == "capability-foundation"
+def test_v082_capability_expiry_survives_current_schema(tmp_path: Path) -> None:
+    assert APP_VERSION == "0.8.3"
+    assert BUILD_LABEL == "recovery-hardening"
 
     settings = _settings(tmp_path)
     db = Database(settings)
     db.initialize()
-    assert db.get_setting("schema_version") == "3"
+    assert db.get_setting("schema_version") == "4"
     with sqlite3.connect(settings.db_path) as conn:
         columns = {
             row[1] for row in conn.execute("PRAGMA table_info(action_ledger)").fetchall()

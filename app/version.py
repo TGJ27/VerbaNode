@@ -1,2 +1,2 @@
-APP_VERSION = "0.8.2"
-BUILD_LABEL = "capability-foundation"
+APP_VERSION = "0.8.3"
+BUILD_LABEL = "recovery-hardening"

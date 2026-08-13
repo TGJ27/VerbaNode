@@ -88,5 +88,5 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     assert '.put("/api/plugins/{plugin_id}")' in plugins_api
     assert 'app.include_router(plugins_router)' in main
     assert '"plugin_manager": True' in system_api
-    assert APP_VERSION == "0.8.2"
-    assert BUILD_LABEL == "capability-foundation"
+    assert APP_VERSION == "0.8.3"
+    assert BUILD_LABEL == "recovery-hardening"

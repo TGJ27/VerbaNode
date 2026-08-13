@@ -1,58 +1,36 @@
-# VerbaNode v0.8.2 — Capability Foundation
+# VerbaNode v0.8.3 — Recovery Hardening
 
-v0.8.2 builds on the v0.8.0 architecture foundation and v0.8.1 hardening work. This release introduces the provider boundary needed for future robot, display, camera, serial, MQTT, filesystem, network, and other controlled capabilities without implementing any specific robot hardware yet.
+v0.8.3 focuses on database durability, upgrade safety, backup verification, and recovery. It builds on the v0.8.0 architecture foundation, v0.8.1 modularization, and v0.8.2 capability-provider foundation without expanding into mobile pairing/discovery or robot-specific hardware.
 
-## Capability provider framework
+## Migration schema v4
 
-A new `app/capabilities` package provides:
+The remaining ad-hoc legacy column upgrades have been moved into numbered migration v4. The migration registry is validated for ordered, contiguous versions and each migration runs under its own SQLite savepoint.
 
-- `CapabilityProvider` — stable asynchronous provider interface
-- `CapabilityRegistry` — duplicate-safe capability/provider registration
-- `CapabilityService` — bounded execution, timeout, expiry, cancellation, active-operation tracking, and provider lifecycle
-- provider-neutral capability descriptors, requests, and normalized results
-- namespaced permission validation
+Databases now carry three coordinated forms of schema identity:
 
-Plugins can now use `PluginContext.gateway.invoke(...)` to request a registered capability. Capability names enforce manifest permissions before execution; for example, `robot.navigate` requires `robot`, `display.show` requires `display`, and `camera.capture` requires `camera`.
+- the existing `settings.schema_version`
+- SQLite `PRAGMA user_version`
+- a `schema_migrations` history table containing version, name, fingerprint, and timestamp
 
-External Python plugins are still trusted code. This provider boundary is the supported architecture for first-party physical/service integrations, not an operating-system sandbox.
+VerbaNode also sets a dedicated SQLite `application_id`. A database claiming a schema newer than the running build is rejected rather than being modified by an older release.
 
-## Execution limits and cancellation
+Before an existing older database is upgraded, VerbaNode automatically creates a `pre-migration-*.db` recovery snapshot. Automatic pre-migration/pre-restore snapshots have bounded retention.
 
-Capability execution now has configurable:
+## Backup format v3
 
-- global concurrency limit
-- per-provider concurrency ceiling
-- execution timeout
-- cancellation-hook timeout
-- provider shutdown timeout
-- maximum argument payload size
-- default and maximum TTL
+New ZIP backups record the database byte size and SHA-256 digest in `backup.json`. Restore verifies those values before accepting the database.
 
-Active provider operations are tied to their parent plugin action. Cancelling an active action propagates into its provider operation, and providers can implement their own best-effort hardware/service cancellation hook.
+Restore validation now rejects unsafe ZIP paths, duplicate members, symlinks, oversized payloads, invalid SQLite databases, failed integrity checks, foreign application IDs, inconsistent schema metadata, and unsupported/newer backup formats. Existing v1/v2 VerbaNode backups remain supported when they validate successfully.
 
-Authenticated APIs added:
+## SQLite-native backup and restore
 
-- `GET /api/capabilities`
-- `POST /api/capabilities/actions/{operation_id}/cancel`
-- `POST /api/actions/{action_id}/cancel`
+Database snapshots now use SQLite's online backup API instead of filesystem-copying the WAL-backed database. Restore uses the same SQLite mechanism, creating a pre-restore safety snapshot first and automatically rolling back to it if replacement/migration fails.
 
-No generic remote capability-execution API is added in this release.
+Authenticated `GET /api/backup/status` exposes backup-format/schema status and the inventory of automatic recovery snapshots.
 
-## Persistent action expiry / migration v3
+## Existing v0.8 platform retained
 
-The action ledger advances to schema version 3 and adds `expires_at`. Expired actions become terminal and are not executed after their deadline. Expiry is also considered during stale-action recovery, preventing old physical commands from becoming valid again after a restart.
-
-## Existing 0.8 architecture retained
-
-v0.8.2 retains:
-
-- modular FastAPI routers
-- WebSocket protocol v1
-- restart-safe SQLite action idempotency
-- structured API errors and `X-Request-ID`
-- hardened backup/restore
-- one source `run.bat`
-- existing browser dashboard behavior
+v0.8.3 retains the modular REST routers, WebSocket protocol v1, persistent action ledger/idempotency, structured API errors and request IDs, capability provider boundary, TTL/expiry, cancellation, and the single source `run.bat` workflow.
 
 ## Deferred scope
 
@@ -65,6 +43,6 @@ Still intentionally not included:
 - cloud relay / Internet remote control
 - robot-specific hardware providers
 
-## Validation status
+## Validation
 
-The clean v0.8.2 source tree passes **187 automated tests** and Python compilation in the build environment used to assemble this update. Dashboard JavaScript syntax and Windows target-machine source/EXE/installer smoke tests should still be run before publishing the release.
+The clean v0.8.3 source tree passes **197 automated tests** and is validated with Python compilation, dashboard JavaScript syntax checks, duplicate-route checks, patch/full-source equivalence, and ZIP integrity before packaging. Windows source/EXE/installer smoke testing should still be performed on the target machine before publishing the release.

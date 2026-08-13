@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     port: int = 8002
     pin: str = "1234"
     db_path: Path = DATA_DIR / "verbanode.db"
+    backup_path: Path = BACKUP_DIR
+    recovery_backup_retention_count: int = Field(default=10, ge=1, le=100)
     ollama_url: str = "http://127.0.0.1:11434"
     default_model: str = "qwen3.5:0.8b"
     default_location: str = "Jakarta"
@@ -124,7 +126,9 @@ class Settings(BaseSettings):
 
     @property
     def backup_dir(self) -> Path:
-        path = BACKUP_DIR
+        path = self.backup_path
+        if not path.is_absolute():
+            path = DATA_DIR.parent / path
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -141,6 +145,8 @@ def get_settings() -> Settings:
     settings = Settings()
     if not settings.db_path.is_absolute():
         settings.db_path = DATA_DIR.parent / settings.db_path
+    if not settings.backup_path.is_absolute():
+        settings.backup_path = DATA_DIR.parent / settings.backup_path
     if not settings.kokoro_dir.is_absolute():
         settings.kokoro_dir = MODEL_DIR.parent / settings.kokoro_dir
     if not settings.tts_cache_path.is_absolute():
