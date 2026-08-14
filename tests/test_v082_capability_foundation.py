@@ -139,13 +139,13 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
 
 
 def test_v082_capability_expiry_survives_current_schema(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.5"
-    assert BUILD_LABEL == "stabilization"
+    assert APP_VERSION == "0.9.0"
+    assert BUILD_LABEL == "local-mobile"
 
     settings = _settings(tmp_path)
     db = Database(settings)
     db.initialize()
-    assert db.get_setting("schema_version") == "4"
+    assert db.get_setting("schema_version") == "5"
     with sqlite3.connect(settings.db_path) as conn:
         columns = {
             row[1] for row in conn.execute("PRAGMA table_info(action_ledger)").fetchall()
@@ -312,5 +312,5 @@ def test_capability_api_and_deferred_mobile_scope_are_explicit() -> None:
     assert '"capability_provider_framework": True' in client_contract
     assert '"capability_action_expiry": True' in client_contract
     assert '"capability_cancellation": True' in client_contract
-    assert '"mobile_pairing": False' in client_contract
-    assert '"lan_discovery": False' in client_contract
+    assert '"mobile_pairing": True' in client_contract
+    assert '"lan_discovery": True' in client_contract

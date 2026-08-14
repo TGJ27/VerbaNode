@@ -28,7 +28,7 @@ _SECURITY_HEADERS = {
     "Permissions-Policy": "camera=(), geolocation=(), microphone=(self)",
     "Content-Security-Policy": (
         "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
-        "form-action 'self'; img-src 'self' data:; font-src 'self' data:; "
+        "form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; "
         "style-src 'self' 'unsafe-inline'; script-src 'self'; "
         "connect-src 'self' ws: wss:; media-src 'self' blob:; worker-src 'self' blob:"
     ),

@@ -11,6 +11,9 @@ function activateSettingsPanel(panelName, remember = true) {
     if (!diagnosticsBackendSupported()) renderDiagnosticsUnavailable();
     else loadDiagnostics().catch(error => { if (error.status !== 404) toast(error.message, 'error'); });
   }
+  if (resolved === 'devices' && appState.token) {
+    loadTrustedDevices().catch(error => toast(error.message, 'error'));
+  }
   if (resolved === 'data' && appState.token) {
     loadBackupStatus().catch(error => toast(error.message, 'error'));
   }

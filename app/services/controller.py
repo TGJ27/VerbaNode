@@ -19,6 +19,7 @@ class ControllerSession:
     client_type: str
     client_version: str | None
     api_version: int | None
+    device_id: str | None
     created_at: float
     last_seen: float
 
@@ -97,6 +98,42 @@ class ControllerManager:
         self._login_failures.pop(client_key, None)
         self._login_lock_until.pop(client_key, None)
 
+    def _grant_session(
+        self,
+        client_name: str,
+        *,
+        client_type: str = "unknown",
+        client_version: str | None = None,
+        api_version: int | None = None,
+        device_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._expire_active_if_stale()
+        now = time.monotonic()
+        previous_client = self.active.client_name if self.active else None
+        old_token = self.active.token if self.active else None
+        token = self._new_token()
+        session_id = secrets.token_hex(12)
+        self.active = ControllerSession(
+            token=token,
+            session_id=session_id,
+            client_name=str(client_name),
+            client_type=str(client_type or "unknown"),
+            client_version=str(client_version) if client_version else None,
+            api_version=int(api_version) if api_version is not None else None,
+            device_id=str(device_id) if device_id else None,
+            created_at=now,
+            last_seen=now,
+        )
+        result: dict[str, Any] = {
+            "status": "granted",
+            "token": token,
+            "session_id": session_id,
+            "takeover": old_token is not None,
+        }
+        if old_token is not None:
+            result.update({"old_token": old_token, "previous_client": previous_client})
+        return result
+
     def login(
         self,
         pin: str,
@@ -116,37 +153,30 @@ class ControllerManager:
             if not secrets.compare_digest(pin, self.settings.pin):
                 return self._record_invalid_pin(client_key, now)
             self._clear_login_failures(client_key)
-
-            self._expire_active_if_stale()
-
-            previous_client = self.active.client_name if self.active else None
-            old_token = self.active.token if self.active else None
-            token = self._new_token()
-            session_id = secrets.token_hex(12)
-            self.active = ControllerSession(
-                token=token,
-                session_id=session_id,
-                client_name=str(client_name),
-                client_type=str(client_type or "unknown"),
-                client_version=str(client_version) if client_version else None,
-                api_version=int(api_version) if api_version is not None else None,
-                created_at=now,
-                last_seen=now,
+            return self._grant_session(
+                client_name,
+                client_type=client_type,
+                client_version=client_version,
+                api_version=api_version,
             )
-            result: dict[str, Any] = {
-                "status": "granted",
-                "token": token,
-                "session_id": session_id,
-                "takeover": old_token is not None,
-            }
-            if old_token is not None:
-                result.update(
-                    {
-                        "old_token": old_token,
-                        "previous_client": previous_client,
-                    }
-                )
-            return result
+
+    def login_trusted_device(
+        self,
+        client_name: str,
+        *,
+        device_id: str,
+        client_type: str = "mobile",
+        client_version: str | None = None,
+        api_version: int | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            return self._grant_session(
+                client_name,
+                client_type=client_type,
+                client_version=client_version,
+                api_version=api_version,
+                device_id=device_id,
+            )
 
     def validate(self, token: str | None, touch: bool = True) -> bool:
         if not token:
@@ -214,6 +244,7 @@ class ControllerManager:
                 "client_type": self.active.client_type,
                 "client_version": self.active.client_version,
                 "api_version": self.active.api_version,
+                "device_id": self.active.device_id,
                 "connected_seconds": int(time.monotonic() - self.active.created_at),
             }
 

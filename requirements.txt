@@ -18,3 +18,7 @@ openai-whisper>=20240930
 modelscope>=1.22,<2.0
 psutil>=6.1,<8.0
 tzdata>=2024.1
+
+zeroconf>=0.150,<1.0
+qrcode>=8.2,<9.0
+cryptography>=44,<47

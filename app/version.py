@@ -1,2 +1,2 @@
-APP_VERSION = "0.8.5"
-BUILD_LABEL = "stabilization"
+APP_VERSION = "0.9.0"
+BUILD_LABEL = "local-mobile"

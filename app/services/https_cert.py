@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import ipaddress
+import ssl
 import os
 import shutil
 import socket
@@ -87,7 +90,14 @@ def _generate_with_cryptography(addresses: list[str]) -> None:
     except ImportError as exc:  # pragma: no cover - used by packaged build
         raise RuntimeError("Neither OpenSSL nor the bundled cryptography package is available") from exc
 
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    key = None
+    if KEY_FILE.exists():
+        try:
+            key = serialization.load_pem_private_key(KEY_FILE.read_bytes(), password=None)
+        except (ValueError, TypeError):
+            key = None
+    if key is None:
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name(
         [
             x509.NameAttribute(NameOID.COMMON_NAME, "VerbaNode Local"),
@@ -148,29 +158,63 @@ def _generate_with_openssl(openssl: str, addresses: list[str]) -> None:
         + "\n",
         encoding="utf-8",
     )
+    if KEY_FILE.exists():
+        command = [
+            openssl, "req", "-x509", "-new", "-key", str(KEY_FILE),
+            "-out", str(CERT_FILE), "-days", "3650", "-config", str(CONFIG_FILE),
+            "-extensions", "extensions",
+        ]
+    else:
+        command = [
+            openssl, "req", "-x509", "-nodes", "-newkey", "rsa:2048",
+            "-keyout", str(KEY_FILE), "-out", str(CERT_FILE), "-days", "3650",
+            "-config", str(CONFIG_FILE), "-extensions", "extensions",
+        ]
     subprocess.run(
-        [
-            openssl,
-            "req",
-            "-x509",
-            "-nodes",
-            "-newkey",
-            "rsa:2048",
-            "-keyout",
-            str(KEY_FILE),
-            "-out",
-            str(CERT_FILE),
-            "-days",
-            "3650",
-            "-config",
-            str(CONFIG_FILE),
-            "-extensions",
-            "extensions",
-        ],
+        command,
         check=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
+
+def certificate_fingerprint_sha256() -> str:
+    """Return the current local HTTPS certificate SHA-256 fingerprint."""
+    if not CERT_FILE.exists():
+        return ""
+    pem = CERT_FILE.read_text(encoding="ascii", errors="strict")
+    der = ssl.PEM_cert_to_DER_cert(pem)
+    return hashlib.sha256(der).hexdigest()
+
+
+
+def certificate_spki_sha256() -> str:
+    """Return a stable SHA-256 hash of the certificate SubjectPublicKeyInfo.
+
+    The local certificate can be regenerated when LAN addresses change. VerbaNode
+    keeps the existing private key during that refresh, so this SPKI pin remains
+    stable and is suitable for trusted local mobile clients.
+    """
+    if not CERT_FILE.exists():
+        return ""
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+    except ImportError:
+        return ""
+    cert = x509.load_pem_x509_certificate(CERT_FILE.read_bytes())
+    spki = cert.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return hashlib.sha256(spki).hexdigest()
+
+
+def certificate_spki_pin() -> str:
+    """Return the conventional sha256/base64 SPKI pin string."""
+    value = certificate_spki_sha256()
+    if not value:
+        return ""
+    return "sha256/" + base64.b64encode(bytes.fromhex(value)).decode("ascii")
 
 def ensure_local_certificate() -> tuple[Path, Path, list[str], bool]:
     CERT_DIR.mkdir(parents=True, exist_ok=True)

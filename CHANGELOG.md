@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.9.0 - Local mobile and trusted devices
+
+- Added schema v5 trusted-device registry with hashed device credentials, last-seen metadata, revocation, rename, and delete support.
+- Added short-lived QR and numeric-code pairing with memory-only pairing secrets and rate-limited public claims.
+- Added trusted-device controller authentication through `/api/auth/device-login` while retaining PIN login and the single-active-controller policy.
+- Added authenticated device-management and pairing APIs plus `/api/discovery/status`.
+- Added persistent VerbaNode instance identity and mobile/device feature negotiation to `/api/client-info`.
+- Added DNS-SD/mDNS advertisement on `_verbanode._tcp.local.` with Core/API/WS/instance/TLS identity metadata.
+- Added stable SHA-256 SPKI server identity and reuse of the existing HTTPS private key when certificate SANs are refreshed after LAN-address changes.
+- Added Settings → Devices web UI for QR/code pairing, discovery state, trusted-device rename/revoke/delete, and active-controller visibility.
+- Added `zeroconf`, `qrcode`, and explicit `cryptography` runtime dependencies and packaged collection support.
+- Updated the source firewall helper for both the configured VerbaNode TCP port and mDNS UDP 5353 on Private networks.
+- Added 0.9.0 local-mobile regression coverage; 222 Core tests pass.
+- Remains LAN-only: no cloud relay, Internet remote control, or multi-controller ownership is introduced.
+
 ## v0.8.5 - Stabilization
 
 - Added WebSocket heartbeat watchdogs, bounded reconnect backoff, session revalidation, and connection-generation protection in the browser client.

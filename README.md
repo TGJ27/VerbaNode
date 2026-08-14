@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.8.5 is the stabilization release that closes the v0.8 architecture sequence: client transport/reconnect behavior, controller expiry, crash-time action reconciliation, input bounds, browser security defaults, first-run PIN handling, frontend modularization, and release verification are hardened on top of the v0.8.4 client contract. Pairing/LAN discovery and the mobile application remain intentionally deferred.
+> **Project status:** active development. v0.9.0 is the local-mobile/trusted-device Core release built on the stabilized v0.8 architecture. It adds LAN discovery, QR/code pairing, trusted Android credentials, device revocation, and stable local TLS identity while keeping VerbaNode LAN-only. The native Android APK is maintained as a separate client project.
 
 ---
 
@@ -80,6 +80,16 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Start Menu / Desktop shortcuts
   - Uninstall support
 
+- **v0.9.0 local mobile & trusted devices**
+  - DNS-SD/mDNS advertisement for automatic same-Wi-Fi discovery
+  - QR and short-code pairing from Settings → Devices
+  - Persistent trusted-device registry with hashed credentials and revocation
+  - Stable HTTPS SPKI identity across certificate SAN refreshes
+  - Trusted-device login reuses the existing single-active-controller policy
+  - Manual IP/hostname connection remains available as a fallback
+  - LAN-only by design; no cloud relay or Internet remote control
+  - 222 automated Core tests pass in the clean v0.9.0 source tree
+
 - **v0.8.5 stabilization**
   - WebSocket heartbeat/watchdog, bounded reconnect backoff, session revalidation, and same-origin browser WebSocket guard
   - Stale controller cleanup invalidates outstanding one-time WebSocket tickets
@@ -97,7 +107,7 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - `/api/*` responses advertise VerbaNode/API/WebSocket versions and request correlation IDs
   - Explicit unsupported REST API versions receive a structured compatibility error; explicit unsupported WebSocket protocols receive `protocol_error` + close code `4406`
   - Dashboard transport/runtime/browser-microphone code is split into `runtime.js`, `client.js`, and `browser-ptt.js` without adding a frontend framework
-  - Current controller ownership remains single-active-controller; mobile pairing/discovery is still deferred
+  - Current controller ownership remains single-active-controller; v0.9.0 adds trusted Android handoff without concurrent ownership
   - 203 automated tests pass in the clean v0.8.4 source tree
 
 - **v0.8.3 recovery hardening**
@@ -117,7 +127,7 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Parent plugin actions can be cancelled through the authenticated action API, propagating cancellation into active provider work
   - Persistent action ledger schema v3 stores `expires_at` and treats expired actions as terminal/non-retryable
   - Authenticated `/api/capabilities` metadata exposes providers, limits, and currently active provider operations
-  - No robot-specific hardware provider, mobile pairing, or LAN discovery is included yet
+  - No robot-specific hardware provider or cloud/Internet relay is included; local mobile pairing/discovery is available in v0.9.0
 
 - **v0.8.1 architecture hardening**
   - `app/main.py` reduced to application composition/lifecycle; system, diagnostics, audio, AI, and TTS endpoints now live in dedicated routers
@@ -582,9 +592,9 @@ See `SECURITY.md` for project security guidance.
 
 ## Current Direction
 
-The v0.8.x line is the **architecture-before-feature-expansion** sequence. v0.8.5 closes that sequence by stabilizing the contracts and recovery behavior introduced from v0.8.0 through v0.8.4.
+The v0.8.x line was the **architecture-before-feature-expansion** sequence. v0.9.0 is the first feature line built on that foundation, adding local Android discovery/pairing/trusted-device support without adding cloud connectivity.
 
-Current v0.8.5 guarantees/priorities:
+Current v0.9.0 guarantees/priorities:
 
 - keep the existing web dashboard fully supported as one client of the shared REST/WebSocket backend
 - keep `app/main.py` limited to application composition and lifecycle while product domains live in API routers
@@ -598,7 +608,7 @@ Current v0.8.5 guarantees/priorities:
 - keep frontend responsibilities modular without a framework rewrite
 - run one release verifier locally, in CI, and before Windows packaging to catch version/route/source-tree regressions
 
-**Intentionally deferred:** mobile application implementation, mDNS/Bonjour discovery, QR pairing, trusted-device credentials, cloud relay, multi-controller ownership, and remote access. Those should be designed together with the next client phase rather than guessed into the v0.8 backend.
+**Intentionally excluded from Core v0.9.0:** cloud relay/Internet remote control, multi-controller ownership, and robot-specific physical providers. The native Android application is a separate project that consumes the local discovery/pairing/client contracts in this release.
 
 The next development line can build new client/device functionality on top of this stabilized backend rather than continuing architectural churn inside v0.8.
 

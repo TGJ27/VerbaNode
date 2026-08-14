@@ -57,12 +57,12 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v080_metadata_and_schema_migration(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.8.5"
-    assert BUILD_LABEL == "stabilization"
+    assert APP_VERSION == "0.9.0"
+    assert BUILD_LABEL == "local-mobile"
 
     db = Database(_settings(tmp_path))
     db.initialize()
-    assert db.get_setting("schema_version") == "4"
+    assert db.get_setting("schema_version") == "5"
     with sqlite3.connect(tmp_path / "verbanode.db") as conn:
         tables = {
             row[0]
@@ -186,8 +186,8 @@ def test_main_is_router_oriented_and_mobile_ready_protocol_is_present() -> None:
     assert '@app.get("/api/backup")' not in main
     assert '"websocket_protocol_version": PROTOCOL_VERSION' in client_contract
     assert '"persistent_action_ledger": True' in client_contract
-    assert '"mobile_pairing": False' in client_contract
-    assert '"lan_discovery": False' in client_contract
+    assert '"mobile_pairing": True' in client_contract
+    assert '"lan_discovery": True' in client_contract
     assert "parse_command(payload)" in auth
     assert "protocol: WEBSOCKET_PROTOCOL_VERSION" in javascript
     assert "type: `command.${command}`" in javascript

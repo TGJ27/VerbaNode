@@ -6,6 +6,7 @@ from app.api.protocol import API_VERSION, MIN_API_VERSION, PROTOCOL_VERSION
 from app.config import get_settings
 from app.migrations import CURRENT_SCHEMA_VERSION
 from app.services.backup import BACKUP_FORMAT_VERSION
+from app.services.https_cert import certificate_fingerprint_sha256, certificate_spki_sha256
 from app.version import APP_VERSION, BUILD_LABEL
 
 CLIENT_INFO_VERSION = 1
@@ -40,13 +41,15 @@ def feature_manifest() -> dict[str, Any]:
         "same_origin_websocket_guard": True,
         "security_headers": True,
         "bounded_uploads": True,
-        # Explicitly deferred until the dedicated mobile phase.
-        "mobile_pairing": False,
-        "lan_discovery": False,
+        "mobile_pairing": True,
+        "trusted_devices": True,
+        "device_revocation": True,
+        "lan_discovery": True,
+        "mdns_service_type": "_verbanode._tcp.local.",
     }
 
 
-def client_info_payload() -> dict[str, Any]:
+def client_info_payload(*, instance_id: str | None = None, instance_name: str | None = None) -> dict[str, Any]:
     """Public, non-secret contract used before a client authenticates."""
     settings = get_settings()
     return {
@@ -56,6 +59,10 @@ def client_info_payload() -> dict[str, Any]:
             "version": APP_VERSION,
             "build": BUILD_LABEL,
         },
+        "instance": {
+            "id": instance_id,
+            "name": instance_name or "VerbaNode",
+        },
         "api": {
             "version": API_VERSION,
             "minimum_supported_version": MIN_API_VERSION,
@@ -63,12 +70,24 @@ def client_info_payload() -> dict[str, Any]:
             "request_id_header": "X-Request-ID",
         },
         "authentication": {
-            "mode": "pin_session",
+            "mode": "pin_or_trusted_device",
             "login_endpoint": "/api/auth/login",
+            "device_login_endpoint": "/api/auth/device-login",
             "logout_endpoint": "/api/auth/logout",
             "session_header": SESSION_HEADER,
             "controller_policy": CONTROLLER_POLICY,
+            "pairing_claim_endpoint": "/api/pairing/claim",
             "idle_timeout_seconds": int(settings.controller_timeout_seconds),
+        },
+        "tls": {
+            "required": True,
+            "certificate_fingerprint_sha256": certificate_fingerprint_sha256(),
+            "certificate_spki_sha256": certificate_spki_sha256(),
+            "local_ca_endpoint": "/verbanode-local-ca.crt",
+        },
+        "discovery": {
+            "service_type": "_verbanode._tcp.local.",
+            "enabled": bool(settings.lan_discovery_enabled),
         },
         "websocket": {
             "endpoint": "/ws",
@@ -85,6 +104,9 @@ def client_info_payload() -> dict[str, Any]:
             "status": "/api/status",
             "heartbeat": "/api/heartbeat",
             "session": "/api/session",
+            "devices": "/api/devices",
+            "pairing_start": "/api/devices/pairing/start",
+            "pairing_claim": "/api/pairing/claim",
         },
         "features": feature_manifest(),
     }

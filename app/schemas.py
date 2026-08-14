@@ -184,3 +184,38 @@ class SettingsPatch(BaseModel):
 class PinChangeRequest(BaseModel):
     current_pin: str
     new_pin: str = Field(min_length=4, max_length=32)
+
+
+class DeviceLoginRequest(BaseModel):
+    device_id: str = Field(min_length=8, max_length=128)
+    device_token: str = Field(min_length=20, max_length=256)
+    client_name: str = Field(default="VerbaNode Android", min_length=1, max_length=120)
+    client_type: str = Field(default="mobile", min_length=1, max_length=32)
+    client_version: str | None = Field(default=None, max_length=64)
+    api_version: int | None = Field(default=None, ge=1, le=1000)
+
+
+class PairingStartRequest(BaseModel):
+    preferred_server_url: str | None = Field(default=None, max_length=500)
+
+
+class PairingClaimRequest(BaseModel):
+    pairing_id: str | None = Field(default=None, max_length=200)
+    secret: str | None = Field(default=None, max_length=300)
+    short_code: str | None = Field(default=None, min_length=6, max_length=12)
+    device_name: str = Field(default="Android device", min_length=1, max_length=120)
+    device_type: str = Field(default="mobile", min_length=1, max_length=32)
+    device_version: str | None = Field(default=None, max_length=64)
+    platform: str | None = Field(default="android", max_length=64)
+
+    @model_validator(mode="after")
+    def validate_pairing_proof(self) -> "PairingClaimRequest":
+        has_qr = bool(self.pairing_id and self.secret)
+        has_code = bool(self.short_code)
+        if not has_qr and not has_code:
+            raise ValueError("pairing_id + secret or short_code is required")
+        return self
+
+
+class DeviceRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)

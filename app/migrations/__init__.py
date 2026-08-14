@@ -124,11 +124,37 @@ def _schema_recovery_foundation_v4(conn: sqlite3.Connection) -> None:
     conn.execute(f"PRAGMA application_id={VERBANODE_APPLICATION_ID}")
 
 
+def _trusted_devices_v5(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trusted_devices (
+            device_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            device_type TEXT NOT NULL,
+            credential_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT,
+            revoked_at TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_trusted_devices_revoked "
+        "ON trusted_devices(revoked_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_trusted_devices_last_seen "
+        "ON trusted_devices(last_seen_at DESC)"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "numbered_migration_foundation", _foundation_v1),
     Migration(2, "persistent_action_ledger", _persistent_action_ledger_v2),
     Migration(3, "capability_action_expiry", _capability_action_expiry_v3),
     Migration(4, "schema_recovery_foundation", _schema_recovery_foundation_v4),
+    Migration(5, "trusted_mobile_devices", _trusted_devices_v5),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import secrets
 from typing import Annotated, Any
 
@@ -92,7 +93,7 @@ async def launcher_health() -> dict[str, Any]:
 @router.get("/api/client-info")
 async def client_info() -> dict[str, Any]:
     """Public compatibility metadata for browser, CLI, and future mobile clients."""
-    return client_info_payload()
+    return client_info_payload(instance_id=state.devices.instance_id(), instance_name=socket.gethostname().strip() or "VerbaNode")
 
 @router.get("/api/bootstrap")
 async def bootstrap(token: Token) -> dict[str, Any]:

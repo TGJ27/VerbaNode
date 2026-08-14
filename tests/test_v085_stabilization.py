@@ -27,18 +27,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_v085_metadata_and_transport_contract() -> None:
-    assert APP_VERSION == "0.8.5"
-    assert BUILD_LABEL == "stabilization"
+    assert APP_VERSION == "0.9.0"
+    assert BUILD_LABEL == "local-mobile"
     features = feature_manifest()
     assert features["websocket_heartbeat"] is True
     assert features["same_origin_websocket_guard"] is True
     assert features["security_headers"] is True
     assert features["bounded_uploads"] is True
-    assert features["mobile_pairing"] is False
-    assert features["lan_discovery"] is False
+    assert features["mobile_pairing"] is True
+    assert features["lan_discovery"] is True
 
     info = client_info_payload()
-    assert info["server"] == {"version": "0.8.5", "build": "stabilization"}
+    assert info["server"] == {"version": "0.9.0", "build": "local-mobile"}
     assert info["authentication"]["idle_timeout_seconds"] >= 30
     assert info["websocket"]["heartbeat_interval_seconds"] >= 5
     assert info["websocket"]["heartbeat_timeout_seconds"] >= 15
@@ -214,7 +214,7 @@ def test_dashboard_transport_and_feature_code_is_modularized() -> None:
         "data-recovery.js",
         "app.js",
     ]
-    positions = [index.index(f"/static/{'js/' if name != 'app.js' else ''}{name}?v=0.8.5") for name in expected]
+    positions = [index.index(f"/static/{'js/' if name != 'app.js' else ''}{name}?v=0.9.0") for name in expected]
     assert positions == sorted(positions)
     assert len(app_js.splitlines()) < 1000
     assert "function renderMessages(" not in app_js

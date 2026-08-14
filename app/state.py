@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.config import Settings, get_settings
+from app.api.protocol import API_VERSION, PROTOCOL_VERSION
 from app.db import Database
 from app.services.audio import HostAudioPlayer, HostAudioRecorder
 from app.services.audio_engine import (
@@ -19,6 +20,8 @@ from app.services.ai_engine import (
 )
 from app.services.controller import ControllerManager
 from app.services.diagnostics import DiagnosticsManager
+from app.services.devices import DeviceManager
+from app.services.discovery import LanDiscoveryAdvertiser
 from app.services.conversation import ConversationManager
 from app.services.events import EventHub
 from app.services.llm import OllamaService
@@ -35,6 +38,8 @@ class AppState:
     db: Database
     events: EventHub
     controller: ControllerManager
+    devices: DeviceManager
+    discovery: LanDiscoveryAdvertiser
     monitor: PipelineMonitor
     recorder: Any
     player: Any
@@ -109,6 +114,15 @@ def build_state() -> AppState:
     db.initialize()
     events = EventHub()
     controller = ControllerManager(settings)
+    devices = DeviceManager(db, pairing_ttl_seconds=settings.mobile_pairing_ttl_seconds)
+    from app.version import APP_VERSION
+    discovery = LanDiscoveryAdvertiser(
+        settings,
+        instance_id=devices.instance_id(),
+        version=APP_VERSION,
+        api_version=API_VERSION,
+        ws_version=PROTOCOL_VERSION,
+    )
     monitor = PipelineMonitor()
 
     audio_engine: AudioEngineSupervisor | None = None
@@ -217,6 +231,8 @@ def build_state() -> AppState:
         db=db,
         events=events,
         controller=controller,
+        devices=devices,
+        discovery=discovery,
         monitor=monitor,
         recorder=recorder,
         player=player,

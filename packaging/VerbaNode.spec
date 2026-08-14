@@ -49,6 +49,8 @@ for package in (
     "cryptography",
     "customtkinter",
     "PIL",
+    "zeroconf",
+    "qrcode",
 ):
     package_datas, package_binaries, package_hidden = safe_collect(package)
     datas += package_datas

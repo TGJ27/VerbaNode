@@ -15,6 +15,7 @@ from app.api.backup import router as backup_router
 from app.api.capabilities import router as capabilities_router
 from app.api.conversations import router as conversations_router
 from app.api.diagnostics import router as diagnostics_router
+from app.api.devices import router as devices_router
 from app.api.information import router as information_router
 from app.api.models import router as models_router
 from app.api.plugins import router as plugins_router
@@ -46,6 +47,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # also makes the application composition easy to audit during release reviews.
 app.include_router(system_router)
 app.include_router(auth_router)
+app.include_router(devices_router)
 app.include_router(actions_router)
 app.include_router(capabilities_router)
 app.include_router(agents_router)
@@ -66,6 +68,8 @@ async def startup_event() -> None:
     install_asyncio_exception_filter()
     state.diagnostics.install_logging()
     LOGGER.info("Diagnostics recorder initialized for VerbaNode %s", APP_VERSION)
+    if state.settings.lan_discovery_enabled:
+        await asyncio.to_thread(state.discovery.start)
     try:
         if state.audio_engine is not None:
             await asyncio.to_thread(state.audio_engine.start)
@@ -95,6 +99,7 @@ async def disable_ui_caching(request: Request, call_next):
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    await asyncio.to_thread(state.discovery.stop)
     state.diagnostics.shutdown()
     await state.conversation.stop_conversation(stop_tts=True)
     await state.script_queue.stop()

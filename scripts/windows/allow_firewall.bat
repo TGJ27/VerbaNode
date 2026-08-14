@@ -11,12 +11,19 @@ if errorlevel 1 (
   exit /b 1
 )
 netsh advfirewall firewall delete rule name="VerbaNode Standalone" >nul 2>&1
+netsh advfirewall firewall delete rule name="VerbaNode Discovery" >nul 2>&1
 netsh advfirewall firewall add rule name="VerbaNode Standalone" dir=in action=allow protocol=TCP localport=%PORT% profile=private
 if errorlevel 1 (
-  echo Could not create the firewall rule.
+  echo Could not create the VerbaNode TCP firewall rule.
   pause
   exit /b 1
 )
-echo Private-network access allowed on TCP port %PORT%.
+netsh advfirewall firewall add rule name="VerbaNode Discovery" dir=in action=allow protocol=UDP localport=5353 profile=private
+if errorlevel 1 (
+  echo Could not create the VerbaNode mDNS firewall rule.
+  pause
+  exit /b 1
+)
+echo Private-network access allowed on TCP port %PORT% and mDNS UDP port 5353.
 pause
 endlocal

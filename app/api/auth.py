@@ -22,7 +22,7 @@ from app.api.protocol import (
     parse_command,
 )
 from app.http import api_error_response
-from app.schemas import LoginRequest
+from app.schemas import DeviceLoginRequest, LoginRequest
 from app.state import state
 from app.version import APP_VERSION
 
@@ -43,6 +43,31 @@ def websocket_origin_allowed(websocket: WebSocket) -> bool:
         return False
     host = (websocket.headers.get("host") or "").strip().lower()
     return bool(host) and parsed.netloc.lower() == host
+
+
+async def _complete_grant(result: dict[str, Any], *, new_client: str) -> JSONResponse:
+    old_token = result.pop("old_token", None)
+    if old_token:
+        await state.events.send(
+            old_token,
+            "control_revoked",
+            {
+                "reason": "automatic_takeover",
+                "new_client": new_client,
+            },
+        )
+        await state.events.disconnect(old_token)
+    result.update(
+        {
+            "server_version": APP_VERSION,
+            "api_version": API_VERSION,
+            "websocket_protocol_version": PROTOCOL_VERSION,
+            "heartbeat_interval_seconds": float(state.settings.websocket_heartbeat_interval_seconds),
+            "heartbeat_timeout_seconds": float(state.settings.websocket_heartbeat_timeout_seconds),
+            "session": state.controller.active_info(),
+        }
+    )
+    return JSONResponse(result)
 
 
 @router.post("/api/auth/login")
@@ -88,28 +113,38 @@ async def login(payload: LoginRequest, request: Request) -> JSONResponse:
             message="Incorrect PIN",
             extra=extra,
         )
-    old_token = result.pop("old_token", None)
-    if old_token:
-        await state.events.send(
-            old_token,
-            "control_revoked",
-            {
-                "reason": "automatic_takeover",
-                "new_client": payload.client_name,
+    return await _complete_grant(result, new_client=payload.client_name)
+
+
+@router.post("/api/auth/device-login")
+async def device_login(payload: DeviceLoginRequest, request: Request) -> JSONResponse:
+    if payload.api_version is not None and not (MIN_API_VERSION <= payload.api_version <= API_VERSION):
+        return api_error_response(
+            request,
+            status_code=409,
+            code="incompatible_api_version",
+            message=f"Client API version {payload.api_version} is not supported",
+            extra={
+                "supported_api_versions": list(range(MIN_API_VERSION, API_VERSION + 1)),
+                "client_info": client_info_payload(),
             },
         )
-        await state.events.disconnect(old_token)
-    result.update(
-        {
-            "server_version": APP_VERSION,
-            "api_version": API_VERSION,
-            "websocket_protocol_version": PROTOCOL_VERSION,
-            "heartbeat_interval_seconds": float(state.settings.websocket_heartbeat_interval_seconds),
-            "heartbeat_timeout_seconds": float(state.settings.websocket_heartbeat_timeout_seconds),
-            "session": state.controller.active_info(),
-        }
+    device = state.devices.verify_device(payload.device_id, payload.device_token)
+    if not device:
+        return api_error_response(
+            request,
+            status_code=401,
+            code="invalid_device_credential",
+            message="Trusted device credential is invalid or revoked",
+        )
+    result = state.controller.login_trusted_device(
+        payload.client_name or str(device.get("name") or "Trusted device"),
+        device_id=payload.device_id,
+        client_type=payload.client_type,
+        client_version=payload.client_version,
+        api_version=payload.api_version,
     )
-    return JSONResponse(result)
+    return await _complete_grant(result, new_client=payload.client_name)
 
 
 @router.post("/api/auth/logout")
