@@ -9,13 +9,16 @@ import app.paths as paths
 from app.services import https_cert
 
 
-def test_source_mode_keeps_existing_repository_data_layout() -> None:
-    if paths.IS_FROZEN:
+def test_source_mode_uses_stable_user_data_by_default() -> None:
+    if paths.IS_FROZEN or paths.PORTABLE_SOURCE_MODE:
         return
-    assert paths.USER_DATA_ROOT == paths.SOURCE_ROOT
-    assert paths.DATA_DIR == paths.SOURCE_ROOT / "data"
+    assert paths.USER_DATA_ROOT != paths.SOURCE_ROOT
+    assert paths.USER_DATA_ROOT.name == "VerbaNode"
+    assert paths.DATA_DIR.parent == paths.USER_DATA_ROOT
+    assert paths.CERT_DIR.parent == paths.USER_DATA_ROOT
+    assert paths.DATA_DIR == paths.USER_DATA_ROOT / "data"
     assert paths.PLUGIN_DIR == paths.SOURCE_ROOT / "plugins"
-    assert paths.CONFIG_DIR == paths.SOURCE_ROOT
+    assert paths.CONFIG_DIR == paths.USER_DATA_ROOT / "config"
 
 
 def test_network_discovery_filters_loopback_link_local_and_virtual(monkeypatch) -> None:

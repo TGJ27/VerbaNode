@@ -10,10 +10,12 @@ from app.api.actions import router as actions_router
 from app.api.agents import router as agents_router
 from app.api.ai import router as ai_router
 from app.api.audio import router as audio_router
+from app.api.audio_library import router as audio_library_router
 from app.api.auth import router as auth_router
 from app.api.backup import router as backup_router
 from app.api.capabilities import router as capabilities_router
 from app.api.conversations import router as conversations_router
+from app.api.configuration_options import router as configuration_options_router
 from app.api.diagnostics import router as diagnostics_router
 from app.api.devices import router as devices_router
 from app.api.information import router as information_router
@@ -55,10 +57,12 @@ app.include_router(information_router)
 app.include_router(scripts_router)
 app.include_router(plugins_router)
 app.include_router(conversations_router)
+app.include_router(configuration_options_router)
 app.include_router(models_router)
 app.include_router(backup_router)
 app.include_router(diagnostics_router)
 app.include_router(audio_router)
+app.include_router(audio_library_router)
 app.include_router(ai_router)
 app.include_router(tts_router)
 
@@ -103,6 +107,7 @@ async def shutdown_event() -> None:
     state.diagnostics.shutdown()
     await state.conversation.stop_conversation(stop_tts=True)
     await state.script_queue.stop()
+    await state.audio_library.stop()
     if state.ai_engine is not None:
         await asyncio.to_thread(state.ai_engine.stop)
     await state.tools.shutdown_plugins()

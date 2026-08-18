@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.1 - Media library and queue UX
+
+- Added MP3/WAV Audio Library APIs and web Audio page.
+- Added shared configuration-option API for web/mobile selectors.
+- Added script queue loop, per-item post-play pause, and drag reorder support.
+- Moved source-mode identity/state to stable user data with one-time v0.9.0 migration.
+- Expanded chat space and moved the web auto-scroll toggle below the composer.
+- Advanced database schema to v6 and added v0.9.1 regression coverage.
+- Coordinated with VerbaNode Android v0.3.2.
+
+
 ## v0.9.0 - Local mobile and trusted devices
 
 - Added schema v5 trusted-device registry with hashed device credentials, last-seen metadata, revocation, rename, and delete support.

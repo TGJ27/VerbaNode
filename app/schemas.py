@@ -173,6 +173,14 @@ class QueueReorder(BaseModel):
     ordered_ids: list[int]
 
 
+class QueueItemUpdate(BaseModel):
+    pause_after_seconds: float = Field(default=0.0, ge=0.0, le=3600.0)
+
+
+class QueueSettingsUpdate(BaseModel):
+    loop: bool
+
+
 class QueueAction(BaseModel):
     action: Literal["play", "pause", "stop", "clear"]
 

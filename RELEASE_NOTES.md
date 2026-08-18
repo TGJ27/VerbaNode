@@ -1,102 +1,46 @@
-# VerbaNode v0.9.0 — Local Mobile & Trusted Devices
+# VerbaNode v0.9.1 — Media Library & Queue UX
 
-v0.9.0 is the first post-v0.8 feature release. It keeps VerbaNode LAN-only while adding the server-side foundation required by the separate native Android controller: automatic local discovery, QR/code pairing, persistent trusted-device credentials, device revocation, and stable local TLS identity.
+v0.9.1 is a coordinated Core/Web release for VerbaNode Android v0.3.2. It keeps the v0.9 LAN-only trusted-device model while adding host audio-file playback, richer script-queue controls, mobile configuration selectors, and stable installation identity across source/application updates.
 
-## Local discovery
+## Audio Library
 
-- VerbaNode advertises `_verbanode._tcp.local.` with DNS-SD/mDNS when discovery is enabled.
-- Discovery metadata includes product, Core version, REST API version, WebSocket protocol version, persistent instance ID, TLS requirement, and the stable HTTPS public-key identity.
-- `/api/discovery/status` exposes the current advertisement state to authenticated clients.
-- `scripts/windows/allow_firewall.bat` now adds Private-network rules for the VerbaNode TCP port and mDNS UDP 5353 when running from source.
-- The packaged installer keeps its existing Private-network program-scoped firewall rule, which covers the VerbaNode executable.
+- Added an **Audio** page to the web dashboard.
+- Upload `.mp3` and `.wav` files to the VerbaNode host.
+- Play/stop uploaded audio through the Windows host output device.
+- Rename and delete uploaded files.
+- Added authenticated `/api/audio-library` endpoints for web and Android clients.
+- Audio files live in the persistent VerbaNode user-data root so source-folder updates do not remove them.
 
-## Trusted local devices
+## Script Queue
 
-Database schema v5 adds a `trusted_devices` registry. A trusted Android device receives a high-entropy bearer credential during pairing; only its SHA-256 digest is stored in the VerbaNode database.
+- Added persistent **Loop queue** control.
+- Added per-item **pause after playback** from 0 to 3600 seconds.
+- Added drag reordering in the web dashboard and Android client.
+- Queue state now reports its loop setting to all clients.
+- Database schema advances to **v6** with `script_queue.pause_after_seconds`.
 
-Authenticated users can:
+## Client configuration contract
 
-- list trusted devices
-- rename devices
-- revoke credentials immediately
-- delete already-revoked devices
-- see which trusted device currently owns the single controller session
+- Added `/api/configuration-options` for languages, installed/default Ollama models, STT model choices, and TTS modes.
+- The Android client uses these options as selectors instead of free-text model/language fields.
 
-A revoked device cannot use its old credential again. PIN login remains available as the recovery/fallback authorization path.
+## Stable device identity across updates
 
-## QR and short-code pairing
+Source-mode Core runtime identity is now stored under the same persistent LocalAppData-style user-data root used by packaged builds, unless explicit portable mode is enabled. On first v0.9.1 source start, legacy repo-local `.env`, database, certificates, backups, diagnostics, runtime audio, audio library, and logs are copied into the stable user-data root when no stable copy exists.
 
-The web dashboard now has **Settings → Devices** with a local pairing flow:
+This preserves the Core `instance_id`, trusted-device database records, controller PIN, and HTTPS private key across clean source-folder replacements. An Android app or Core version change is not treated as a new device.
 
-1. Start a short-lived pairing request.
-2. Scan the QR code in VerbaNode Android or enter the displayed short code.
-3. The Android client proves the pairing secret locally over pinned HTTPS.
-4. VerbaNode issues a unique trusted-device credential.
-5. The phone can reconnect later without re-entering the dashboard PIN until the device is revoked.
+Set `VERBANODE_PORTABLE_MODE=true` only when intentionally using repo-local source runtime state.
 
-Pairing secrets remain memory-only and expire automatically. The public claim endpoint is rate-limited and never exposes an existing pairing secret.
+## Chat UX
 
-## Stable local HTTPS identity
+- Increased usable chat area in the web dashboard.
+- Moved the auto-scroll control below the composer.
+- Narrowed/lowered the side controls to prioritize conversation space.
 
-VerbaNode still generates its HTTPS certificate locally and never distributes a private key in source or release archives.
+## Compatibility
 
-For mobile trust, v0.9.0 introduces a SHA-256 SubjectPublicKeyInfo (SPKI) identity. When the machine's LAN IP addresses change, VerbaNode refreshes the certificate SANs while reusing the existing private key. This means:
-
-- certificate bytes/fingerprint may change after an IP change
-- the pinned public-key/SPKI identity remains stable
-- a trusted phone does not need to silently disable TLS validation
-
-`/api/client-info`, pairing payloads, and mDNS metadata expose the non-secret SPKI identity needed by local clients.
-
-## Mobile-aware authentication
-
-- Added `POST /api/auth/device-login` for trusted local devices.
-- Controller sessions can carry a `device_id` in addition to client type/name/version metadata.
-- Trusted-device login still enters the same existing single-active-controller model as the web dashboard.
-- Taking control from web to Android (or back) remains deterministic; v0.9.0 does not introduce concurrent controller ownership.
-
-## Client contract additions
-
-`GET /api/client-info` now advertises:
-
-- persistent VerbaNode instance ID/name
-- PIN-or-trusted-device authentication
-- trusted-device login endpoint
-- pairing endpoints
-- mDNS service type and enabled state
-- stable HTTPS SPKI identity
-- feature flags for discovery, pairing, trusted devices, and revocation
-
-The REST API remains v1 and WebSocket Protocol remains v1, so the new Android client builds on the contracts stabilized in v0.8 rather than requiring another backend rewrite.
-
-## Web dashboard device management
-
-The existing framework-free web dashboard now includes a Devices settings panel with:
-
-- discovery status
-- pairing QR code
-- short pairing code
-- pairing expiry/claim status
-- trusted-device list
-- rename
-- revoke
-- delete
-
-## Packaging and dependencies
-
-- Added `zeroconf` for DNS-SD/mDNS advertisement.
-- Added `qrcode` for local pairing QR generation.
-- Added an explicit `cryptography` dependency because stable certificate public-key identity is now a product feature.
-- Updated PyInstaller collection so the packaged Windows application includes the new mobile/discovery dependencies.
-
-## Security boundary
-
-v0.9.0 remains intentionally **LAN-only**. It does not add a cloud relay, Internet remote control, NAT traversal, or a VerbaNode account service.
-
-Manual server address entry remains supported even when mDNS discovery is available.
-
-## Validation
-
-The clean v0.9.0 Core tree passes **222 automated tests**, including new coverage for schema v5, QR/code pairing, trusted credentials, revocation, trusted controller sessions, and stable SPKI identity across certificate refreshes.
-
-The Android application is maintained as a separate project/repository and has its own release version. VerbaNode Core v0.9.0 provides the local discovery/pairing/device-management contract it consumes.
+- REST API version remains v1.
+- WebSocket protocol remains v1.
+- Trusted-device pairing remains LAN-only and single-active-controller.
+- Existing v0.9.0 databases migrate automatically to schema v6.

@@ -29,6 +29,8 @@ _GENERATED_PATTERNS = (
     "logs/*",
     "diagnostics/*",
     "runtime_audio/*",
+    "audio_library/*",
+    "backups/*",
 )
 
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.9.0';
+const FRONTEND_VERSION = '0.9.1';
 const CLIENT_API_VERSION = 1;
 const WEBSOCKET_PROTOCOL_VERSION = 1;
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
@@ -20,6 +20,9 @@ const appState = {
   plugins: { plugins: [], summary: {} },
   scripts: [],
   queue: [],
+  queueLoop: false,
+  audioLibrary: [],
+  audioLibraryPlaying: null,
   models: [],
   kokoroVoices: [],
   edgeVoices: { voices: [], source: 'built-in-fallback', error: null },

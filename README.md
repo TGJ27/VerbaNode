@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.9.0 is the local-mobile/trusted-device Core release built on the stabilized v0.8 architecture. It adds LAN discovery, QR/code pairing, trusted Android credentials, device revocation, and stable local TLS identity while keeping VerbaNode LAN-only. The native Android APK is maintained as a separate client project.
+> **Project status:** active development. v0.9.1 builds on the v0.9 local-mobile/trusted-device foundation with a host Audio Library, richer script-queue controls, shared client configuration selectors, and stable update identity across source/packaged workflows. VerbaNode remains LAN-only; the native Android client is maintained as a separate project (v0.3.2 for this coordinated release).
 
 ---
 
@@ -80,6 +80,12 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Start Menu / Desktop shortcuts
   - Uninstall support
 
+- **v0.9.1 media library & queue UX**
+  - Upload/play/rename/delete MP3 and WAV files through the host Audio Library
+  - Persistent script-queue loop, per-item pause-after-playback, and drag reorder
+  - Shared configuration options for web and Android model/language selectors
+  - Stable Core identity/state across clean source-folder updates
+  - Coordinated with VerbaNode Android v0.3.2
 - **v0.9.0 local mobile & trusted devices**
   - DNS-SD/mDNS advertisement for automatic same-Wi-Fi discovery
   - QR and short-code pairing from Settings → Devices

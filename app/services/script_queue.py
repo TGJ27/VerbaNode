@@ -26,6 +26,7 @@ class ScriptQueueManager:
         self._task: asyncio.Task | None = None
         self._paused = True
         self._stopping = False
+        self._loop_enabled = str(self.db.get_setting("script_queue_loop", "false") or "false").lower() == "true"
 
     @property
     def state(self) -> str:
@@ -33,20 +34,37 @@ class ScriptQueueManager:
             return "playing"
         return "paused"
 
+    @property
+    def loop_enabled(self) -> bool:
+        return self._loop_enabled
+
     async def notify(self) -> None:
         await self.events.broadcast(
             "queue_state",
-            {"state": self.state, "items": self.db.list_queue()},
+            {
+                "state": self.state,
+                "loop": self._loop_enabled,
+                "items": self.db.list_queue(),
+            },
         )
 
-    async def add(self, script_id: int) -> dict[str, Any]:
-        item = self.db.queue_script(script_id)
+    async def add(self, script_id: int, pause_after_seconds: float = 0.0) -> dict[str, Any]:
+        item = self.db.queue_script(script_id, pause_after_seconds)
+        await self.notify()
+        return item
+
+    async def set_loop(self, enabled: bool) -> None:
+        self._loop_enabled = bool(enabled)
+        self.db.set_setting("script_queue_loop", "true" if enabled else "false")
+        await self.notify()
+
+    async def set_item_pause(self, queue_id: int, pause_after_seconds: float) -> dict[str, Any] | None:
+        item = self.db.update_queue_item_pause(queue_id, pause_after_seconds)
         await self.notify()
         return item
 
     @staticmethod
     def _script_tts_config(script: dict[str, Any]) -> dict[str, Any]:
-        """Return an agent-shaped TTS configuration owned by the script itself."""
         language = str(script.get("language") or "en")
         default_voice = "id-ID-GadisNeural" if language == "id" else "en-US-AriaNeural"
         return {
@@ -149,6 +167,9 @@ class ScriptQueueManager:
         await self.notify()
 
     async def reorder(self, ordered_ids: list[int]) -> None:
+        current_ids = [int(item["id"]) for item in self.db.list_queue()]
+        if sorted(current_ids) != sorted(int(value) for value in ordered_ids):
+            raise ValueError("Queue reorder must include each queued item exactly once")
         self.db.reorder_queue(ordered_ids)
         await self.notify()
 
@@ -158,37 +179,56 @@ class ScriptQueueManager:
         self.tts.stop_current()
         await self.notify()
 
+    async def _pause_after_item(self, seconds: float) -> None:
+        remaining = max(0.0, min(3600.0, float(seconds)))
+        if remaining <= 0:
+            return
+        await self.events.broadcast(
+            "queue_delay",
+            {"seconds": remaining, "state": self.state},
+        )
+        while remaining > 0 and not self._paused and not self._stopping:
+            step = min(0.25, remaining)
+            await asyncio.sleep(step)
+            remaining -= step
+
     async def _worker(self) -> None:
-        while not self._paused:
-            item = self.db.pop_next_queue_item()
-            if not item:
-                self._paused = True
-                break
-            if not item.get("enabled"):
-                self.db.finish_queue_item(int(item["id"]), remove=True)
-                continue
-            agent = self._script_tts_config(item)
-            speech_id = self.tts.begin_speech()
-            await self.events.broadcast(
-                "tts_started",
-                {"source": "script_queue", "queue_id": item["id"], "text": item["text"]},
-            )
-            try:
-                await self._speak_cached_script(
-                    text=item["text"],
-                    agent=agent,
-                    speech_id=speech_id,
-                    source="script_queue",
-                    queue_id=int(item["id"]),
+        try:
+            while not self._paused:
+                item = self.db.pop_next_queue_item()
+                if not item:
+                    self._paused = True
+                    break
+                queue_id = int(item["id"])
+                if not item.get("enabled"):
+                    self.db.finish_queue_item(queue_id, remove=True)
+                    continue
+                agent = self._script_tts_config(item)
+                speech_id = self.tts.begin_speech()
+                await self.events.broadcast(
+                    "tts_started",
+                    {"source": "script_queue", "queue_id": queue_id, "text": item["text"]},
                 )
-                # A played or manually interrupted item is consumed; remaining items stay queued.
-                self.db.finish_queue_item(int(item["id"]), remove=True)
-            except Exception as exc:
-                LOGGER.exception("Queued script failed")
-                self.db.finish_queue_item(int(item["id"]), remove=True)
-                await self.events.broadcast("error", {"message": str(exc), "source": "script_queue"})
-            finally:
-                self._stopping = False
-                await self.events.broadcast("tts_stopped", {"source": "script_queue"})
-                await self.notify()
-        await self.notify()
+                try:
+                    await self._speak_cached_script(
+                        text=item["text"],
+                        agent=agent,
+                        speech_id=speech_id,
+                        source="script_queue",
+                        queue_id=queue_id,
+                    )
+                    await self._pause_after_item(float(item.get("pause_after_seconds") or 0.0))
+                    if self._loop_enabled and not self._stopping:
+                        self.db.requeue_queue_item(queue_id)
+                    else:
+                        self.db.finish_queue_item(queue_id, remove=True)
+                except Exception as exc:
+                    LOGGER.exception("Queued script failed")
+                    self.db.finish_queue_item(queue_id, remove=True)
+                    await self.events.broadcast("error", {"message": str(exc), "source": "script_queue"})
+                finally:
+                    self._stopping = False
+                    await self.events.broadcast("tts_stopped", {"source": "script_queue"})
+                    await self.notify()
+        finally:
+            await self.notify()

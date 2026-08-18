@@ -22,6 +22,7 @@ async function loadBootstrap() {
   appState.mode = data.mode || 'idle';
   appState.pipeline = data.pipeline || appState.pipeline;
   appState.queueState = data.queue_state || 'paused';
+  appState.queueLoop = Boolean(data.queue_loop);
   renderAll();
   if (data.ollama_error) toast(data.ollama_error, 'error');
 }
@@ -45,6 +46,7 @@ function renderAll() {
   renderSettings();
   renderModels();
   renderRuntimeStatus(appState.data || {});
+  loadAudioLibrary(false).catch(() => {});
   setMode(appState.mode);
   updateBrowserMicSupport();
 }
@@ -152,12 +154,58 @@ function renderQueue() {
   $('#queueBadge').textContent = count;
   $('#queueBadge').classList.toggle('hidden', count === 0);
   $('#queueStateChip').textContent = appState.queueState === 'playing' ? 'Playing' : 'Paused';
-  const html = count ? appState.queue.map((item, index) => `<div class="queue-item">
-    <span class="queue-number">${index + 1}</span><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status)}</small></div><button class="icon-btn" data-remove-queue="${item.id}" title="Remove">×</button>
+  ['#queueLoopToggle', '#drawerQueueLoopToggle'].forEach(selector => { const node = $(selector); if (node) node.checked = Boolean(appState.queueLoop); });
+  const html = count ? appState.queue.map((item, index) => `<div class="queue-item" draggable="true" data-queue-id="${item.id}">
+    <span class="queue-drag" title="Drag to reorder">⋮⋮</span>
+    <span class="queue-number">${index + 1}</span>
+    <div class="queue-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.status)} · pause after <input class="queue-pause-input" data-queue-pause="${item.id}" type="number" min="0" max="3600" step="0.5" value="${Number(item.pause_after_seconds || 0)}"> sec</small></div>
+    <button class="icon-btn" data-remove-queue="${item.id}" title="Remove">×</button>
   </div>`).join('') : `<div class="queue-empty">Queue is empty.<br>Add scripts or use Run now.</div>`;
   $('#queueList').innerHTML = html;
   $('#drawerQueueList').innerHTML = html;
+  wireQueueDragAndPause($('#queueList'));
+  wireQueueDragAndPause($('#drawerQueueList'));
 }
+
+function wireQueueDragAndPause(container) {
+  if (!container) return;
+  let draggedId = null;
+  container.querySelectorAll('.queue-item').forEach(node => {
+    node.addEventListener('dragstart', event => { draggedId = Number(node.dataset.queueId); node.classList.add('dragging'); event.dataTransfer.effectAllowed = 'move'; });
+    node.addEventListener('dragend', () => { node.classList.remove('dragging'); draggedId = null; });
+    node.addEventListener('dragover', event => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; });
+    node.addEventListener('drop', async event => {
+      event.preventDefault();
+      const targetId = Number(node.dataset.queueId);
+      if (!draggedId || draggedId === targetId) return;
+      const ids = appState.queue.map(item => Number(item.id));
+      const from = ids.indexOf(draggedId);
+      const to = ids.indexOf(targetId);
+      if (from < 0 || to < 0) return;
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      try { await api('/api/queue/reorder', { method: 'PUT', body: JSON.stringify({ ordered_ids: ids }) }); }
+      catch (error) { toast(error.message, 'error'); }
+    });
+  });
+  container.querySelectorAll('[data-queue-pause]').forEach(input => {
+    input.addEventListener('change', async event => {
+      const queueId = Number(event.currentTarget.dataset.queuePause);
+      const value = Math.max(0, Math.min(3600, Number(event.currentTarget.value || 0)));
+      try { await api(`/api/queue/${queueId}`, { method: 'PATCH', body: JSON.stringify({ pause_after_seconds: value }) }); }
+      catch (error) { toast(error.message, 'error'); }
+    });
+    input.addEventListener('dragstart', event => event.stopPropagation());
+  });
+}
+
+async function setQueueLoop(enabled) {
+  try {
+    const result = await api('/api/queue/settings', { method: 'PUT', body: JSON.stringify({ loop: Boolean(enabled) }) });
+    appState.queueLoop = Boolean(result.loop);
+    renderQueue();
+  } catch (error) { toast(error.message, 'error'); renderQueue(); }
+}
+
 
 function setMode(mode) {
   appState.mode = mode || 'idle';
@@ -237,7 +285,9 @@ function handleEvent(message) {
       if (appState.data) appState.data.pipeline = appState.pipeline;
       renderRuntimeStatus({ ...(appState.data || {}), pipeline: appState.pipeline });
       break;
-    case 'queue_state': appState.queueState = data.state; appState.queue = data.items || []; renderQueue(); break;
+    case 'queue_state': appState.queueState = data.state; appState.queueLoop = Boolean(data.loop); appState.queue = data.items || []; renderQueue(); break;
+    case 'audio_library_changed': appState.audioLibrary = data.items || []; renderAudioLibrary(); break;
+    case 'audio_library_state': appState.audioLibraryPlaying = data.name || null; appState.audioLibrary = data.items || appState.audioLibrary; renderAudioLibrary(); break;
     case 'agents_changed': appState.agents = data || []; renderAgents(); break;
     case 'information_changed': appState.information = data || []; renderInformation(); break;
     case 'plugins_changed': appState.plugins = data || { plugins: [], summary: {} }; if (appState.data) appState.data.plugins = appState.plugins; renderPlugins(); break;
@@ -273,7 +323,7 @@ function handleEvent(message) {
 function navigate(page) {
   $$('.page').forEach(node => node.classList.toggle('active', node.id === `page-${page}`));
   $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.classList.toggle('active', node.dataset.page === page));
-  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Information'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], settings: ['SYSTEM', 'Settings'] };
+  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Information'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], audio: ['HOST MEDIA', 'Audio'], settings: ['SYSTEM', 'Settings'] };
   $('#pageEyebrow').textContent = titles[page]?.[0] || '';
   $('#pageTitle').textContent = titles[page]?.[1] || page;
   closeMobileNav();
@@ -482,6 +532,8 @@ function bindEvents() {
   $('#mobileMenuBtn').onclick = openMobileNav; $('#mobileCloseNav').onclick = closeMobileNav; $('#sidebarBackdrop').onclick = closeMobileNav;
   $('#queueQuickBtn').onclick = openQueueDrawer; $$('[data-close-drawer]').forEach(node => node.onclick = closeQueueDrawer);
   $('#drawerPlayQueue').onclick = () => queueAction('play'); $('#drawerClearQueue').onclick = () => queueAction('clear');
+  $('#queueLoopToggle').onchange = event => setQueueLoop(event.currentTarget.checked);
+  $('#drawerQueueLoopToggle').onchange = event => setQueueLoop(event.currentTarget.checked);
 
   const stopTts = async () => { try { await api('/api/tts/stop', { method: 'POST' }); } catch (error) { toast(error.message, 'error'); } };
   $('#stopTtsTopBtn').onclick = stopTts; $('#stopTtsBtn').onclick = stopTts;
@@ -846,6 +898,7 @@ function bindEvents() {
     finally { button.disabled = false; button.textContent = 'Reload Kokoro'; }
   };
   bindDataRecoveryControls();
+  bindAudioLibraryControls();
 
   setInterval(() => {
     if (appState.token && appState.settingsPanel === 'diagnostics' && $('#page-settings')?.classList.contains('active')) {

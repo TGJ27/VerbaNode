@@ -120,6 +120,7 @@ async def bootstrap(token: Token) -> dict[str, Any]:
         "scripts": state.db.list_scripts(),
         "queue": state.db.list_queue(),
         "queue_state": state.script_queue.state,
+        "queue_loop": state.script_queue.loop_enabled,
         "runtime_settings": state.db.get_runtime_settings(),
         "audio_devices": audio_device_payload(),
         "audio": {
@@ -157,6 +158,7 @@ async def system_status(token: Token) -> dict[str, Any]:
         "stt": state.stt.status(),
         "active_agent": state.conversation.active_agent(),
         "queue_state": state.script_queue.state,
+        "queue_loop": state.script_queue.loop_enabled,
         "controller": state.controller.active_info(),
         "hardware": hardware_status(),
         "audio": {

@@ -12,6 +12,10 @@ IS_FROZEN = bool(getattr(sys, "frozen", False))
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", SOURCE_ROOT)).resolve() if IS_FROZEN else SOURCE_ROOT
 
 
+def _truthy_env(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _local_appdata() -> Path:
     override = os.environ.get("VERBANODE_USER_DATA_DIR")
     if override:
@@ -22,29 +26,58 @@ def _local_appdata() -> Path:
     return Path.home() / "AppData" / "Local" / "VerbaNode"
 
 
-# Development/source mode intentionally preserves the historical repository-local
-# layout. Frozen builds move mutable data to LocalAppData so Program Files stays
-# read-only and application upgrades cannot overwrite user state.
-USER_DATA_ROOT = _local_appdata() if IS_FROZEN else SOURCE_ROOT
-CONFIG_DIR = USER_DATA_ROOT / "config" if IS_FROZEN else SOURCE_ROOT
+# v0.9.1: mutable identity/state is stable across source-folder and packaged
+# upgrades. Developers who explicitly want the historical repo-local behavior
+# can opt into portable mode.
+PORTABLE_SOURCE_MODE = bool(not IS_FROZEN and _truthy_env("VERBANODE_PORTABLE_MODE"))
+USER_DATA_ROOT = SOURCE_ROOT if PORTABLE_SOURCE_MODE else _local_appdata()
+CONFIG_DIR = SOURCE_ROOT if PORTABLE_SOURCE_MODE else USER_DATA_ROOT / "config"
 DATA_DIR = USER_DATA_ROOT / "data"
 CERT_DIR = USER_DATA_ROOT / "certs"
 MODEL_DIR = USER_DATA_ROOT / "models" if IS_FROZEN else SOURCE_ROOT / "models"
 PLUGIN_DIR = USER_DATA_ROOT / "plugins" if IS_FROZEN else SOURCE_ROOT / "plugins"
 DIAGNOSTICS_DIR = USER_DATA_ROOT / "diagnostics"
 RUNTIME_AUDIO_DIR = USER_DATA_ROOT / "runtime_audio"
+AUDIO_LIBRARY_DIR = USER_DATA_ROOT / "audio_library"
 BACKUP_DIR = USER_DATA_ROOT / "backups"
 LOG_DIR = USER_DATA_ROOT / "logs"
 
 
-def _ensure_env_file(env_file: Path, env_example: Path) -> None:
-    """Seed config once and ensure it has a non-placeholder controller PIN.
+def _copy_if_missing(source: Path, destination: Path) -> None:
+    if not source.exists() or destination.exists():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, destination)
+    else:
+        shutil.copy2(source, destination)
 
-    Existing user configuration is never replaced. The only value repaired in
-    an existing file is the shipped placeholder/blank controller PIN. This is
-    used by both clean source runs and frozen installs so a fresh LAN-bound
-    VerbaNode instance never silently falls back to a well-known PIN.
+
+def _migrate_legacy_source_runtime_once() -> None:
+    """Move v0.9.0 source-mode identity/state to stable LocalAppData once.
+
+    A clean source update used to create a new database/certificate identity and
+    therefore looked like a different VerbaNode to Android. From v0.9.1 source
+    mode shares the same persistent runtime root as packaged builds. Existing
+    files are copied only when the stable destination does not already exist.
     """
+    if IS_FROZEN or PORTABLE_SOURCE_MODE or USER_DATA_ROOT == SOURCE_ROOT:
+        return
+    marker = USER_DATA_ROOT / ".source-runtime-migrated-v091"
+    if marker.exists():
+        return
+    USER_DATA_ROOT.mkdir(parents=True, exist_ok=True)
+
+    # Preserve controller PIN/configuration, database identity/trusted devices,
+    # certificate private key/SPKI, recovery data and user-created audio.
+    _copy_if_missing(SOURCE_ROOT / ".env", CONFIG_DIR / ".env")
+    for name in ("data", "certs", "backups", "diagnostics", "runtime_audio", "audio_library", "logs"):
+        _copy_if_missing(SOURCE_ROOT / name, USER_DATA_ROOT / name)
+    marker.write_text("VerbaNode source runtime migrated to stable user data in v0.9.1\n", encoding="utf-8")
+
+
+def _ensure_env_file(env_file: Path, env_example: Path) -> None:
+    """Seed config once and ensure it has a non-placeholder controller PIN."""
     if not env_file.exists():
         if env_example.exists():
             shutil.copy2(env_example, env_file)
@@ -90,6 +123,7 @@ def resource_path(*parts: str) -> Path:
 
 
 def ensure_runtime_layout() -> None:
+    _migrate_legacy_source_runtime_once()
     for directory in (
         USER_DATA_ROOT,
         CONFIG_DIR,
@@ -99,6 +133,7 @@ def ensure_runtime_layout() -> None:
         PLUGIN_DIR,
         DIAGNOSTICS_DIR,
         RUNTIME_AUDIO_DIR,
+        AUDIO_LIBRARY_DIR,
         BACKUP_DIR,
         LOG_DIR,
     ):
@@ -111,8 +146,6 @@ def ensure_runtime_layout() -> None:
     if not IS_FROZEN:
         return
 
-    # Seed documentation/template/reference plugins only when absent. Existing
-    # plugins are never overwritten by an application upgrade.
     bundled_plugins = resource_path("plugins")
     if bundled_plugins.exists():
         for name in ("README.md", "_template", "example_echo"):

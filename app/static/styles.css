@@ -813,3 +813,52 @@ input:focus,textarea:focus,select:focus { border-color: #8ab5ff; box-shadow: 0 0
 .trusted-device-copy small { color: var(--muted); overflow-wrap: anywhere; }
 .trusted-device-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 720px) { .trusted-device-row { grid-template-columns: auto minmax(0,1fr); } .trusted-device-actions { grid-column: 1 / -1; justify-content: flex-start; } }
+
+
+/* v0.9.1 media library, larger chat, and queue controls */
+.conversation-layout { grid-template-columns:minmax(0,1fr) 286px; gap:12px; }
+.chat-panel { padding:12px; }
+.chat-compose-zone { display:grid; gap:7px; margin-top:4px; }
+.chat-compose-footer { min-height:34px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 3px; }
+.chat-compose-footer .toggle-row { width:auto; min-width:160px; margin:0; padding:4px 8px; border:0; background:transparent; }
+.chat-compose-footer .field-help { margin-left:auto; text-align:right; }
+.control-panel { align-content:end; grid-template-rows:auto auto auto; }
+.control-card { max-height:42vh; }
+.new-messages-btn { bottom:112px; }
+.audio-library-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+.audio-card { min-height:150px; padding:16px; display:flex; flex-direction:column; gap:10px; border:1px solid var(--line); border-radius:18px; background:#fff; box-shadow:var(--shadow-soft); }
+.audio-card.playing { border-color:#9fc0ff; box-shadow:0 0 0 3px rgba(53,120,246,.10),var(--shadow-soft); }
+.audio-card-head { display:flex; align-items:flex-start; gap:10px; }
+.audio-card-icon { width:42px; height:42px; flex:0 0 auto; display:grid; place-items:center; border-radius:12px; background:#edf4ff; color:var(--primary); font-size:20px; }
+.audio-card-copy { min-width:0; flex:1; }
+.audio-card-copy strong,.audio-card-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.audio-card-copy small { margin-top:4px; color:var(--muted); }
+.audio-card-actions { margin-top:auto; display:flex; gap:7px; flex-wrap:wrap; }
+.audio-upload-label { cursor:pointer; }
+.queue-loop-toggle { margin:0; min-width:190px; }
+.queue-item { grid-template-columns:26px minmax(0,1fr) auto; cursor:grab; }
+.queue-item.dragging { opacity:.45; cursor:grabbing; }
+.queue-drag-handle { color:#8b98b4; font-size:18px; line-height:1; user-select:none; touch-action:none; }
+.queue-copy small { display:flex; align-items:center; flex-wrap:wrap; gap:4px; white-space:normal; }
+.queue-pause-input { width:72px; min-height:29px; padding:0 7px; font-size:11px; }
+@media (max-width:1100px) { .audio-library-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:920px) {
+  .conversation-layout { grid-template-columns:minmax(0,1fr) 270px; }
+  .chat-compose-footer { align-items:flex-start; flex-direction:column; }
+  .chat-compose-footer .field-help { margin-left:0; text-align:left; }
+  .new-messages-btn { bottom:138px; }
+}
+@media (max-width:720px) {
+  .conversation-layout { display:flex; flex-direction:column; }
+  .chat-panel { height:calc(100vh - 178px); min-height:500px; }
+  .control-panel { order:2; }
+  .audio-library-grid { grid-template-columns:1fr; }
+  .chat-compose-footer .toggle-row { width:100%; }
+}
+.audio-file-card { min-height:150px; padding:16px; display:grid; grid-template-columns:44px minmax(0,1fr); gap:10px 12px; align-items:start; border:1px solid var(--line); border-radius:18px; background:#fff; box-shadow:var(--shadow-soft); }
+.audio-file-card.playing { border-color:#9fc0ff; box-shadow:0 0 0 3px rgba(53,120,246,.10),var(--shadow-soft); }
+.audio-file-icon { width:42px; height:42px; display:grid; place-items:center; border-radius:12px; background:#edf4ff; color:var(--primary); font-size:20px; }
+.audio-file-copy { min-width:0; }
+.audio-file-copy h3 { margin:1px 0 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.audio-file-copy p { margin:0; color:var(--muted); }
+.audio-file-actions { grid-column:1 / -1; margin-top:auto; display:flex; gap:7px; flex-wrap:wrap; }

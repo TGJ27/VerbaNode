@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#eef4ff">
   <title>VerbaNode Standalone</title>
-  <link rel="icon" href="/static/VerbaNode.png?v=0.9.0" type="image/png">
-  <link rel="stylesheet" href="/static/styles.css?v=0.9.0">
+  <link rel="icon" href="/static/VerbaNode.png?v=0.9.1" type="image/png">
+  <link rel="stylesheet" href="/static/styles.css?v=0.9.1">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
 
   <section id="loginView" class="login-view">
     <div class="login-card">
-      <div class="brand-mark large"><img src="/static/VerbaNode.png?v=0.9.0" alt="VerbaNode"></div>
+      <div class="brand-mark large"><img src="/static/VerbaNode.png?v=0.9.1" alt="VerbaNode"></div>
       <p class="eyebrow">LOCAL VOICE SYSTEM</p>
       <h1>VerbaNode</h1>
       <p class="muted">Standalone Windows host · browser control panel</p>
@@ -34,10 +34,10 @@
   <div id="appShell" class="app-shell hidden">
     <aside class="sidebar" id="sidebar">
       <div class="brand-row">
-        <div class="brand-mark"><img src="/static/VerbaNode.png?v=0.9.0" alt="VerbaNode"></div>
+        <div class="brand-mark"><img src="/static/VerbaNode.png?v=0.9.1" alt="VerbaNode"></div>
         <div>
           <strong>VerbaNode</strong>
-          <span>Standalone · <b id="appVersion">v0.9.0</b></span>
+          <span>Standalone · <b id="appVersion">v0.9.1</b></span>
         </div>
         <button id="mobileCloseNav" class="icon-btn mobile-only" aria-label="Close menu">×</button>
       </div>
@@ -48,6 +48,7 @@
         <button class="nav-item" data-page="information"><span>▤</span>Information</button>
         <button class="nav-item" data-page="plugins"><span>⬡</span>Plugins</button>
         <button class="nav-item" data-page="scripts"><span>▶</span>Scripts & Queue</button>
+        <button class="nav-item" data-page="audio"><span>♫</span>Audio</button>
         <button class="nav-item" data-page="settings"><span>⚙</span>Settings</button>
       </nav>
 
@@ -91,7 +92,6 @@
             <div class="chat-header">
               <div id="chatAgentIdentity" class="agent-identity"></div>
               <div class="chat-header-actions">
-                <button id="autoScrollToggle" class="btn primary compact" type="button" aria-pressed="true" title="Chat is locked to the newest message">Auto-scroll ON</button>
                 <select id="conversationSelect" title="Conversation history"></select>
                 <button id="newChatBtn" class="btn ghost compact">＋ New Chat</button>
               </div>
@@ -105,10 +105,16 @@
             <div id="messageList" class="message-list"></div>
             <button id="newMessagesBtn" class="new-messages-btn hidden" type="button">↓ New messages</button>
 
-            <form id="chatForm" class="chat-compose">
-              <textarea id="chatInput" rows="1" placeholder="Type a message. The response will appear here and play through the Windows speaker."></textarea>
-              <button class="btn primary send-btn" type="submit" aria-label="Send message">Send</button>
-            </form>
+            <div class="chat-compose-zone">
+              <form id="chatForm" class="chat-compose">
+                <textarea id="chatInput" rows="1" placeholder="Type a message. The response will appear here and play through the Windows speaker."></textarea>
+                <button class="btn primary send-btn" type="submit" aria-label="Send message">Send</button>
+              </form>
+              <div class="chat-compose-footer">
+                <button id="autoScrollToggle" class="btn primary compact" type="button" aria-pressed="true" title="Chat is locked to the newest message">Auto-scroll ON</button>
+                <span class="tiny muted">Turn off to read older messages without being pulled to the bottom.</span>
+              </div>
+            </div>
           </section>
 
           <aside class="control-panel">
@@ -204,6 +210,18 @@
         </section>
       </section>
 
+      <section id="page-audio" class="page">
+        <div class="page-actions">
+          <div><p class="eyebrow">HOST AUDIO LIBRARY</p><p class="muted">Upload MP3 or WAV files and play them through the selected Windows speaker. Files stay on this VerbaNode installation.</p></div>
+          <label class="btn primary audio-upload-label">＋ Upload audio<input id="audioLibraryUpload" type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" hidden></label>
+        </div>
+        <div class="audio-library-toolbar card">
+          <div><strong id="audioLibraryStatus">No audio playing</strong><small id="audioLibraryCount">0 files</small></div>
+          <button id="stopAudioLibraryBtn" class="btn danger-outline compact">■ Stop audio</button>
+        </div>
+        <div id="audioLibraryGrid" class="card-grid audio-library-grid"></div>
+      </section>
+
       <section id="page-scripts" class="page">
         <div class="scripts-layout">
           <div>
@@ -217,7 +235,9 @@
               <button id="pauseQueueBtn" class="btn ghost compact">Ⅱ Pause</button>
               <button id="stopQueueBtn" class="btn ghost compact">■ Stop</button>
             </div>
+            <label class="toggle-row queue-loop-toggle"><span><strong>Loop queue</strong><small>Repeat queued scripts until stopped.</small></span><input id="queueLoopToggle" type="checkbox"><i></i></label>
             <button id="clearQueueBtn" class="btn danger-outline full compact">Clear queue</button>
+            <p class="tiny muted queue-help">Drag queued items to reorder. Set a pause after each item before the next starts.</p>
             <div id="queueList" class="queue-list"></div>
           </aside>
         </div>
@@ -488,6 +508,7 @@
     <div class="drawer-backdrop" data-close-drawer></div>
     <section class="drawer-panel">
       <div class="card-title-row"><h3>Script queue</h3><button class="icon-btn" data-close-drawer>×</button></div>
+      <label class="toggle-row queue-loop-toggle"><span><strong>Loop queue</strong></span><input id="drawerQueueLoopToggle" type="checkbox"><i></i></label>
       <div id="drawerQueueList" class="queue-list"></div>
       <div class="button-grid two"><button id="drawerPlayQueue" class="btn success">▶ Play</button><button id="drawerClearQueue" class="btn danger-outline">Clear</button></div>
     </section>
@@ -548,16 +569,17 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/js/runtime.js?v=0.9.0" defer></script>
-  <script src="/static/js/client.js?v=0.9.0" defer></script>
-  <script src="/static/js/browser-ptt.js?v=0.9.0" defer></script>
-  <script src="/static/js/diagnostics.js?v=0.9.0" defer></script>
-  <script src="/static/js/chat.js?v=0.9.0" defer></script>
-  <script src="/static/js/agents.js?v=0.9.0" defer></script>
-  <script src="/static/js/plugins.js?v=0.9.0" defer></script>
-  <script src="/static/js/devices.js?v=0.9.0" defer></script>
-  <script src="/static/js/settings.js?v=0.9.0" defer></script>
-  <script src="/static/js/data-recovery.js?v=0.9.0" defer></script>
-  <script src="/static/app.js?v=0.9.0" defer></script>
+  <script src="/static/js/runtime.js?v=0.9.1" defer></script>
+  <script src="/static/js/client.js?v=0.9.1" defer></script>
+  <script src="/static/js/browser-ptt.js?v=0.9.1" defer></script>
+  <script src="/static/js/diagnostics.js?v=0.9.1" defer></script>
+  <script src="/static/js/chat.js?v=0.9.1" defer></script>
+  <script src="/static/js/agents.js?v=0.9.1" defer></script>
+  <script src="/static/js/plugins.js?v=0.9.1" defer></script>
+  <script src="/static/js/devices.js?v=0.9.1" defer></script>
+  <script src="/static/js/settings.js?v=0.9.1" defer></script>
+  <script src="/static/js/data-recovery.js?v=0.9.1" defer></script>
+  <script src="/static/js/audio-library.js?v=0.9.1" defer></script>
+  <script src="/static/app.js?v=0.9.1" defer></script>
 </body>
 </html>

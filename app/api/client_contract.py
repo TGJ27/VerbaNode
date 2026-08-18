@@ -46,6 +46,13 @@ def feature_manifest() -> dict[str, Any]:
         "device_revocation": True,
         "lan_discovery": True,
         "mdns_service_type": "_verbanode._tcp.local.",
+        "audio_library": True,
+        "audio_library_formats": ["mp3", "wav"],
+        "configuration_options": True,
+        "script_queue_loop": True,
+        "script_queue_pause": True,
+        "script_queue_drag_reorder": True,
+        "stable_instance_identity": True,
     }
 
 

@@ -8,6 +8,7 @@ from app.config import Settings, get_settings
 from app.api.protocol import API_VERSION, PROTOCOL_VERSION
 from app.db import Database
 from app.services.audio import HostAudioPlayer, HostAudioRecorder
+from app.services.audio_library import AudioLibraryManager
 from app.services.audio_engine import (
     AudioEngineSupervisor,
     AudioPlayerProxy,
@@ -43,6 +44,7 @@ class AppState:
     monitor: PipelineMonitor
     recorder: Any
     player: Any
+    audio_library: AudioLibraryManager
     audio_engine: AudioEngineSupervisor | None
     ai_engine: AiEngineSupervisor | None
     stt: Any
@@ -218,6 +220,7 @@ def build_state() -> AppState:
         monitor=monitor,
     )
     script_queue = ScriptQueueManager(db, tts, events, conversation.active_agent)
+    audio_library = AudioLibraryManager(settings.audio_library_dir, player, events)
     conversation.script_queue = script_queue
     from app.version import APP_VERSION, BUILD_LABEL
 
@@ -236,6 +239,7 @@ def build_state() -> AppState:
         monitor=monitor,
         recorder=recorder,
         player=player,
+        audio_library=audio_library,
         audio_engine=audio_engine,
         ai_engine=ai_engine,
         stt=stt,

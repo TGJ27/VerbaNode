@@ -124,6 +124,11 @@ def _schema_recovery_foundation_v4(conn: sqlite3.Connection) -> None:
     conn.execute(f"PRAGMA application_id={VERBANODE_APPLICATION_ID}")
 
 
+
+def _script_queue_controls_v6(conn: sqlite3.Connection) -> None:
+    _add_column_if_missing(conn, "script_queue", "pause_after_seconds", "REAL NOT NULL DEFAULT 0")
+
+
 def _trusted_devices_v5(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -155,6 +160,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "capability_action_expiry", _capability_action_expiry_v3),
     Migration(4, "schema_recovery_foundation", _schema_recovery_foundation_v4),
     Migration(5, "trusted_mobile_devices", _trusted_devices_v5),
+    Migration(6, "script_queue_controls", _script_queue_controls_v6),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 

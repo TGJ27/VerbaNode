@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.paths import (
+    AUDIO_LIBRARY_DIR,
     BACKUP_DIR,
     CERT_DIR,
     CONFIG_DIR,
@@ -61,6 +62,7 @@ class Settings(BaseSettings):
     websocket_heartbeat_interval_seconds: float = Field(default=15.0, ge=5.0, le=120.0)
     websocket_heartbeat_timeout_seconds: float = Field(default=45.0, ge=15.0, le=600.0)
     api_max_json_body_bytes: int = Field(default=2097152, ge=65536, le=16777216)
+    audio_library_max_upload_bytes: int = Field(default=52428800, ge=1048576, le=536870912)
     login_max_attempts: int = Field(default=5, ge=2, le=20)
     login_attempt_window_seconds: float = Field(default=60.0, ge=10.0, le=600.0)
     login_lockout_base_seconds: float = Field(default=5.0, ge=1.0, le=120.0)
@@ -114,6 +116,13 @@ class Settings(BaseSettings):
         path = self.external_plugins_path
         if not path.is_absolute():
             path = ROOT_DIR / path
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+
+    @property
+    def audio_library_dir(self) -> Path:
+        path = AUDIO_LIBRARY_DIR
         path.mkdir(parents=True, exist_ok=True)
         return path
 

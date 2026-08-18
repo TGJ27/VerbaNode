@@ -151,6 +151,7 @@ class Database:
             script_id INTEGER NOT NULL REFERENCES scripts(id) ON DELETE CASCADE,
             position INTEGER NOT NULL,
             status TEXT NOT NULL DEFAULT 'waiting',
+            pause_after_seconds REAL NOT NULL DEFAULT 0,
             added_at TEXT NOT NULL
         );
 
@@ -829,13 +830,13 @@ class Database:
             cur = conn.execute("DELETE FROM scripts WHERE id=?", (script_id,))
         return bool(cur.rowcount)
 
-    def queue_script(self, script_id: int) -> dict[str, Any]:
+    def queue_script(self, script_id: int, pause_after_seconds: float = 0.0) -> dict[str, Any]:
         now = utc_now()
         with self._write_lock, self.connect() as conn:
             position = conn.execute("SELECT COALESCE(MAX(position),-1)+1 FROM script_queue").fetchone()[0]
             cur = conn.execute(
-                "INSERT INTO script_queue(script_id,position,status,added_at) VALUES(?,?,?,?)",
-                (script_id, position, "waiting", now),
+                "INSERT INTO script_queue(script_id,position,status,pause_after_seconds,added_at) VALUES(?,?,?,?,?)",
+                (script_id, position, "waiting", max(0.0, min(3600.0, float(pause_after_seconds))), now),
             )
             queue_id = int(cur.lastrowid)
         return self.get_queue_item(queue_id) or {}
@@ -880,6 +881,25 @@ class Database:
                 conn.execute("DELETE FROM script_queue WHERE id=?", (queue_id,))
             else:
                 conn.execute("UPDATE script_queue SET status='waiting' WHERE id=?", (queue_id,))
+
+    def requeue_queue_item(self, queue_id: int) -> None:
+        with self._write_lock, self.connect() as conn:
+            position = conn.execute("SELECT COALESCE(MAX(position),-1)+1 FROM script_queue").fetchone()[0]
+            conn.execute(
+                "UPDATE script_queue SET status='waiting', position=? WHERE id=?",
+                (position, queue_id),
+            )
+
+    def update_queue_item_pause(self, queue_id: int, pause_after_seconds: float) -> dict[str, Any] | None:
+        value = max(0.0, min(3600.0, float(pause_after_seconds)))
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE script_queue SET pause_after_seconds=? WHERE id=?",
+                (value, queue_id),
+            )
+            if not cur.rowcount:
+                return None
+        return self.get_queue_item(queue_id)
 
     def remove_queue_item(self, queue_id: int) -> bool:
         with self._write_lock, self.connect() as conn:
