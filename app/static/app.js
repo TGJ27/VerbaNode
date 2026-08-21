@@ -47,6 +47,8 @@ function renderAll() {
   renderModels();
   renderRuntimeStatus(appState.data || {});
   loadAudioLibrary(false).catch(() => {});
+  loadScriptDefaults().catch(() => {});
+  loadTypeToTalk(true).catch(() => {});
   setMode(appState.mode);
   updateBrowserMicSupport();
 }
@@ -288,6 +290,8 @@ function handleEvent(message) {
     case 'queue_state': appState.queueState = data.state; appState.queueLoop = Boolean(data.loop); appState.queue = data.items || []; renderQueue(); break;
     case 'audio_library_changed': appState.audioLibrary = data.items || []; renderAudioLibrary(); break;
     case 'audio_library_state': appState.audioLibraryPlaying = data.name || null; appState.audioLibrary = data.items || appState.audioLibrary; renderAudioLibrary(); break;
+    case 'type_to_talk_queue': appState.typeToTalkState = data.state || 'idle'; appState.typeToTalkItems = data.items || []; renderTypeToTalk(); break;
+    case 'script_defaults_changed': appState.scriptDefaults = data || null; break;
     case 'agents_changed': appState.agents = data || []; renderAgents(); break;
     case 'information_changed': appState.information = data || []; renderInformation(); break;
     case 'plugins_changed': appState.plugins = data || { plugins: [], summary: {} }; if (appState.data) appState.data.plugins = appState.plugins; renderPlugins(); break;
@@ -323,7 +327,7 @@ function handleEvent(message) {
 function navigate(page) {
   $$('.page').forEach(node => node.classList.toggle('active', node.id === `page-${page}`));
   $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.classList.toggle('active', node.dataset.page === page));
-  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Information'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], audio: ['HOST MEDIA', 'Audio'], settings: ['SYSTEM', 'Settings'] };
+  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Information'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], speak: ['DIRECT TTS', 'Type to Talk'], audio: ['HOST MEDIA', 'Audio'], settings: ['SYSTEM', 'Settings'] };
   $('#pageEyebrow').textContent = titles[page]?.[0] || '';
   $('#pageTitle').textContent = titles[page]?.[1] || page;
   closeMobileNav();
@@ -365,6 +369,11 @@ const AGENT_LANGUAGE_PROFILES = {
 
 function wireModalBasics() { $$('[data-close-modal]').forEach(node => node.onclick = closeModal); }
 
+async function loadScriptDefaults() {
+  if (!appState.token) return;
+  appState.scriptDefaults = await api('/api/scripts/defaults');
+}
+
 function openSimpleModal(kind, item = null) {
   const fragment = $('#simpleModalTemplate').content.cloneNode(true);
   $('#modalRoot').replaceChildren(fragment);
@@ -374,7 +383,8 @@ function openSimpleModal(kind, item = null) {
   if (kind === 'info') {
     $('#simpleModalFields').innerHTML = `<label>Title<input name="title" required value="${escapeHtml(item?.title || '')}"></label><label>Full text<textarea name="content" rows="10" required>${escapeHtml(item?.content || '')}</textarea></label><label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>`;
   } else {
-    const language = item?.language || 'en';
+    const remembered = item || appState.scriptDefaults || {};
+    const language = remembered.language || 'en';
     const profile = languageProfile(language);
     $('#simpleModalFields').innerHTML = `
       <label>Button title<input name="title" required value="${escapeHtml(item?.title || '')}"></label>
@@ -384,23 +394,23 @@ function openSimpleModal(kind, item = null) {
         <label>TTS mode<select name="tts_mode"><option value="edge">Edge only</option><option value="kokoro">Kokoro local only</option><option value="edge_fallback">Edge → Kokoro fallback</option><option value="kokoro_fallback">Kokoro → Edge fallback</option></select></label>
         <label>Edge voice<select name="edge_voice" id="scriptEdgeVoiceSelect"></select></label>
         <label>Kokoro voice<select name="kokoro_voice_id" id="scriptKokoroVoiceSelect"></select></label>
-        <label>Speech rate<input name="tts_rate" type="number" min="0.5" max="2" step="0.05" value="${Number(item?.tts_rate ?? 1)}"></label>
-        <label>Volume<input name="tts_volume" type="number" min="0" max="1" step="0.05" value="${Number(item?.tts_volume ?? 1)}"></label>
+        <label>Speech rate<input name="tts_rate" type="number" min="0.5" max="2" step="0.05" value="${Number(remembered.tts_rate ?? 1)}"></label>
+        <label>Volume<input name="tts_volume" type="number" min="0" max="1" step="0.05" value="${Number(remembered.tts_volume ?? 1)}"></label>
       </div>
       <div id="scriptTtsCompatibilityHint" class="status-box"></div>
       <button type="button" id="previewScriptVoiceBtn" class="btn secondary">▶ Preview script voice</button>
+      <p class="tiny muted">New scripts start with the speech configuration from the last script you saved. If there is no previous script configuration, VerbaNode uses the normal defaults.</p>
       <label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>
       ${item ? '<button type="button" id="deleteSimpleItem" class="btn danger-outline">Delete</button>' : ''}`;
     form.elements.namedItem('language').value = language;
-    form.elements.namedItem('tts_mode').value = item?.tts_mode || 'edge';
+    form.elements.namedItem('tts_mode').value = remembered.tts_mode || 'edge';
     const populateScriptVoices = (forceDefault = false) => {
       const selectedLanguage = form.elements.namedItem('language').value || 'en';
       const selectedProfile = languageProfile(selectedLanguage);
-      renderStandaloneEdgeVoiceSelect(
-        $('#scriptEdgeVoiceSelect'),
-        selectedLanguage,
-        forceDefault ? selectedProfile.defaultVoice : (item?.edge_voice || selectedProfile.defaultVoice),
-      );
+      const preferredVoice = forceDefault
+        ? selectedProfile.defaultVoice
+        : (remembered.edge_voice || selectedProfile.defaultVoice);
+      renderStandaloneEdgeVoiceSelect($('#scriptEdgeVoiceSelect'), selectedLanguage, preferredVoice);
       applyLanguageTtsAvailability(form.elements.namedItem('tts_mode'), selectedLanguage);
       const kokoroSelect = $('#scriptKokoroVoiceSelect');
       if (kokoroSelect) kokoroSelect.disabled = selectedLanguage === 'id';
@@ -414,7 +424,7 @@ function openSimpleModal(kind, item = null) {
     const scriptKokoro = $('#scriptKokoroVoiceSelect');
     const scriptVoices = appState.kokoroVoices.length ? appState.kokoroVoices : [{ id: 0, name: 'af_maple', category: 'American female' }];
     scriptKokoro.innerHTML = scriptVoices.map(voice => `<option value="${voice.id}">${escapeHtml(voice.name)} — ${escapeHtml(voice.category)}</option>`).join('');
-    scriptKokoro.value = String(item?.kokoro_voice_id ?? 0);
+    scriptKokoro.value = String(remembered.kokoro_voice_id ?? 0);
     $('#previewScriptVoiceBtn').onclick = async () => {
       const button = $('#previewScriptVoiceBtn');
       button.disabled = true; button.textContent = 'Playing…';
@@ -475,7 +485,11 @@ function openSimpleModal(kind, item = null) {
       await api(item ? `${base}/${item.id}` : base, { method: item ? 'PUT' : 'POST', body: JSON.stringify(payload) });
       closeModal();
       if (kind === 'info') { appState.information = await api('/api/information'); renderInformation(); }
-      else { appState.scripts = await api('/api/scripts'); renderScripts(); }
+      else {
+        appState.scripts = await api('/api/scripts');
+        await loadScriptDefaults();
+        renderScripts();
+      }
       toast(`${kind === 'info' ? 'Information' : 'Script'} saved.`, 'success');
     } catch (error) { toast(error.message, 'error'); }
   };
@@ -899,7 +913,7 @@ function bindEvents() {
   };
   bindDataRecoveryControls();
   bindAudioLibraryControls();
-
+  bindTypeToTalkControls();
   setInterval(() => {
     if (appState.token && appState.settingsPanel === 'diagnostics' && $('#page-settings')?.classList.contains('active')) {
       loadDiagnostics(false).catch(() => {});

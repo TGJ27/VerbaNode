@@ -11,7 +11,7 @@ from app.services.audio import AudioUnavailable
 from app.services.events import EventHub
 
 LOGGER = logging.getLogger(__name__)
-_ALLOWED_SUFFIXES = {".wav", ".mp3"}
+_ALLOWED_SUFFIXES = {".wav", ".mp3", ".mpeg", ".mpg", ".mpga", ".mp2", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wma", ".aiff", ".aif", ".webm", ".mka", ".amr"}
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._ -]+")
 
 
@@ -26,7 +26,7 @@ def _safe_filename(value: str) -> str:
         name = "audio"
     suffix = Path(name).suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
-        raise AudioLibraryError("Only .mp3 and .wav audio files are supported")
+        raise AudioLibraryError("Unsupported audio format. Use WAV, MP3/MPEG/MP2, FLAC, OGG/OGA, Opus, M4A, AAC, WMA, AIFF/AIF, WebM audio, MKA, or AMR")
     stem = Path(name).stem[:120].strip(" .") or "audio"
     return f"{stem}{suffix}"
 

@@ -154,6 +154,44 @@ def _trusted_devices_v5(conn: sqlite3.Connection) -> None:
     )
 
 
+
+def _type_to_talk_queue_v7(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS type_to_talk_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_type_to_talk_queue_position "
+        "ON type_to_talk_queue(position,id)"
+    )
+
+
+def _type_to_talk_tts_config_v8(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(type_to_talk_queue)").fetchall()}
+    additions = [
+        ("language", "TEXT"),
+        ("tts_mode", "TEXT"),
+        ("edge_voice", "TEXT"),
+        ("kokoro_voice_id", "INTEGER"),
+        ("tts_rate", "REAL"),
+        ("tts_volume", "REAL"),
+        ("completed_at", "TEXT"),
+    ]
+    for name, sql_type in additions:
+        if name not in columns:
+            conn.execute(f"ALTER TABLE type_to_talk_queue ADD COLUMN {name} {sql_type}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_type_to_talk_queue_status_position "
+        "ON type_to_talk_queue(status,position,id)"
+    )
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "numbered_migration_foundation", _foundation_v1),
     Migration(2, "persistent_action_ledger", _persistent_action_ledger_v2),
@@ -161,6 +199,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(4, "schema_recovery_foundation", _schema_recovery_foundation_v4),
     Migration(5, "trusted_mobile_devices", _trusted_devices_v5),
     Migration(6, "script_queue_controls", _script_queue_controls_v6),
+    Migration(7, "type_to_talk_queue", _type_to_talk_queue_v7),
+    Migration(8, "type_to_talk_tts_config", _type_to_talk_tts_config_v8),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 

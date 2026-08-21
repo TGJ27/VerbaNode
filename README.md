@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.9.1 builds on the v0.9 local-mobile/trusted-device foundation with a host Audio Library, richer script-queue controls, shared client configuration selectors, and stable update identity across source/packaged workflows. VerbaNode remains LAN-only; the native Android client is maintained as a separate project (v0.3.2 for this coordinated release).
+> **Project status:** active development. v0.9.2 adds a persistent Type-to-Talk queue, remembered script speech defaults, broader Audio Library format support, and stronger shared model selectors while preserving the v0.9 LAN-only trusted-device foundation. RAG/large-knowledge retrieval is intentionally deferred. The native Android client is maintained as a separate project (v0.3.3 for this coordinated release).
 
 ---
 
@@ -79,6 +79,13 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.9.2 direct speech & workflow UX**
+  - Persistent Type-to-Talk queue shared by Web and Android; text goes directly to TTS without LLM processing
+  - Remembered script language/TTS/voice/rate/volume defaults for faster multi-entry authoring
+  - Common-format Audio Library with optional FFmpeg fallback decoding
+  - Android model choices merged with the live installed Ollama model catalog
+  - Coordinated with VerbaNode Android v0.3.3
 
 - **v0.9.1 media library & queue UX**
   - Upload/play/rename/delete MP3 and WAV files through the host Audio Library

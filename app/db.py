@@ -917,6 +917,99 @@ class Database:
                 [(index, queue_id) for index, queue_id in enumerate(ordered_ids)],
             )
 
+    # Type-to-talk queue
+    def list_type_to_talk_queue(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM type_to_talk_queue WHERE status IN ('waiting','playing') ORDER BY position,id"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_type_to_talk_transcript(self, limit: int = 200) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM type_to_talk_queue ORDER BY id DESC LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def pending_type_to_talk_count(self) -> int:
+        with self.connect() as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM type_to_talk_queue WHERE status IN ('waiting','playing')"
+            ).fetchone()[0])
+
+    def add_type_to_talk(self, text: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+        now = utc_now()
+        cfg = config or {}
+        with self._write_lock, self.connect() as conn:
+            position = conn.execute(
+                "SELECT COALESCE(MAX(position),-1)+1 FROM type_to_talk_queue WHERE status IN ('waiting','playing')"
+            ).fetchone()[0]
+            cur = conn.execute(
+                """
+                INSERT INTO type_to_talk_queue(
+                    text,position,status,created_at,language,tts_mode,edge_voice,
+                    kokoro_voice_id,tts_rate,tts_volume
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(text).strip(), position, "waiting", now,
+                    cfg.get("language"), cfg.get("tts_mode"), cfg.get("edge_voice"),
+                    cfg.get("kokoro_voice_id"), cfg.get("tts_rate"), cfg.get("tts_volume"),
+                ),
+            )
+            item_id = int(cur.lastrowid)
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM type_to_talk_queue WHERE id=?", (item_id,)).fetchone()
+        return dict(row) if row else {}
+
+    def pop_next_type_to_talk(self) -> dict[str, Any] | None:
+        with self._write_lock, self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM type_to_talk_queue WHERE status='waiting' ORDER BY position,id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute("UPDATE type_to_talk_queue SET status='playing' WHERE id=?", (row["id"],))
+            result = dict(row)
+            result["status"] = "playing"
+            return result
+
+    def complete_type_to_talk(self, item_id: int) -> None:
+        with self._write_lock, self.connect() as conn:
+            conn.execute(
+                "UPDATE type_to_talk_queue SET status='completed',completed_at=? WHERE id=?",
+                (utc_now(), item_id),
+            )
+            # Keep a bounded transcript so Type-to-Talk behaves like chat without growing forever.
+            conn.execute(
+                """DELETE FROM type_to_talk_queue
+                   WHERE status='completed' AND id NOT IN (
+                     SELECT id FROM type_to_talk_queue WHERE status='completed' ORDER BY id DESC LIMIT 200
+                   )"""
+            )
+
+    def reset_type_to_talk_playing(self) -> None:
+        with self._write_lock, self.connect() as conn:
+            conn.execute("UPDATE type_to_talk_queue SET status='waiting' WHERE status='playing'")
+
+    def remove_type_to_talk(self, item_id: int) -> bool:
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute("DELETE FROM type_to_talk_queue WHERE id=?", (item_id,))
+        return bool(cur.rowcount)
+
+    def clear_type_to_talk(self) -> None:
+        with self._write_lock, self.connect() as conn:
+            conn.execute("DELETE FROM type_to_talk_queue")
+
+    def reorder_type_to_talk(self, ordered_ids: list[int]) -> None:
+        with self._write_lock, self.connect() as conn:
+            conn.executemany(
+                "UPDATE type_to_talk_queue SET position=? WHERE id=? AND status='waiting'",
+                [(index, item_id) for index, item_id in enumerate(ordered_ids)],
+            )
+
     # Conversations and messages
     def create_conversation(self, agent_id: int, title: str | None = None) -> dict[str, Any]:
         now = utc_now()

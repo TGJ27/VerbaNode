@@ -1,5 +1,20 @@
 # Changelog
 
+
+- Fixed the Conversation right rail so controls start at the top instead of leaving a large blank area.
+- Reworked Type to Talk into a chat-style direct-speech transcript with Enter-to-send, queued messages, persistent speech history, and per-message TTS language/engine/voice/rate/volume configuration.
+## v0.9.2 - Direct speech and workflow UX
+
+- Added a persistent server-side Type-to-Talk queue shared by the web and Android clients; queued text goes directly to TTS without LLM processing.
+- Added persistent script speech defaults so language, TTS mode/voice, speech rate, and volume are reused across new script entries instead of resetting.
+- Hardened Android model selection by combining shared configuration choices with the live installed Ollama model catalog.
+- Expanded the Audio Library to common formats including WAV, MP3, FLAC, OGG/OGA, Opus, M4A, AAC, WMA, AIFF/AIF, WebM audio, MKA, and AMR, with optional FFmpeg fallback decoding.
+- Added client feature negotiation for Type-to-Talk, script defaults, and broad audio formats.
+- Advanced database schema to v7 for the persistent Type-to-Talk queue.
+- RAG/large-knowledge retrieval remains intentionally deferred to a later release.
+- Coordinated with VerbaNode Android v0.3.3.
+
+
 ## v0.9.1 - Media library and queue UX
 
 - Added MP3/WAV Audio Library APIs and web Audio page.
@@ -388,3 +403,5 @@
 - Added STT confidence threshold controls.
 - Set Ropi defaults to `qwen3.5:0.8b`, 88% STT threshold, and 224 maximum response tokens.
 - Added explicit database setup tooling for repository deployments.
+
+- Expanded Audio Library MPEG-family compatibility for `.mpeg`, `.mpg`, `.mpga`, and `.mp2` files (decoded through the existing FFmpeg fallback when required).

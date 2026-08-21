@@ -117,8 +117,11 @@ def test_frontend_contains_agent_language_and_script_tts_controls() -> None:
     assert 'name="language"' in html
     assert "Whisper-base" in javascript
     assert "Whisper-small" in javascript
-    assert "scriptEdgeVoiceSelect" in javascript
-    assert "previewScriptVoiceBtn" in javascript
+    assert 'name="tts_mode"' in javascript
+    assert 'id="scriptEdgeVoiceSelect"' in javascript
+    assert 'name="tts_rate"' in javascript
+    assert "loadScriptDefaults" in javascript
+    assert "last script you saved" in javascript
 
 
 def test_whisper_base_runs_through_funasr_with_indonesian_decoding(

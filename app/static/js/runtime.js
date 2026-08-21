@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.9.1';
+const FRONTEND_VERSION = '0.9.2';
 const CLIENT_API_VERSION = 1;
 const WEBSOCKET_PROTOCOL_VERSION = 1;
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
@@ -23,6 +23,11 @@ const appState = {
   queueLoop: false,
   audioLibrary: [],
   audioLibraryPlaying: null,
+  typeToTalkItems: [],
+  typeToTalkState: 'idle',
+  typeToTalkDefaults: null,
+  typeToTalkConfigInitialized: false,
+  scriptDefaults: null,
   models: [],
   kokoroVoices: [],
   edgeVoices: { voices: [], source: 'built-in-fallback', error: null },

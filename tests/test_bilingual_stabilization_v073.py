@@ -65,7 +65,9 @@ def test_bilingual_stabilization_ui_controls_exist() -> None:
     assert 'id="testLanguageProfileBtn"' in html
     assert "/api/ai/test-language-profile" in js
     assert "First use will download the model" in js
-    assert "Bahasa Indonesia scripts use Edge TTS only" in js
+    assert 'name="language"' in js
+    assert 'id="scriptEdgeVoiceSelect"' in js
+    assert "loadScriptDefaults" in js
 
 
 def test_whisper_cache_status_checks_default_home_when_xdg_points_elsewhere(tmp_path: Path, monkeypatch) -> None:

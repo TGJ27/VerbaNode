@@ -6,10 +6,23 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from app.api.deps import Token
-from app.schemas import QueueItemUpdate, QueueReorder, QueueSettingsUpdate, ScriptCreate
+from app.schemas import QueueItemUpdate, QueueReorder, QueueSettingsUpdate, ScriptCreate, ScriptDefaultsUpdate
 from app.state import state
+from app.services.script_defaults import get_script_defaults, save_script_defaults
 
 router = APIRouter(tags=["scripts", "queue"])
+
+
+@router.get("/api/scripts/defaults")
+async def script_defaults(token: Token) -> dict[str, Any]:
+    return get_script_defaults(state.db)
+
+
+@router.put("/api/scripts/defaults")
+async def update_script_defaults(payload: ScriptDefaultsUpdate, token: Token) -> dict[str, Any]:
+    values = save_script_defaults(state.db, payload.model_dump())
+    await state.events.broadcast("script_defaults_changed", values)
+    return values
 
 
 @router.get("/api/scripts")
@@ -19,16 +32,22 @@ async def list_scripts(token: Token) -> list[dict[str, Any]]:
 
 @router.post("/api/scripts")
 async def create_script(payload: ScriptCreate, token: Token) -> dict[str, Any]:
-    script = state.db.create_script(payload.model_dump())
+    values = payload.model_dump()
+    remembered = save_script_defaults(state.db, values)
+    script = state.db.create_script(values)
+    await state.events.broadcast("script_defaults_changed", remembered)
     await state.events.broadcast("scripts_changed", state.db.list_scripts())
     return script
 
 
 @router.put("/api/scripts/{script_id}")
 async def update_script(script_id: int, payload: ScriptCreate, token: Token) -> dict[str, Any]:
-    script = state.db.update_script(script_id, payload.model_dump())
+    values = payload.model_dump()
+    remembered = save_script_defaults(state.db, values)
+    script = state.db.update_script(script_id, values)
     if not script:
         raise HTTPException(status_code=404, detail="Script not found")
+    await state.events.broadcast("script_defaults_changed", remembered)
     await state.events.broadcast("scripts_changed", state.db.list_scripts())
     return script
 

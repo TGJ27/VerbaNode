@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#eef4ff">
   <title>VerbaNode Standalone</title>
-  <link rel="icon" href="/static/VerbaNode.png?v=0.9.1" type="image/png">
-  <link rel="stylesheet" href="/static/styles.css?v=0.9.1">
+  <link rel="icon" href="/static/VerbaNode.png?v=0.9.2" type="image/png">
+  <link rel="stylesheet" href="/static/styles.css?v=0.9.2">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
 
   <section id="loginView" class="login-view">
     <div class="login-card">
-      <div class="brand-mark large"><img src="/static/VerbaNode.png?v=0.9.1" alt="VerbaNode"></div>
+      <div class="brand-mark large"><img src="/static/VerbaNode.png?v=0.9.2" alt="VerbaNode"></div>
       <p class="eyebrow">LOCAL VOICE SYSTEM</p>
       <h1>VerbaNode</h1>
       <p class="muted">Standalone Windows host · browser control panel</p>
@@ -34,10 +34,10 @@
   <div id="appShell" class="app-shell hidden">
     <aside class="sidebar" id="sidebar">
       <div class="brand-row">
-        <div class="brand-mark"><img src="/static/VerbaNode.png?v=0.9.1" alt="VerbaNode"></div>
+        <div class="brand-mark"><img src="/static/VerbaNode.png?v=0.9.2" alt="VerbaNode"></div>
         <div>
           <strong>VerbaNode</strong>
-          <span>Standalone · <b id="appVersion">v0.9.1</b></span>
+          <span>Standalone · <b id="appVersion">v0.9.2</b></span>
         </div>
         <button id="mobileCloseNav" class="icon-btn mobile-only" aria-label="Close menu">×</button>
       </div>
@@ -48,6 +48,7 @@
         <button class="nav-item" data-page="information"><span>▤</span>Information</button>
         <button class="nav-item" data-page="plugins"><span>⬡</span>Plugins</button>
         <button class="nav-item" data-page="scripts"><span>▶</span>Scripts & Queue</button>
+        <button class="nav-item" data-page="speak"><span>◖</span>Type to Talk</button>
         <button class="nav-item" data-page="audio"><span>♫</span>Audio</button>
         <button class="nav-item" data-page="settings"><span>⚙</span>Settings</button>
       </nav>
@@ -212,8 +213,8 @@
 
       <section id="page-audio" class="page">
         <div class="page-actions">
-          <div><p class="eyebrow">HOST AUDIO LIBRARY</p><p class="muted">Upload MP3 or WAV files and play them through the selected Windows speaker. Files stay on this VerbaNode installation.</p></div>
-          <label class="btn primary audio-upload-label">＋ Upload audio<input id="audioLibraryUpload" type="file" accept="audio/mpeg,audio/wav,.mp3,.wav" hidden></label>
+          <div><p class="eyebrow">HOST AUDIO LIBRARY</p><p class="muted">Upload common audio formats and play them through the selected Windows speaker. FFmpeg is used as a fallback decoder when needed. Files stay on this VerbaNode installation.</p></div>
+          <label class="btn primary audio-upload-label">＋ Upload audio<input id="audioLibraryUpload" type="file" accept="audio/*,.wav,.mp3,.mpeg,.mpg,.mpga,.mp2,.flac,.ogg,.oga,.opus,.m4a,.aac,.wma,.aiff,.aif,.webm,.mka,.amr" hidden></label>
         </div>
         <div class="audio-library-toolbar card">
           <div><strong id="audioLibraryStatus">No audio playing</strong><small id="audioLibraryCount">0 files</small></div>
@@ -222,10 +223,39 @@
         <div id="audioLibraryGrid" class="card-grid audio-library-grid"></div>
       </section>
 
+      <section id="page-speak" class="page">
+        <div class="type-to-talk-shell">
+          <section class="card type-to-talk-card">
+            <div class="type-to-talk-header">
+              <div><p class="eyebrow">DIRECT TTS</p><h3>Type to Talk</h3></div>
+              <div class="type-to-talk-actions">
+                <span id="typeToTalkState" class="chip">Idle</span>
+                <button id="typeToTalkPlayBtn" class="btn success compact" type="button">▶ Resume</button>
+                <button id="typeToTalkStopBtn" class="btn ghost compact" type="button">■ Stop</button>
+                <button id="typeToTalkClearBtn" class="btn danger-outline compact" type="button">Clear</button>
+              </div>
+            </div>
+            <div class="type-to-talk-config" aria-label="Type to Talk TTS configuration">
+              <label>Language<select id="typeToTalkLanguage"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select></label>
+              <label>TTS mode<select id="typeToTalkMode"><option value="edge">Edge only</option><option value="kokoro">Kokoro local only</option><option value="edge_fallback">Edge → Kokoro fallback</option><option value="kokoro_fallback">Kokoro → Edge fallback</option></select></label>
+              <label>Edge voice<select id="typeToTalkEdgeVoice"></select></label>
+              <label>Kokoro voice<select id="typeToTalkKokoroVoice"></select></label>
+              <label>Rate<input id="typeToTalkRate" type="number" min="0.5" max="2" step="0.05" value="1"></label>
+              <label>Volume<input id="typeToTalkVolume" type="number" min="0" max="1" step="0.05" value="1"></label>
+            </div>
+            <div id="typeToTalkMessages" class="type-to-talk-messages" aria-live="polite"></div>
+            <form id="typeToTalkForm" class="type-to-talk-compose">
+              <textarea id="typeToTalkInput" rows="1" maxlength="20000" placeholder="Type something for VerbaNode to say. Enter sends; Shift+Enter adds a new line."></textarea>
+              <button class="btn primary send-btn" type="submit">Send</button>
+            </form>
+          </section>
+        </div>
+      </section>
+
       <section id="page-scripts" class="page">
         <div class="scripts-layout">
           <div>
-            <div class="page-actions"><div><p class="muted">Scripts bypass STT, LLM, tools, and memory. They use the active agent's TTS. Generated audio is cached and replayed when the text and voice settings are unchanged.</p></div><button id="addScriptBtn" class="btn primary">＋ Create script</button></div>
+            <div class="page-actions"><div><p class="muted">Scripts bypass STT, LLM, tools, and memory. Speech settings are chosen when you create a script. New scripts remember the configuration from the last script you saved; otherwise VerbaNode uses the normal defaults.</p></div><button id="addScriptBtn" class="btn primary">＋ Create script</button></div>
             <div id="scriptGrid" class="card-grid scripts-grid"></div>
           </div>
           <aside class="card queue-card">
@@ -498,9 +528,10 @@
 
     <nav class="mobile-bottom-nav">
       <button class="active" data-page="chat">◉<span>Chat</span></button>
-      <button data-page="agents">◇<span>Agents</span></button>
       <button data-page="scripts">▶<span>Scripts</span></button>
-      <button data-page="settings">⚙<span>Settings</span></button>
+      <button data-page="audio">♫<span>Audio</span></button>
+      <button data-page="speak">◖<span>Speak</span></button>
+      <button data-page="settings">⚙<span>More</span></button>
     </nav>
   </div>
 
@@ -569,17 +600,18 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/js/runtime.js?v=0.9.1" defer></script>
-  <script src="/static/js/client.js?v=0.9.1" defer></script>
-  <script src="/static/js/browser-ptt.js?v=0.9.1" defer></script>
-  <script src="/static/js/diagnostics.js?v=0.9.1" defer></script>
-  <script src="/static/js/chat.js?v=0.9.1" defer></script>
-  <script src="/static/js/agents.js?v=0.9.1" defer></script>
-  <script src="/static/js/plugins.js?v=0.9.1" defer></script>
-  <script src="/static/js/devices.js?v=0.9.1" defer></script>
-  <script src="/static/js/settings.js?v=0.9.1" defer></script>
-  <script src="/static/js/data-recovery.js?v=0.9.1" defer></script>
-  <script src="/static/js/audio-library.js?v=0.9.1" defer></script>
-  <script src="/static/app.js?v=0.9.1" defer></script>
+  <script src="/static/js/runtime.js?v=0.9.2" defer></script>
+  <script src="/static/js/client.js?v=0.9.2" defer></script>
+  <script src="/static/js/browser-ptt.js?v=0.9.2" defer></script>
+  <script src="/static/js/diagnostics.js?v=0.9.2" defer></script>
+  <script src="/static/js/chat.js?v=0.9.2" defer></script>
+  <script src="/static/js/agents.js?v=0.9.2" defer></script>
+  <script src="/static/js/plugins.js?v=0.9.2" defer></script>
+  <script src="/static/js/devices.js?v=0.9.2" defer></script>
+  <script src="/static/js/settings.js?v=0.9.2" defer></script>
+  <script src="/static/js/data-recovery.js?v=0.9.2" defer></script>
+  <script src="/static/js/audio-library.js?v=0.9.2" defer></script>
+  <script src="/static/js/type-to-talk.js?v=0.9.2" defer></script>
+  <script src="/static/app.js?v=0.9.2" defer></script>
 </body>
 </html>

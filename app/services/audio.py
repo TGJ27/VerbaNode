@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+import subprocess
+import tempfile
 import queue
 import threading
 import time
@@ -832,8 +835,30 @@ class HostAudioPlayer:
             import soundfile as sf
 
             audio, source_rate = sf.read(str(path), dtype="float32", always_2d=True)
-        except Exception as exc:
-            raise AudioUnavailable(f"Could not decode TTS audio {path.name}: {exc}") from exc
+        except Exception as first_exc:
+            ffmpeg = shutil.which("ffmpeg")
+            if not ffmpeg:
+                raise AudioUnavailable(
+                    f"Could not decode audio {path.name}: {first_exc}. "
+                    "Install FFmpeg for additional audio formats."
+                ) from first_exc
+            tmp_name = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
+                    tmp_name = handle.name
+                result = subprocess.run(
+                    [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(path), "-ac", "1", "-ar", str(int(self._sample_rate)), tmp_name],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120, check=False,
+                )
+                if result.returncode != 0:
+                    detail = result.stderr.decode("utf-8", errors="replace").strip()
+                    raise AudioUnavailable(f"FFmpeg could not decode {path.name}: {detail or 'unknown decoder error'}")
+                import soundfile as sf
+                audio, source_rate = sf.read(tmp_name, dtype="float32", always_2d=True)
+            finally:
+                if tmp_name:
+                    try: Path(tmp_name).unlink(missing_ok=True)
+                    except Exception: pass
         if audio.size == 0:
             raise AudioUnavailable(f"TTS audio file is empty: {path.name}")
         if audio.shape[1] > 1:

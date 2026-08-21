@@ -160,6 +160,49 @@ class ScriptTtsPreviewRequest(BaseModel):
         return self
 
 
+class ScriptDefaultsUpdate(BaseModel):
+    language: Literal["en", "id"] = "en"
+    tts_mode: Literal["edge", "kokoro", "edge_fallback", "kokoro_fallback"] = "edge"
+    edge_voice: str = Field(default="en-US-AriaNeural", min_length=3, max_length=120)
+    kokoro_voice_id: int = Field(default=0, ge=0, le=102)
+    tts_rate: float = Field(default=1.0, ge=0.5, le=2.0)
+    tts_volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def apply_language_profile(self) -> "ScriptDefaultsUpdate":
+        if self.language == "id":
+            self.tts_mode = "edge"
+            if not self.edge_voice.startswith("id-"):
+                self.edge_voice = "id-ID-GadisNeural"
+        elif self.edge_voice.lower().startswith("id-"):
+            self.edge_voice = "en-US-AriaNeural"
+        return self
+
+
+class TypeToTalkCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    language: Literal["en", "id"] | None = None
+    tts_mode: Literal["edge", "kokoro", "edge_fallback", "kokoro_fallback"] | None = None
+    edge_voice: str | None = Field(default=None, min_length=3, max_length=120)
+    kokoro_voice_id: int | None = Field(default=None, ge=0, le=102)
+    tts_rate: float | None = Field(default=None, ge=0.5, le=2.0)
+    tts_volume: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def apply_language_profile(self) -> "TypeToTalkCreate":
+        if self.language == "id":
+            self.tts_mode = "edge"
+            if self.edge_voice and not self.edge_voice.startswith("id-"):
+                self.edge_voice = "id-ID-GadisNeural"
+        elif self.language == "en" and self.edge_voice and self.edge_voice.lower().startswith("id-"):
+            self.edge_voice = "en-US-AriaNeural"
+        return self
+
+
+class TypeToTalkReorder(BaseModel):
+    ordered_ids: list[int]
+
+
 class DiagnosticsSoakRequest(BaseModel):
     duration_minutes: int = Field(default=30, ge=1, le=480)
     interval_seconds: int = Field(default=5, ge=2, le=60)

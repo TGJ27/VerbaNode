@@ -30,6 +30,7 @@ from app.services.pipeline import PipelineMonitor
 from app.services.script_queue import ScriptQueueManager
 from app.services.stt import FunASRService
 from app.services.tools import ToolService
+from app.services.type_to_talk import TypeToTalkManager
 from app.services.tts import KokoroTtsProvider, TtsService
 
 
@@ -53,6 +54,7 @@ class AppState:
     tts: TtsService
     conversation: ConversationManager
     script_queue: ScriptQueueManager
+    type_to_talk: TypeToTalkManager
     diagnostics: DiagnosticsManager
 
     def reconcile_audio_devices(self) -> dict[str, int | None]:
@@ -220,6 +222,7 @@ def build_state() -> AppState:
         monitor=monitor,
     )
     script_queue = ScriptQueueManager(db, tts, events, conversation.active_agent)
+    type_to_talk = TypeToTalkManager(db, tts, events)
     audio_library = AudioLibraryManager(settings.audio_library_dir, player, events)
     conversation.script_queue = script_queue
     from app.version import APP_VERSION, BUILD_LABEL
@@ -248,6 +251,7 @@ def build_state() -> AppState:
         tts=tts,
         conversation=conversation,
         script_queue=script_queue,
+        type_to_talk=type_to_talk,
         diagnostics=diagnostics,
     )
 

@@ -47,12 +47,15 @@ def feature_manifest() -> dict[str, Any]:
         "lan_discovery": True,
         "mdns_service_type": "_verbanode._tcp.local.",
         "audio_library": True,
-        "audio_library_formats": ["mp3", "wav"],
+        "audio_library_formats": ["mp3", "mpeg", "mpg", "mpga", "mp2", "wav", "flac", "ogg", "oga", "opus", "m4a", "aac", "wma", "aiff", "aif", "webm", "mka", "amr"],
         "configuration_options": True,
         "script_queue_loop": True,
         "script_queue_pause": True,
         "script_queue_drag_reorder": True,
         "stable_instance_identity": True,
+        "type_to_talk_queue": True,
+        "script_defaults": True,
+        "broad_audio_formats": True,
     }
 
 

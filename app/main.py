@@ -24,6 +24,7 @@ from app.api.plugins import router as plugins_router
 from app.api.scripts import router as scripts_router
 from app.api.system import router as system_router
 from app.api.tts import router as tts_router
+from app.api.type_to_talk import router as type_to_talk_router
 from app.config import ROOT_DIR
 from app.http import install_http_hardening, install_request_id_logging
 from app.runtime import install_asyncio_exception_filter
@@ -65,6 +66,7 @@ app.include_router(audio_router)
 app.include_router(audio_library_router)
 app.include_router(ai_router)
 app.include_router(tts_router)
+app.include_router(type_to_talk_router)
 
 
 @app.on_event("startup")
@@ -107,6 +109,7 @@ async def shutdown_event() -> None:
     state.diagnostics.shutdown()
     await state.conversation.stop_conversation(stop_tts=True)
     await state.script_queue.stop()
+    await state.type_to_talk.stop()
     await state.audio_library.stop()
     if state.ai_engine is not None:
         await asyncio.to_thread(state.ai_engine.stop)

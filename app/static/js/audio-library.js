@@ -30,7 +30,7 @@ function renderAudioLibrary() {
   $('#audioLibraryCount').textContent = `${items.length} ${items.length === 1 ? 'file' : 'files'}`;
   $('#audioLibraryStatus').textContent = appState.audioLibraryPlaying ? `Playing: ${appState.audioLibraryPlaying}` : 'No audio playing';
   if (!items.length) {
-    grid.innerHTML = '<div class="card queue-empty">No audio files yet. Upload an MP3 or WAV file.</div>';
+    grid.innerHTML = '<div class="card queue-empty">No audio files yet. Upload a supported audio file.</div>';
     return;
   }
   grid.innerHTML = items.map(item => {
@@ -54,7 +54,7 @@ function bindAudioLibraryControls() {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = '';
     if (!file) return;
-    if (!/\.(mp3|wav)$/i.test(file.name)) return toast('Choose an MP3 or WAV file.', 'error');
+    if (!/\.(wav|mp3|mpeg|mpg|mpga|mp2|flac|ogg|oga|opus|m4a|aac|wma|aiff|aif|webm|mka|amr)$/i.test(file.name)) return toast('Choose a supported audio file.', 'error');
     const body = new FormData();
     body.append('file', file, file.name);
     try {

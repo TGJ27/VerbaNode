@@ -1,46 +1,43 @@
-# VerbaNode v0.9.1 — Media Library & Queue UX
+# VerbaNode v0.9.2 — Direct Speech & Workflow UX
 
-v0.9.1 is a coordinated Core/Web release for VerbaNode Android v0.3.2. It keeps the v0.9 LAN-only trusted-device model while adding host audio-file playback, richer script-queue controls, mobile configuration selectors, and stable installation identity across source/application updates.
+
+- Fixed the Conversation right rail so controls start at the top instead of leaving a large blank area.
+- Reworked Type to Talk into a chat-style direct-speech transcript with Enter-to-send, queued messages, persistent speech history, and per-message TTS language/engine/voice/rate/volume configuration.
+- Script creation keeps speech controls inside the Create/Edit dialog again; a new script is prefilled from the last script configuration you saved, and falls back to standard defaults when no previous configuration exists.
+v0.9.2 is the coordinated Core/Web release for VerbaNode Android v0.3.3. It focuses on direct speech, repeatable script authoring, broader audio playback, and consistent client configuration. RAG and large-knowledge retrieval are intentionally deferred.
+
+## Type to Talk
+
+- Added a persistent Core-hosted Type-to-Talk queue shared by Web and Android.
+- Typed text is sent directly to TTS; it does not pass through the LLM.
+- Multiple entries can be added while speech is already playing.
+- Clients can play, stop, clear, remove, and reorder queued entries.
+- Queue state survives client disconnects and is reconciled on Core restart.
+
+## Script defaults
+
+- Added persistent defaults for language, TTS mode, Edge voice, Kokoro voice, speech rate, and volume.
+- New scripts inherit the last saved defaults instead of reverting after each add.
+- Existing scripts keep their saved speech configuration when edited.
+- Web and Android expose the defaults outside the per-script add flow.
 
 ## Audio Library
 
-- Added an **Audio** page to the web dashboard.
-- Upload `.mp3` and `.wav` files to the VerbaNode host.
-- Play/stop uploaded audio through the Windows host output device.
-- Rename and delete uploaded files.
-- Added authenticated `/api/audio-library` endpoints for web and Android clients.
-- Audio files live in the persistent VerbaNode user-data root so source-folder updates do not remove them.
+- Expanded accepted formats to WAV, MP3, FLAC, OGG/OGA, Opus, M4A, AAC, WMA, AIFF/AIF, WebM audio, MKA, and AMR.
+- Formats supported by the normal decoder play directly. Other supported uploads can use an `ffmpeg` executable on PATH as a decode fallback.
+- Uploaded files are validated by VerbaNode and remain in persistent user data.
 
-## Script Queue
+## Client configuration
 
-- Added persistent **Loop queue** control.
-- Added per-item **pause after playback** from 0 to 3600 seconds.
-- Added drag reordering in the web dashboard and Android client.
-- Queue state now reports its loop setting to all clients.
-- Database schema advances to **v6** with `script_queue.pause_after_seconds`.
-
-## Client configuration contract
-
-- Added `/api/configuration-options` for languages, installed/default Ollama models, STT model choices, and TTS modes.
-- The Android client uses these options as selectors instead of free-text model/language fields.
-
-## Stable device identity across updates
-
-Source-mode Core runtime identity is now stored under the same persistent LocalAppData-style user-data root used by packaged builds, unless explicit portable mode is enabled. On first v0.9.1 source start, legacy repo-local `.env`, database, certificates, backups, diagnostics, runtime audio, audio library, and logs are copied into the stable user-data root when no stable copy exists.
-
-This preserves the Core `instance_id`, trusted-device database records, controller PIN, and HTTPS private key across clean source-folder replacements. An Android app or Core version change is not treated as a new device.
-
-Set `VERBANODE_PORTABLE_MODE=true` only when intentionally using repo-local source runtime state.
-
-## Chat UX
-
-- Increased usable chat area in the web dashboard.
-- Moved the auto-scroll control below the composer.
-- Narrowed/lowered the side controls to prioritize conversation space.
+- Android model selection merges shared `/api/configuration-options` choices with the live installed-model catalog from Core.
+- Client capability metadata advertises Type-to-Talk, script defaults, and broad audio support.
 
 ## Compatibility
 
-- REST API version remains v1.
+- REST API remains v1.
 - WebSocket protocol remains v1.
+- Database schema advances to v7 and migrates automatically.
 - Trusted-device pairing remains LAN-only and single-active-controller.
-- Existing v0.9.0 databases migrate automatically to schema v6.
+- No RAG/vector database/document-ingestion system is included in this release.
+
+- Expanded Audio Library MPEG-family compatibility for `.mpeg`, `.mpg`, `.mpga`, and `.mp2` files (decoded through the existing FFmpeg fallback when required).
