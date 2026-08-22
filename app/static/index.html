@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#eef4ff">
   <title>VerbaNode Standalone</title>
-  <link rel="icon" href="/static/VerbaNode.png?v=0.9.2" type="image/png">
-  <link rel="stylesheet" href="/static/styles.css?v=0.9.2">
+  <link rel="icon" href="/static/VerbaNode.png?v=0.9.6" type="image/png">
+  <link rel="stylesheet" href="/static/styles.css?v=0.9.6">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
 
   <section id="loginView" class="login-view">
     <div class="login-card">
-      <div class="brand-mark large"><img src="/static/VerbaNode.png?v=0.9.2" alt="VerbaNode"></div>
+      <div class="brand-mark large"><img src="/static/VerbaNode.png?v=0.9.6" alt="VerbaNode"></div>
       <p class="eyebrow">LOCAL VOICE SYSTEM</p>
       <h1>VerbaNode</h1>
       <p class="muted">Standalone Windows host · browser control panel</p>
@@ -34,10 +34,10 @@
   <div id="appShell" class="app-shell hidden">
     <aside class="sidebar" id="sidebar">
       <div class="brand-row">
-        <div class="brand-mark"><img src="/static/VerbaNode.png?v=0.9.2" alt="VerbaNode"></div>
+        <div class="brand-mark"><img src="/static/VerbaNode.png?v=0.9.6" alt="VerbaNode"></div>
         <div>
           <strong>VerbaNode</strong>
-          <span>Standalone · <b id="appVersion">v0.9.2</b></span>
+          <span>Standalone · <b id="appVersion">v0.9.6</b></span>
         </div>
         <button id="mobileCloseNav" class="icon-btn mobile-only" aria-label="Close menu">×</button>
       </div>
@@ -94,6 +94,7 @@
               <div id="chatAgentIdentity" class="agent-identity"></div>
               <div class="chat-header-actions">
                 <select id="conversationSelect" title="Conversation history"></select>
+                <button id="autoScrollToggle" class="btn primary compact" type="button" aria-pressed="true" title="Chat is locked to the newest message">Auto-scroll ON</button>
                 <button id="newChatBtn" class="btn ghost compact">＋ New Chat</button>
               </div>
             </div>
@@ -111,10 +112,6 @@
                 <textarea id="chatInput" rows="1" placeholder="Type a message. The response will appear here and play through the Windows speaker."></textarea>
                 <button class="btn primary send-btn" type="submit" aria-label="Send message">Send</button>
               </form>
-              <div class="chat-compose-footer">
-                <button id="autoScrollToggle" class="btn primary compact" type="button" aria-pressed="true" title="Chat is locked to the newest message">Auto-scroll ON</button>
-                <span class="tiny muted">Turn off to read older messages without being pulled to the bottom.</span>
-              </div>
             </div>
           </section>
 
@@ -214,7 +211,7 @@
       <section id="page-audio" class="page">
         <div class="page-actions">
           <div><p class="eyebrow">HOST AUDIO LIBRARY</p><p class="muted">Upload common audio formats and play them through the selected Windows speaker. FFmpeg is used as a fallback decoder when needed. Files stay on this VerbaNode installation.</p></div>
-          <label class="btn primary audio-upload-label">＋ Upload audio<input id="audioLibraryUpload" type="file" accept="audio/*,.wav,.mp3,.mpeg,.mpg,.mpga,.mp2,.flac,.ogg,.oga,.opus,.m4a,.aac,.wma,.aiff,.aif,.webm,.mka,.amr" hidden></label>
+          <label class="btn primary audio-upload-label">＋ Upload audio<input id="audioLibraryUpload" type="file" accept="audio/*,audio/mpeg,video/mpeg,.wav,.mp3,.mpeg,.mpg,.mpga,.mp2,.mpa,.flac,.ogg,.oga,.opus,.m4a,.aac,.wma,.aiff,.aif,.webm,.mka,.amr" hidden></label>
         </div>
         <div class="audio-library-toolbar card">
           <div><strong id="audioLibraryStatus">No audio playing</strong><small id="audioLibraryCount">0 files</small></div>
@@ -224,31 +221,31 @@
       </section>
 
       <section id="page-speak" class="page">
-        <div class="type-to-talk-shell">
-          <section class="card type-to-talk-card">
-            <div class="type-to-talk-header">
+        <div class="type-to-talk-layout">
+          <section class="card type-to-talk-panel">
+            <div class="type-to-talk-head">
               <div><p class="eyebrow">DIRECT TTS</p><h3>Type to Talk</h3></div>
-              <div class="type-to-talk-actions">
-                <span id="typeToTalkState" class="chip">Idle</span>
-                <button id="typeToTalkPlayBtn" class="btn success compact" type="button">▶ Resume</button>
-                <button id="typeToTalkStopBtn" class="btn ghost compact" type="button">■ Stop</button>
-                <button id="typeToTalkClearBtn" class="btn danger-outline compact" type="button">Clear</button>
-              </div>
+              <span id="typeToTalkState" class="chip">Idle</span>
             </div>
-            <div class="type-to-talk-config" aria-label="Type to Talk TTS configuration">
+            <div class="type-to-talk-settings form-grid three">
               <label>Language<select id="typeToTalkLanguage"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select></label>
               <label>TTS mode<select id="typeToTalkMode"><option value="edge">Edge only</option><option value="kokoro">Kokoro local only</option><option value="edge_fallback">Edge → Kokoro fallback</option><option value="kokoro_fallback">Kokoro → Edge fallback</option></select></label>
               <label>Edge voice<select id="typeToTalkEdgeVoice"></select></label>
               <label>Kokoro voice<select id="typeToTalkKokoroVoice"></select></label>
-              <label>Rate<input id="typeToTalkRate" type="number" min="0.5" max="2" step="0.05" value="1"></label>
+              <label>Speech rate<input id="typeToTalkRate" type="number" min="0.5" max="2" step="0.05" value="1"></label>
               <label>Volume<input id="typeToTalkVolume" type="number" min="0" max="1" step="0.05" value="1"></label>
             </div>
-            <div id="typeToTalkMessages" class="type-to-talk-messages" aria-live="polite"></div>
-            <form id="typeToTalkForm" class="type-to-talk-compose">
-              <textarea id="typeToTalkInput" rows="1" maxlength="20000" placeholder="Type something for VerbaNode to say. Enter sends; Shift+Enter adds a new line."></textarea>
+            <div id="typeToTalkQueue" class="type-to-talk-messages"></div>
+            <form id="typeToTalkForm" class="chat-compose type-to-talk-compose">
+              <textarea id="typeToTalkInput" rows="1" maxlength="20000" placeholder="Type what VerbaNode should say..."></textarea>
               <button class="btn primary send-btn" type="submit">Send</button>
             </form>
           </section>
+          <aside class="card queue-card type-to-talk-controls">
+            <div class="card-title-row"><div><p class="eyebrow">SPEECH QUEUE</p><h3>Controls</h3></div></div>
+            <div class="button-grid three queue-controls"><button id="typeToTalkPlayBtn" class="btn success compact">▶ Play</button><button id="typeToTalkStopBtn" class="btn ghost compact">■ Stop</button><button id="typeToTalkClearBtn" class="btn danger-outline compact">Clear</button></div>
+            <p class="muted tiny">Enter sends. Shift+Enter adds a new line. New entries queue while speech is already playing.</p>
+          </aside>
         </div>
       </section>
 
@@ -600,18 +597,18 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/js/runtime.js?v=0.9.2" defer></script>
-  <script src="/static/js/client.js?v=0.9.2" defer></script>
-  <script src="/static/js/browser-ptt.js?v=0.9.2" defer></script>
-  <script src="/static/js/diagnostics.js?v=0.9.2" defer></script>
-  <script src="/static/js/chat.js?v=0.9.2" defer></script>
-  <script src="/static/js/agents.js?v=0.9.2" defer></script>
-  <script src="/static/js/plugins.js?v=0.9.2" defer></script>
-  <script src="/static/js/devices.js?v=0.9.2" defer></script>
-  <script src="/static/js/settings.js?v=0.9.2" defer></script>
-  <script src="/static/js/data-recovery.js?v=0.9.2" defer></script>
-  <script src="/static/js/audio-library.js?v=0.9.2" defer></script>
-  <script src="/static/js/type-to-talk.js?v=0.9.2" defer></script>
-  <script src="/static/app.js?v=0.9.2" defer></script>
+  <script src="/static/js/runtime.js?v=0.9.6" defer></script>
+  <script src="/static/js/client.js?v=0.9.6" defer></script>
+  <script src="/static/js/browser-ptt.js?v=0.9.6" defer></script>
+  <script src="/static/js/diagnostics.js?v=0.9.6" defer></script>
+  <script src="/static/js/chat.js?v=0.9.6" defer></script>
+  <script src="/static/js/agents.js?v=0.9.6" defer></script>
+  <script src="/static/js/plugins.js?v=0.9.6" defer></script>
+  <script src="/static/js/devices.js?v=0.9.6" defer></script>
+  <script src="/static/js/settings.js?v=0.9.6" defer></script>
+  <script src="/static/js/data-recovery.js?v=0.9.6" defer></script>
+  <script src="/static/js/audio-library.js?v=0.9.6" defer></script>
+  <script src="/static/js/type-to-talk.js?v=0.9.6" defer></script>
+  <script src="/static/app.js?v=0.9.6" defer></script>
 </body>
 </html>

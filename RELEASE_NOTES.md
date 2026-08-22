@@ -1,43 +1,23 @@
-# VerbaNode v0.9.2 — Direct Speech & Workflow UX
+# VerbaNode v0.9.6 — Type-to-Talk Self-Healing Queue
 
+v0.9.6 fixes the case where an installation can still show:
 
-- Fixed the Conversation right rail so controls start at the top instead of leaving a large blank area.
-- Reworked Type to Talk into a chat-style direct-speech transcript with Enter-to-send, queued messages, persistent speech history, and per-message TTS language/engine/voice/rate/volume configuration.
-- Script creation keeps speech controls inside the Create/Edit dialog again; a new script is prefilled from the last script configuration you saved, and falls back to standard defaults when no previous configuration exists.
-v0.9.2 is the coordinated Core/Web release for VerbaNode Android v0.3.3. It focuses on direct speech, repeatable script authoring, broader audio playback, and consistent client configuration. RAG and large-knowledge retrieval are intentionally deferred.
+`Type-to-Talk queue is unavailable: table type_to_talk_queue has no column named error`
 
-## Type to Talk
+even after updating to v0.9.5. The previous fix depended too heavily on migration v9 running once. If the database was already stamped schema v9 while a stale SQLite object remained, reinstalling the same release would not run v9 again.
 
-- Added a persistent Core-hosted Type-to-Talk queue shared by Web and Android.
-- Typed text is sent directly to TTS; it does not pass through the LLM.
-- Multiple entries can be added while speech is already playing.
-- Clients can play, stop, clear, remove, and reorder queued entries.
-- Queue state survives client disconnects and is reconciled on Core restart.
+## What changed
 
-## Script defaults
+- Added database schema migration v10. It force-rebuilds `type_to_talk_queue` into the canonical five-column schema regardless of the existing v9 queue shape.
+- Core now validates and repairs the Type-to-Talk queue on **every startup**, even when schema metadata already says the database is current.
+- Send now has a request-time self-heal path. If the queue INSERT hits a SQLite schema error involving `type_to_talk_queue`, Core force-repairs the queue and retries the real INSERT exactly once.
+- Queue repair removes every persistent SQLite trigger whose SQL references `type_to_talk_queue`, including triggers attached to another table.
+- Queue validation now executes a real INSERT inside a savepoint and rolls it back. This validates trigger execution; the older `EXPLAIN INSERT` check was not sufficient for all persistent-object states.
+- Valid queued text is preserved during rebuild. Playback state is reset to `waiting`.
+- Existing v0.9.5/v0.9.4 cleanup hardening remains unchanged.
 
-- Added persistent defaults for language, TTS mode, Edge voice, Kokoro voice, speech rate, and volume.
-- New scripts inherit the last saved defaults instead of reverting after each add.
-- Existing scripts keep their saved speech configuration when edited.
-- Web and Android expose the defaults outside the per-script add flow.
+## Upgrade
 
-## Audio Library
+Fully stop VerbaNode Core, replace the release files, then start it again. Migration v10 runs at startup. If a stale queue object somehow appears after startup, the first Send request can now repair it automatically without another migration bump.
 
-- Expanded accepted formats to WAV, MP3, FLAC, OGG/OGA, Opus, M4A, AAC, WMA, AIFF/AIF, WebM audio, MKA, and AMR.
-- Formats supported by the normal decoder play directly. Other supported uploads can use an `ffmpeg` executable on PATH as a decode fallback.
-- Uploaded files are validated by VerbaNode and remain in persistent user data.
-
-## Client configuration
-
-- Android model selection merges shared `/api/configuration-options` choices with the live installed-model catalog from Core.
-- Client capability metadata advertises Type-to-Talk, script defaults, and broad audio support.
-
-## Compatibility
-
-- REST API remains v1.
-- WebSocket protocol remains v1.
-- Database schema advances to v7 and migrates automatically.
-- Trusted-device pairing remains LAN-only and single-active-controller.
-- No RAG/vector database/document-ingestion system is included in this release.
-
-- Expanded Audio Library MPEG-family compatibility for `.mpeg`, `.mpg`, `.mpga`, and `.mp2` files (decoded through the existing FFmpeg fallback when required).
+The Android client remains compatible at v0.3.6; no Android code change is required for this Core database fault.

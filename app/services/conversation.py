@@ -156,10 +156,21 @@ class ConversationManager:
             await self.stop_current_tts()
         # asyncio task cancellation alone does not stop a function already
         # running inside asyncio.to_thread(). Explicitly close and wait for the
-        # microphone before scripts or TTS are allowed to start.
-        await asyncio.to_thread(self.recorder.cancel_capture, True, 2.0)
-        self.recorder.cancel_ptt()
-        await asyncio.to_thread(self.recorder.unlock_input)
+        # microphone before scripts or TTS are allowed to start. Stopping is an
+        # idempotent control operation, so an unavailable/restarting audio engine
+        # must not turn a harmless stop into an HTTP 500 for direct-speech APIs.
+        try:
+            await asyncio.to_thread(self.recorder.cancel_capture, True, 2.0)
+        except Exception:
+            LOGGER.warning("Microphone capture cleanup failed while stopping conversation", exc_info=True)
+        try:
+            self.recorder.cancel_ptt()
+        except Exception:
+            LOGGER.warning("PTT cleanup failed while stopping conversation", exc_info=True)
+        try:
+            await asyncio.to_thread(self.recorder.unlock_input)
+        except Exception:
+            LOGGER.warning("Microphone unlock failed while stopping conversation", exc_info=True)
         self._ptt_active = False
         await self.events.broadcast(
             "audio_lock_changed",

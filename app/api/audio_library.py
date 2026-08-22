@@ -23,7 +23,7 @@ async def list_audio_library(token: Token) -> dict[str, Any]:
     return {
         "items": state.audio_library.list_files(),
         "playing": state.audio_library.playing_name,
-        "allowed_extensions": [".wav", ".mp3", ".mpeg", ".mpg", ".mpga", ".mp2", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wma", ".aiff", ".aif", ".webm", ".mka", ".amr"],
+        "allowed_extensions": [".wav", ".mp3", ".mpeg", ".mpg", ".mpga", ".mp2", ".mpa", ".flac", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wma", ".aiff", ".aif", ".webm", ".mka", ".amr"],
         "max_upload_bytes": state.settings.audio_library_max_upload_bytes,
     }
 

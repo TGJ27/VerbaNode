@@ -54,7 +54,7 @@ function bindAudioLibraryControls() {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = '';
     if (!file) return;
-    if (!/\.(wav|mp3|mpeg|mpg|mpga|mp2|flac|ogg|oga|opus|m4a|aac|wma|aiff|aif|webm|mka|amr)$/i.test(file.name)) return toast('Choose a supported audio file.', 'error');
+    if (!/\.(wav|mp3|mpeg|mpg|mpga|mp2|mpa|flac|ogg|oga|opus|m4a|aac|wma|aiff|aif|webm|mka|amr)$/i.test(file.name)) return toast('Choose a supported audio file.', 'error');
     const body = new FormData();
     body.append('file', file, file.name);
     try {

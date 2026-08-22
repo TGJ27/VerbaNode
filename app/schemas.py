@@ -188,13 +188,22 @@ class TypeToTalkCreate(BaseModel):
     tts_rate: float | None = Field(default=None, ge=0.5, le=2.0)
     tts_volume: float | None = Field(default=None, ge=0.0, le=1.0)
 
+
+class TypeToTalkSettingsUpdate(BaseModel):
+    language: Literal["en", "id"] = "en"
+    tts_mode: Literal["edge", "kokoro", "edge_fallback", "kokoro_fallback"] = "edge"
+    edge_voice: str = Field(default="en-US-AriaNeural", min_length=3, max_length=120)
+    kokoro_voice_id: int = Field(default=0, ge=0, le=102)
+    tts_rate: float = Field(default=1.0, ge=0.5, le=2.0)
+    tts_volume: float = Field(default=1.0, ge=0.0, le=1.0)
+
     @model_validator(mode="after")
-    def apply_language_profile(self) -> "TypeToTalkCreate":
+    def apply_language_profile(self) -> "TypeToTalkSettingsUpdate":
         if self.language == "id":
             self.tts_mode = "edge"
-            if self.edge_voice and not self.edge_voice.startswith("id-"):
+            if not self.edge_voice.startswith("id-"):
                 self.edge_voice = "id-ID-GadisNeural"
-        elif self.language == "en" and self.edge_voice and self.edge_voice.lower().startswith("id-"):
+        elif self.edge_voice.startswith("id-"):
             self.edge_voice = "en-US-AriaNeural"
         return self
 

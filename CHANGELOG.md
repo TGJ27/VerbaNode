@@ -1,8 +1,34 @@
+## v0.9.6 - Type-to-Talk migration-independent self-heal
+
+- Add schema migration v10 to force a canonical rebuild of `type_to_talk_queue` for databases already stamped schema v9.
+- Validate/repair the Type-to-Talk queue on every Core startup, independent of migration metadata.
+- Add request-time recovery: if Send encounters a Type-to-Talk SQLite schema error, Core force-repairs the queue and retries the insert exactly once.
+- Remove all persistent SQLite triggers whose SQL references `type_to_talk_queue`, not only triggers attached directly to that table.
+- Replace the prior `EXPLAIN` probe with a real rolled-back production-shaped INSERT, so trigger execution is validated too.
+- Preserve valid queued text while rebuilding and reset playback state to `waiting`.
+
+## v0.9.5 - Type-to-Talk database schema repair
+
+- Add schema migration v9 to remove unsupported legacy Type-to-Talk SQLite triggers that can reference the obsolete `error` column.
+- Rebuild malformed Type-to-Talk queue tables while preserving valid queued text.
+- Normalize queue state/indexes and compile the production INSERT during startup so schema incompatibilities are caught before use.
+- Keep the v0.9.4 best-effort playback/audio cleanup behavior.
+
+## v0.9.4 - Type-to-Talk 500 reliability fix
+
+- Isolate all competing-playback cleanup during Type-to-Talk submission so stale/restarting subsystems cannot raise HTTP 500.
+- Add schema migration v8 to self-repair the Type-to-Talk queue table/index and reset stale playing rows.
+- Return an explicit 503 with diagnostic detail if queue insertion itself is unavailable.
+
 # Changelog
 
+## v0.9.4 - Type-to-Talk reliability hotfix
 
-- Fixed the Conversation right rail so controls start at the top instead of leaving a large blank area.
-- Reworked Type to Talk into a chat-style direct-speech transcript with Enter-to-send, queued messages, persistent speech history, and per-message TTS language/engine/voice/rate/volume configuration.
+- Fixed a Core-side HTTP 500 affecting Type-to-Talk from both the web dashboard and Android clients when the microphone/audio engine was idle, unavailable, or restarting.
+- Idle Type-to-Talk requests now stop only current speech/output instead of tearing down the conversation microphone path.
+- Conversation shutdown now treats capture cancellation, PTT cancellation, and microphone unlock as best-effort cleanup so transient audio-engine failures do not abort API requests.
+- Added regression tests for the idle Type-to-Talk path and resilient conversation-stop cleanup.
+
 ## v0.9.2 - Direct speech and workflow UX
 
 - Added a persistent server-side Type-to-Talk queue shared by the web and Android clients; queued text goes directly to TTS without LLM processing.
@@ -403,5 +429,7 @@
 - Added STT confidence threshold controls.
 - Set Ropi defaults to `qwen3.5:0.8b`, 88% STT threshold, and 224 maximum response tokens.
 - Added explicit database setup tooling for repository deployments.
+- Fixed the conversation side rail alignment so controls no longer leave a large empty area above them.
+- Type to Talk now has its own remembered TTS configuration and a chat-style send/queue experience.
+- Added MPEG-family audio uploads (`.mpeg`, `.mpg`, `.mpga`, `.mp2`, `.mpa`) in addition to existing formats.
 
-- Expanded Audio Library MPEG-family compatibility for `.mpeg`, `.mpg`, `.mpga`, and `.mp2` files (decoded through the existing FFmpeg fallback when required).

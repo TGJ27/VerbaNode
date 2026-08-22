@@ -36,6 +36,7 @@ from app.migrations import (
     VERBANODE_APPLICATION_ID,
     apply_migrations,
     read_schema_version,
+    repair_type_to_talk_queue_schema,
 )
 from app.services.kokoro_voices import voice_name
 
@@ -191,6 +192,11 @@ class Database:
         with self._write_lock, self.connect() as conn:
             conn.executescript(schema)
             apply_migrations(conn)
+            # Health-check the direct-speech queue on every startup, even when
+            # schema metadata already says the database is current. This is
+            # deliberately independent of migration versioning so a stale
+            # trigger/object cannot survive a hand-copied or interrupted update.
+            repair_type_to_talk_queue_schema(conn)
         self._seed()
 
     def _seed(self) -> None:
@@ -921,45 +927,57 @@ class Database:
     def list_type_to_talk_queue(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM type_to_talk_queue WHERE status IN ('waiting','playing') ORDER BY position,id"
+                "SELECT * FROM type_to_talk_queue ORDER BY position,id"
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def list_type_to_talk_transcript(self, limit: int = 200) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM type_to_talk_queue ORDER BY id DESC LIMIT ?",
-                (max(1, int(limit)),),
-            ).fetchall()
-        return [dict(row) for row in reversed(rows)]
-
-    def pending_type_to_talk_count(self) -> int:
-        with self.connect() as conn:
-            return int(conn.execute(
-                "SELECT COUNT(*) FROM type_to_talk_queue WHERE status IN ('waiting','playing')"
-            ).fetchone()[0])
-
-    def add_type_to_talk(self, text: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _add_type_to_talk_once(self, text: str) -> int:
         now = utc_now()
-        cfg = config or {}
         with self._write_lock, self.connect() as conn:
             position = conn.execute(
-                "SELECT COALESCE(MAX(position),-1)+1 FROM type_to_talk_queue WHERE status IN ('waiting','playing')"
+                "SELECT COALESCE(MAX(position),-1)+1 FROM type_to_talk_queue"
             ).fetchone()[0]
             cur = conn.execute(
-                """
-                INSERT INTO type_to_talk_queue(
-                    text,position,status,created_at,language,tts_mode,edge_voice,
-                    kokoro_voice_id,tts_rate,tts_volume
-                ) VALUES(?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    str(text).strip(), position, "waiting", now,
-                    cfg.get("language"), cfg.get("tts_mode"), cfg.get("edge_voice"),
-                    cfg.get("kokoro_voice_id"), cfg.get("tts_rate"), cfg.get("tts_volume"),
-                ),
+                "INSERT INTO type_to_talk_queue(text,position,status,created_at) VALUES(?,?,?,?)",
+                (str(text).strip(), position, "waiting", now),
             )
-            item_id = int(cur.lastrowid)
+            return int(cur.lastrowid)
+
+    @staticmethod
+    def _is_type_to_talk_schema_error(exc: sqlite3.DatabaseError) -> bool:
+        message = str(exc).lower()
+        return "type_to_talk_queue" in message and any(
+            marker in message
+            for marker in (
+                "no column named",
+                "no such column",
+                "no such table",
+                "malformed",
+                "schema",
+            )
+        )
+
+    def repair_type_to_talk_queue(self, *, force_rebuild: bool = True) -> None:
+        """Repair direct-speech queue objects without changing schema metadata.
+
+        This is the request-time escape hatch for installations whose migration
+        version is already current but whose SQLite objects are not.
+        """
+        with self._write_lock, self.connect() as conn:
+            repair_type_to_talk_queue_schema(conn, force_rebuild=force_rebuild)
+
+    def add_type_to_talk(self, text: str) -> dict[str, Any]:
+        try:
+            item_id = self._add_type_to_talk_once(text)
+        except sqlite3.DatabaseError as exc:
+            if not self._is_type_to_talk_schema_error(exc):
+                raise
+            # Do not require another application restart. Repair the queue from
+            # the failing Send request itself, then retry the production INSERT
+            # exactly once.
+            self.repair_type_to_talk_queue(force_rebuild=True)
+            item_id = self._add_type_to_talk_once(text)
+
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM type_to_talk_queue WHERE id=?", (item_id,)).fetchone()
         return dict(row) if row else {}
@@ -975,20 +993,6 @@ class Database:
             result = dict(row)
             result["status"] = "playing"
             return result
-
-    def complete_type_to_talk(self, item_id: int) -> None:
-        with self._write_lock, self.connect() as conn:
-            conn.execute(
-                "UPDATE type_to_talk_queue SET status='completed',completed_at=? WHERE id=?",
-                (utc_now(), item_id),
-            )
-            # Keep a bounded transcript so Type-to-Talk behaves like chat without growing forever.
-            conn.execute(
-                """DELETE FROM type_to_talk_queue
-                   WHERE status='completed' AND id NOT IN (
-                     SELECT id FROM type_to_talk_queue WHERE status='completed' ORDER BY id DESC LIMIT 200
-                   )"""
-            )
 
     def reset_type_to_talk_playing(self) -> None:
         with self._write_lock, self.connect() as conn:
@@ -1006,7 +1010,7 @@ class Database:
     def reorder_type_to_talk(self, ordered_ids: list[int]) -> None:
         with self._write_lock, self.connect() as conn:
             conn.executemany(
-                "UPDATE type_to_talk_queue SET position=? WHERE id=? AND status='waiting'",
+                "UPDATE type_to_talk_queue SET position=? WHERE id=?",
                 [(index, item_id) for index, item_id in enumerate(ordered_ids)],
             )
 

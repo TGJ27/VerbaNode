@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.9.2 adds a persistent Type-to-Talk queue, remembered script speech defaults, broader Audio Library format support, and stronger shared model selectors while preserving the v0.9 LAN-only trusted-device foundation. RAG/large-knowledge retrieval is intentionally deferred. The native Android client is maintained as a separate project (v0.3.3 for this coordinated release).
+> **Project status:** active development. v0.9.6 makes Type-to-Talk queue repair migration-independent: schema v10 force-rebuilds the queue, startup validates it every time, and Send self-repairs/retries the exact stale-SQLite failure even when the database is already marked current. It preserves the v0.9.5/v0.9.4 direct-speech hardening, v0.9.2 workflow, and v0.9 LAN-only trusted-device foundation. RAG/large-knowledge retrieval is intentionally deferred. The native Android client remains compatible at v0.3.6.
 
 ---
 
@@ -79,6 +79,21 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.9.6 Type-to-Talk self-healing queue**
+  - Adds schema migration v10, which force-rebuilds the direct-speech queue for databases already stamped v9.
+  - Validates/repairs the queue on every Core startup rather than trusting schema metadata alone.
+  - If Send hits a queue-schema SQLite error, Core repairs the queue immediately and retries the insert once.
+  - Removes any persistent SQLite trigger whose SQL references `type_to_talk_queue`, including cross-table legacy triggers.
+- **v0.9.5 Type-to-Talk database repair**
+  - Removes unsupported legacy SQLite triggers that can reference the obsolete `error` queue column.
+  - Rebuilds malformed Type-to-Talk queue tables while preserving valid queued text where possible.
+  - Validates the production queue INSERT during startup migration before the dashboard/mobile client can submit speech.
+
+- **v0.9.4 Type-to-Talk hotfix**
+  - Prevents idle Type-to-Talk requests from unnecessarily tearing down the microphone/audio engine.
+  - Makes conversation-stop audio cleanup best-effort so an engine restart cannot surface as a raw HTTP 500.
+  - Applies to both the built-in web dashboard and native Android clients because they share the same Core API.
 
 - **v0.9.2 direct speech & workflow UX**
   - Persistent Type-to-Talk queue shared by Web and Android; text goes directly to TTS without LLM processing

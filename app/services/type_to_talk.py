@@ -6,11 +6,7 @@ from typing import Any
 
 from app.db import Database
 from app.services.events import EventHub
-from app.services.type_to_talk_defaults import (
-    get_type_to_talk_defaults,
-    resolve_type_to_talk_config,
-    save_type_to_talk_defaults,
-)
+from app.services.type_to_talk_settings import get_type_to_talk_settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,21 +26,16 @@ class TypeToTalkManager:
     def state(self) -> str:
         if self._task and not self._task.done() and not self._paused:
             return "playing"
-        return "paused" if self.db.pending_type_to_talk_count() else "idle"
+        return "paused" if self.db.list_type_to_talk_queue() else "idle"
 
     async def notify(self) -> None:
         await self.events.broadcast(
             "type_to_talk_queue",
-            {"state": self.state, "items": self.db.list_type_to_talk_transcript()},
+            {"state": self.state, "items": self.db.list_type_to_talk_queue()},
         )
 
-    def defaults(self) -> dict[str, Any]:
-        return get_type_to_talk_defaults(self.db)
-
-    async def add(self, text: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
-        resolved = resolve_type_to_talk_config(self.db, config)
-        save_type_to_talk_defaults(self.db, resolved)
-        item = self.db.add_type_to_talk(text, resolved)
+    async def add(self, text: str) -> dict[str, Any]:
+        item = self.db.add_type_to_talk(text)
         await self.play()
         return item
 
@@ -70,11 +61,10 @@ class TypeToTalkManager:
         await self.notify()
 
     async def reorder(self, ordered_ids: list[int]) -> None:
-        current = [int(item["id"]) for item in self.db.list_type_to_talk_queue() if item.get("status") == "waiting"]
-        current_set = set(current)
-        values = [int(value) for value in ordered_ids if int(value) in current_set]
+        current = [int(item["id"]) for item in self.db.list_type_to_talk_queue()]
+        values = [int(value) for value in ordered_ids]
         if sorted(current) != sorted(values):
-            raise ValueError("Queue reorder must include each waiting Type-to-Talk item exactly once")
+            raise ValueError("Queue reorder must include each Type-to-Talk item exactly once")
         self.db.reorder_type_to_talk(values)
         await self.notify()
 
@@ -90,17 +80,7 @@ class TypeToTalkManager:
                 if not text:
                     self.db.remove_type_to_talk(item_id)
                     continue
-                defaults = resolve_type_to_talk_config(
-                    self.db,
-                    {
-                        "language": item.get("language"),
-                        "tts_mode": item.get("tts_mode"),
-                        "edge_voice": item.get("edge_voice"),
-                        "kokoro_voice_id": item.get("kokoro_voice_id"),
-                        "tts_rate": item.get("tts_rate"),
-                        "tts_volume": item.get("tts_volume"),
-                    },
-                )
+                defaults = get_type_to_talk_settings(self.db)
                 speech_id = self.tts.begin_speech()
                 await self.notify()
                 await self.events.broadcast(
@@ -116,7 +96,7 @@ class TypeToTalkManager:
                         cache_namespace="type-to-talk",
                     )
                     if played:
-                        self.db.complete_type_to_talk(item_id)
+                        self.db.remove_type_to_talk(item_id)
                     else:
                         self.db.reset_type_to_talk_playing()
                         self._paused = True

@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from app.api.deps import Token
+from app.services.kokoro_voices import KOKORO_VOICES
 from app.state import state
 
 router = APIRouter(tags=["configuration"])
@@ -41,5 +42,21 @@ async def configuration_options(token: Token) -> dict[str, Any]:
             {"value": "kokoro", "label": "Kokoro local only"},
             {"value": "edge_fallback", "label": "Edge → Kokoro fallback"},
             {"value": "kokoro_fallback", "label": "Kokoro → Edge fallback"},
+        ],
+        "edge_voices": [
+            {
+                "value": str(voice.get("short_name") or ""),
+                "label": f"{voice.get('name') or voice.get('short_name') or 'Voice'} — {voice.get('locale') or 'unknown'} · {voice.get('gender') or 'Unknown'}",
+                "locale": str(voice.get("locale") or ""),
+            }
+            for voice in state.tts.edge.cached_voice_payload().get("voices", [])
+            if str(voice.get("short_name") or "").strip()
+        ],
+        "kokoro_voices": [
+            {
+                "value": str(voice["id"]),
+                "label": f"{voice['name']} — {voice['category']}",
+            }
+            for voice in KOKORO_VOICES
         ],
     }

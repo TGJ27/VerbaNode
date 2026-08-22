@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.9.2';
+const FRONTEND_VERSION = '0.9.6';
 const CLIENT_API_VERSION = 1;
 const WEBSOCKET_PROTOCOL_VERSION = 1;
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
@@ -25,8 +25,7 @@ const appState = {
   audioLibraryPlaying: null,
   typeToTalkItems: [],
   typeToTalkState: 'idle',
-  typeToTalkDefaults: null,
-  typeToTalkConfigInitialized: false,
+  typeToTalkSettings: null,
   scriptDefaults: null,
   models: [],
   kokoroVoices: [],

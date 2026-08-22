@@ -1,112 +1,134 @@
+
 'use strict';
 
-async function loadTypeToTalk(render = true) {
-  if (!appState.token) return;
-  const payload = await api('/api/type-to-talk');
-  appState.typeToTalkItems = payload.items || [];
-  appState.typeToTalkState = payload.state || 'idle';
-  appState.typeToTalkDefaults = payload.defaults || appState.typeToTalkDefaults || {};
-  if (render) renderTypeToTalk();
-}
-
-function typeToTalkConfig() {
+function currentTypeToTalkSettings() {
   return {
     language: $('#typeToTalkLanguage')?.value || 'en',
     tts_mode: $('#typeToTalkMode')?.value || 'edge',
-    edge_voice: $('#typeToTalkEdgeVoice')?.value || 'en-US-AriaNeural',
+    edge_voice: $('#typeToTalkEdgeVoice')?.value || ($('#typeToTalkLanguage')?.value === 'id' ? 'id-ID-GadisNeural' : 'en-US-AriaNeural'),
     kokoro_voice_id: Number($('#typeToTalkKokoroVoice')?.value || 0),
     tts_rate: Number($('#typeToTalkRate')?.value || 1),
     tts_volume: Number($('#typeToTalkVolume')?.value || 1),
   };
 }
 
-function configureTypeToTalkVoices(forceDefault = false) {
-  const language = $('#typeToTalkLanguage')?.value || 'en';
-  const profile = languageProfile(language);
-  const defaults = appState.typeToTalkDefaults || {};
-  const edgeSelect = $('#typeToTalkEdgeVoice');
-  if (edgeSelect) {
-    const preferred = forceDefault ? profile.defaultVoice : (edgeSelect.value || defaults.edge_voice || profile.defaultVoice);
-    renderStandaloneEdgeVoiceSelect(edgeSelect, language, preferred);
-  }
-  const mode = $('#typeToTalkMode');
-  if (mode) applyLanguageTtsAvailability(mode, language);
-  const kokoro = $('#typeToTalkKokoroVoice');
-  if (kokoro) kokoro.disabled = language === 'id';
-}
-
-function initializeTypeToTalkConfig() {
-  if (appState.typeToTalkConfigInitialized) return;
-  const defaults = appState.typeToTalkDefaults || {};
-  const language = defaults.language || 'en';
+function renderTypeToTalkSettings() {
+  const settings = appState.typeToTalkSettings || {};
+  const language = settings.language === 'id' ? 'id' : 'en';
   const languageSelect = $('#typeToTalkLanguage');
   const modeSelect = $('#typeToTalkMode');
-  const kokoroSelect = $('#typeToTalkKokoroVoice');
   if (languageSelect) languageSelect.value = language;
-  if (modeSelect) modeSelect.value = defaults.tts_mode || 'edge';
-  if (kokoroSelect) {
-    const voices = appState.kokoroVoices.length ? appState.kokoroVoices : [{ id: 0, name: 'af_maple', category: 'American female' }];
-    kokoroSelect.innerHTML = voices.map(voice => `<option value="${voice.id}">${escapeHtml(voice.name)} — ${escapeHtml(voice.category)}</option>`).join('');
-    kokoroSelect.value = String(defaults.kokoro_voice_id ?? 0);
+  if (modeSelect) {
+    modeSelect.value = language === 'id' ? 'edge' : (settings.tts_mode || 'edge');
+    modeSelect.disabled = language === 'id';
   }
-  if ($('#typeToTalkRate')) $('#typeToTalkRate').value = String(defaults.tts_rate ?? 1);
-  if ($('#typeToTalkVolume')) $('#typeToTalkVolume').value = String(defaults.tts_volume ?? 1);
-  configureTypeToTalkVoices(false);
-  appState.typeToTalkConfigInitialized = true;
+  const edge = $('#typeToTalkEdgeVoice');
+  if (edge) renderStandaloneEdgeVoiceSelect(edge, language, settings.edge_voice || (language === 'id' ? 'id-ID-GadisNeural' : 'en-US-AriaNeural'));
+  const kokoro = $('#typeToTalkKokoroVoice');
+  if (kokoro) {
+    const voices = appState.kokoroVoices.length ? appState.kokoroVoices : [{ id: 0, name: 'af_maple' }];
+    kokoro.innerHTML = voices.map(v => `<option value="${Number(v.id)}">${escapeHtml(v.name || `Voice ${v.id}`)}</option>`).join('');
+    kokoro.value = String(settings.kokoro_voice_id ?? 0);
+    kokoro.disabled = language === 'id';
+  }
+  if ($('#typeToTalkRate')) $('#typeToTalkRate').value = String(settings.tts_rate ?? 1);
+  if ($('#typeToTalkVolume')) $('#typeToTalkVolume').value = String(settings.tts_volume ?? 1);
+}
+
+async function saveTypeToTalkSettings() {
+  const payload = currentTypeToTalkSettings();
+  if (payload.language === 'id') {
+    payload.tts_mode = 'edge';
+    if (!String(payload.edge_voice).startsWith('id-')) payload.edge_voice = 'id-ID-GadisNeural';
+  } else if (String(payload.edge_voice).startsWith('id-')) {
+    payload.edge_voice = 'en-US-AriaNeural';
+  }
+  appState.typeToTalkSettings = await api('/api/type-to-talk/settings', { method: 'PATCH', body: JSON.stringify(payload) });
+  renderTypeToTalkSettings();
+}
+
+async function loadTypeToTalk(render = true) {
+  if (!appState.token) return;
+  const payload = await api('/api/type-to-talk');
+  appState.typeToTalkItems = payload.items || [];
+  appState.typeToTalkState = payload.state || 'idle';
+  appState.typeToTalkSettings = payload.settings || appState.typeToTalkSettings || {};
+  if (render) renderTypeToTalk();
 }
 
 function renderTypeToTalk() {
-  initializeTypeToTalkConfig();
-  const list = $('#typeToTalkMessages');
-  const stateNode = $('#typeToTalkState');
-  if (stateNode) stateNode.textContent = (appState.typeToTalkState || 'idle').replace(/^./, c => c.toUpperCase());
+  const list = $('#typeToTalkQueue');
   if (!list) return;
+  const stateNode = $('#typeToTalkState');
+  if (stateNode) stateNode.textContent = appState.typeToTalkState || 'idle';
+  renderTypeToTalkSettings();
   const items = appState.typeToTalkItems || [];
   if (!items.length) {
-    list.innerHTML = '<div class="type-to-talk-empty">Type a message below and press Enter. VerbaNode will speak it directly without sending it to the LLM.</div>';
+    list.innerHTML = '<div class="type-to-talk-empty">Nothing queued yet. Type below and press Enter.</div>';
     return;
   }
-  list.innerHTML = items.map(item => {
-    const status = item.status || 'waiting';
-    const statusLabel = status === 'playing' ? 'Speaking now' : status === 'completed' ? 'Spoken' : 'Queued';
-    const mode = item.tts_mode || 'edge';
-    const voice = mode.startsWith('kokoro') ? `Kokoro #${Number(item.kokoro_voice_id || 0)}` : (item.edge_voice || 'Edge');
-    return `<div class="type-to-talk-message-row">
-      <div class="type-to-talk-bubble" data-status="${escapeHtml(status)}">
-        <p>${escapeHtml(item.text || '')}</p>
-        <small>${escapeHtml(statusLabel)} · ${escapeHtml(voice)} · ${Number(item.tts_rate || 1).toFixed(2)}× <button class="link-btn" data-ttt-remove="${item.id}" type="button">Remove</button></small>
-      </div>
-    </div>`;
-  }).join('');
+  list.innerHTML = items.map((item, index) => `<article class="type-to-talk-message ${item.status === 'playing' ? 'playing' : ''}" draggable="true" data-ttt-id="${item.id}">
+    <div class="message-content">${escapeHtml(item.text)}</div>
+    <div class="message-meta"><span>${item.status === 'playing' ? 'Speaking now' : `Queued ${index + 1}`}</span></div>
+    <div class="message-actions"><button class="icon-btn compact" data-ttt-remove="${item.id}" title="Remove">×</button></div>
+  </article>`).join('');
+  wireTypeToTalkDrag();
   list.scrollTop = list.scrollHeight;
 }
 
-function bindTypeToTalkControls() {
-  $('#typeToTalkLanguage')?.addEventListener('change', () => configureTypeToTalkVoices(true));
-  $('#typeToTalkMode')?.addEventListener('change', () => configureTypeToTalkVoices(false));
-
-  const input = $('#typeToTalkInput');
-  input?.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+function wireTypeToTalkDrag() {
+  const list = $('#typeToTalkQueue');
+  if (!list) return;
+  let draggedId = null;
+  list.querySelectorAll('[data-ttt-id]').forEach(node => {
+    node.addEventListener('dragstart', event => {
+      draggedId = Number(node.dataset.tttId);
+      node.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+    });
+    node.addEventListener('dragend', () => node.classList.remove('dragging'));
+    node.addEventListener('dragover', event => event.preventDefault());
+    node.addEventListener('drop', async event => {
       event.preventDefault();
-      $('#typeToTalkForm')?.requestSubmit();
-    }
+      const targetId = Number(node.dataset.tttId);
+      if (!draggedId || draggedId === targetId) return;
+      const ids = appState.typeToTalkItems.map(item => Number(item.id));
+      const from = ids.indexOf(draggedId), to = ids.indexOf(targetId);
+      if (from < 0 || to < 0) return;
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      try { await api('/api/type-to-talk/reorder', { method: 'PUT', body: JSON.stringify({ ordered_ids: ids }) }); await loadTypeToTalk(); }
+      catch (error) { toast(error.message, 'error'); }
+    });
   });
+}
 
+function bindTypeToTalkControls() {
   const form = $('#typeToTalkForm');
+  const input = $('#typeToTalkInput');
   if (form) form.onsubmit = async event => {
     event.preventDefault();
     const text = input?.value.trim() || '';
     if (!text) return;
-    const payload = { text, ...typeToTalkConfig() };
     try {
-      await api('/api/type-to-talk', { method: 'POST', body: JSON.stringify(payload) });
-      if (input) input.value = '';
-      appState.typeToTalkDefaults = { ...payload }; delete appState.typeToTalkDefaults.text;
+      const settings = currentTypeToTalkSettings();
+      await api('/api/type-to-talk', { method: 'POST', body: JSON.stringify({ text, ...settings }) });
+      appState.typeToTalkSettings = { ...settings };
+      input.value = '';
       await loadTypeToTalk();
-      input?.focus();
+      input.focus();
     } catch (error) { toast(error.message, 'error'); }
   };
+  input?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); form?.requestSubmit(); }
+  });
+  ['typeToTalkLanguage','typeToTalkMode','typeToTalkEdgeVoice','typeToTalkKokoroVoice','typeToTalkRate','typeToTalkVolume'].forEach(id => {
+    $(`#${id}`)?.addEventListener('change', async () => { try { await saveTypeToTalkSettings(); } catch (e) { toast(e.message, 'error'); } });
+  });
+  $('#typeToTalkLanguage')?.addEventListener('change', () => {
+    const language = $('#typeToTalkLanguage').value;
+    if (language === 'id') { $('#typeToTalkMode').value = 'edge'; }
+    renderTypeToTalkSettings();
+  });
   $('#typeToTalkPlayBtn')?.addEventListener('click', async () => { try { await api('/api/type-to-talk/play', { method: 'POST' }); await loadTypeToTalk(); } catch (e) { toast(e.message, 'error'); } });
   $('#typeToTalkStopBtn')?.addEventListener('click', async () => { try { await api('/api/type-to-talk/stop', { method: 'POST' }); await loadTypeToTalk(); } catch (e) { toast(e.message, 'error'); } });
   $('#typeToTalkClearBtn')?.addEventListener('click', async () => { try { await api('/api/type-to-talk', { method: 'DELETE' }); await loadTypeToTalk(); } catch (e) { toast(e.message, 'error'); } });

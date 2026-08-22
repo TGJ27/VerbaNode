@@ -291,6 +291,7 @@ function handleEvent(message) {
     case 'audio_library_changed': appState.audioLibrary = data.items || []; renderAudioLibrary(); break;
     case 'audio_library_state': appState.audioLibraryPlaying = data.name || null; appState.audioLibrary = data.items || appState.audioLibrary; renderAudioLibrary(); break;
     case 'type_to_talk_queue': appState.typeToTalkState = data.state || 'idle'; appState.typeToTalkItems = data.items || []; renderTypeToTalk(); break;
+    case 'type_to_talk_settings': appState.typeToTalkSettings = data.settings || appState.typeToTalkSettings; renderTypeToTalkSettings(); break;
     case 'script_defaults_changed': appState.scriptDefaults = data || null; break;
     case 'agents_changed': appState.agents = data || []; renderAgents(); break;
     case 'information_changed': appState.information = data || []; renderInformation(); break;

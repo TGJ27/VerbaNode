@@ -865,24 +865,23 @@ input:focus,textarea:focus,select:focus { border-color: #8ab5ff; box-shadow: 0 0
 
 .script-defaults-card{margin-bottom:14px}.script-defaults-card .form-grid{margin-top:10px}
 
-
-/* v0.9.2 Type-to-Talk chat UX and conversation rail alignment fix */
-.type-to-talk-shell{height:100%;min-height:0;display:flex;flex-direction:column;gap:10px}
-.type-to-talk-card{height:100%;min-height:0;padding:12px;display:flex;flex-direction:column;gap:10px}
-.type-to-talk-header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.type-to-talk-config{display:grid;grid-template-columns:130px 180px minmax(180px,1fr) minmax(160px,1fr) 90px 90px;gap:8px;align-items:end;padding:10px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2)}
-.type-to-talk-config label{min-width:0;font-size:11px;color:var(--muted)}
-.type-to-talk-config select,.type-to-talk-config input{margin-top:4px;width:100%;min-height:36px}
-.type-to-talk-messages{flex:1;min-height:260px;overflow:auto;padding:8px 4px 4px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}
-.type-to-talk-empty{margin:auto;color:var(--muted);text-align:center;padding:20px}
-.type-to-talk-message-row{display:flex;justify-content:flex-end}
-.type-to-talk-bubble{max-width:min(76%,760px);padding:10px 12px;border-radius:16px 16px 4px 16px;background:linear-gradient(135deg,#4477ff,#625bff);color:#fff;box-shadow:var(--shadow-soft)}
-.type-to-talk-bubble[data-status="completed"]{background:#eef3ff;color:var(--text);border:1px solid var(--line);box-shadow:none}
-.type-to-talk-bubble[data-status="playing"]{box-shadow:0 0 0 3px rgba(68,119,255,.18),var(--shadow-soft)}
-.type-to-talk-bubble p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
-.type-to-talk-bubble small{display:block;margin-top:5px;opacity:.8}
-.type-to-talk-compose{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
-.type-to-talk-compose textarea{min-height:46px;max-height:150px;resize:vertical}
-.type-to-talk-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
-@media(max-width:1180px){.type-to-talk-config{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:720px){.type-to-talk-config{grid-template-columns:1fr 1fr}.type-to-talk-bubble{max-width:92%}.type-to-talk-card{min-height:calc(100vh - 170px)}}
+/* v0.9.2 direct-speech polish */
+.chat-compose-zone { gap:4px; }
+.chat-header-actions #autoScrollToggle { white-space:nowrap; }
+.type-to-talk-layout { height:100%; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:12px; }
+.type-to-talk-panel { min-height:0; padding:14px; display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; gap:10px; overflow:hidden; }
+.type-to-talk-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.type-to-talk-head h3,.type-to-talk-head p { margin:0; }
+.type-to-talk-settings { padding:10px; border:1px solid var(--line); border-radius:14px; background:#f8fbff; }
+.type-to-talk-settings label { min-width:0; }
+.type-to-talk-messages { min-height:0; padding:8px 4px; overflow-y:auto; display:flex; flex-direction:column; gap:9px; }
+.type-to-talk-message { max-width:min(78%,760px); align-self:flex-end; padding:10px 13px; border-radius:14px; border-bottom-right-radius:4px; color:#fff; background:linear-gradient(135deg,var(--primary),var(--primary-2)); box-shadow:0 3px 10px rgba(60,85,140,.08); }
+.type-to-talk-message.playing { box-shadow:0 0 0 3px rgba(53,120,246,.16),0 3px 10px rgba(60,85,140,.08); }
+.type-to-talk-message .message-meta { justify-content:flex-end; }
+.type-to-talk-message .message-actions { margin-top:6px; display:flex; justify-content:flex-end; gap:6px; }
+.type-to-talk-message .icon-btn { color:#fff; border-color:rgba(255,255,255,.35); background:rgba(255,255,255,.08); }
+.type-to-talk-empty { margin:auto; color:var(--muted); text-align:center; }
+.type-to-talk-compose { margin-top:0; }
+.type-to-talk-controls { align-self:start; }
+@media (max-width:920px) { .type-to-talk-layout { grid-template-columns:1fr; height:auto; } .type-to-talk-panel { min-height:620px; } .type-to-talk-settings { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:620px) { .type-to-talk-settings { grid-template-columns:1fr; } .chat-header-actions #autoScrollToggle { font-size:10px; padding-inline:8px; } }
