@@ -75,5 +75,15 @@ class EventHub:
         for token, ws in stale:
             await self.disconnect(token, ws)
 
+    async def is_connected(self, token: str) -> bool:
+        """Return whether ``token`` currently owns a live WebSocket slot.
+
+        The lookup is lock-protected so reconnect/disconnect cleanup can make a
+        reliable decision without racing a replacement socket for the same
+        controller token.
+        """
+        async with self._lock:
+            return token in self._clients
+
     def connected_tokens(self) -> set[str]:
         return set(self._clients)

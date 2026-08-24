@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.9.6 makes Type-to-Talk queue repair migration-independent: schema v10 force-rebuilds the queue, startup validates it every time, and Send self-repairs/retries the exact stale-SQLite failure even when the database is already marked current. It preserves the v0.9.5/v0.9.4 direct-speech hardening, v0.9.2 workflow, and v0.9 LAN-only trusted-device foundation. RAG/large-knowledge retrieval is intentionally deferred. The native Android client remains compatible at v0.3.6.
+> **Project status:** active development. v0.9.7 is a Phase 1 stability release: host PTT is fail-safe across unexpected controller WebSocket loss, and unhandled HTTP faults now return a structured request-ID error envelope for diagnosis. It preserves the v0.9.6 Type-to-Talk self-healing queue, v0.9.2 workflow, and v0.9 LAN-only trusted-device foundation. RAG/large-knowledge retrieval is intentionally deferred. The coordinated native Android client is v0.3.7.
 
 ---
 
@@ -79,6 +79,12 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.9.7 Phase 1 stability hardening**
+  - Cancels host PTT after an unexpected controlling WebSocket disconnect even while the controller session token remains valid.
+  - Gives the same controller token a short reconnect grace period so fast socket replacement does not interrupt a held recording.
+  - Returns structured `internal_server_error` responses with `X-Request-ID` for unexpected HTTP failures while keeping exception details in server logs.
+  - Coordinated with VerbaNode Android v0.3.7 connection/PTT lifecycle hardening.
 
 - **v0.9.6 Type-to-Talk self-healing queue**
   - Adds schema migration v10, which force-rebuilds the direct-speech queue for databases already stamped v9.

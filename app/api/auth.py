@@ -183,6 +183,25 @@ async def session_info(token: Token) -> dict[str, Any]:
     }
 
 
+async def _cleanup_disconnected_host_ptt(token: str, websocket: WebSocket) -> None:
+    """Cancel host PTT if its controlling socket is truly gone.
+
+    A controller session can remain valid for the normal idle timeout after its
+    WebSocket drops, so token validity is not evidence that a hold-to-talk
+    client is still connected.  Give the same token a short reconnect grace
+    period, then cancel host PTT only when no replacement socket owns it.
+    """
+    await state.events.disconnect(token, websocket)
+    if state.conversation.mode != "ptt":
+        return
+    await asyncio.sleep(1.0)
+    if state.conversation.mode == "ptt" and not await state.events.is_connected(token):
+        try:
+            await state.conversation.cancel_ptt()
+        except Exception:
+            LOGGER.exception("Failed to cancel host PTT after WebSocket disconnect")
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, ticket: str = "") -> None:
     if not websocket_origin_allowed(websocket):
@@ -259,12 +278,11 @@ async def websocket_endpoint(websocket: WebSocket, ticket: str = "") -> None:
                 await state.conversation.stop_current_tts()
                 await state.events.broadcast("tts_stopped", {"source": "manual"})
     except WebSocketDisconnect:
-        await state.events.disconnect(token, websocket)
-        if state.conversation.mode == "ptt":
-            # A disconnected hold-to-talk controller must not leave the host mic recording.
-            await asyncio.sleep(1.0)
-            if not state.controller.validate(token, touch=False):
-                await state.conversation.cancel_ptt()
+        pass
     except Exception:
         LOGGER.exception("WebSocket client failed")
-        await state.events.disconnect(token, websocket)
+    finally:
+        # Covers client disconnects, heartbeat/protocol closes, controller
+        # revocation, and unexpected handler failures. A replacement socket for
+        # the same token is preserved by EventHub.disconnect/is_connected.
+        await _cleanup_disconnected_host_ptt(token, websocket)

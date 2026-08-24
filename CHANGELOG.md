@@ -1,3 +1,11 @@
+## v0.9.7 - Phase 1 stability hardening
+
+- Fixed host Push-to-Talk cleanup after unexpected controller WebSocket loss. The disconnect path now checks whether the same controller token actually reconnected instead of incorrectly treating a still-valid controller session as an active socket.
+- Added a one-second reconnect grace window so a quick same-token WebSocket replacement does not cancel an in-progress host PTT hold.
+- Applied the same host-PTT cleanup to unexpected WebSocket handler failures, not only normal disconnect exceptions.
+- Added a global HTTP exception boundary that logs the real exception and returns a non-leaking structured `internal_server_error` response containing the request ID.
+- Added regression coverage for dropped-PTT sockets, fast same-token reconnects, and unexpected HTTP 500 envelopes.
+
 ## v0.9.6 - Type-to-Talk migration-independent self-heal
 
 - Add schema migration v10 to force a canonical rebuild of `type_to_talk_queue` for databases already stamped schema v9.

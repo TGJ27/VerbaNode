@@ -18,6 +18,7 @@ _REQUEST_ID = contextvars.ContextVar("verbanode_request_id", default="-")
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,96}$")
 _LOG_RECORD_FACTORY_INSTALLED = False
 _DEFAULT_MAX_JSON_BODY_BYTES = 2 * 1024 * 1024
+LOGGER = logging.getLogger(__name__)
 
 _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -44,6 +45,18 @@ def _resolve_request_id(request: Request) -> str:
     if supplied and _REQUEST_ID_RE.fullmatch(supplied):
         return supplied
     return uuid.uuid4().hex
+
+
+def _apply_standard_headers(response: Response, request: Request, request_id: str) -> Response:
+    response.headers["X-Request-ID"] = request_id
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    if request.url.path.startswith("/api/"):
+        response.headers["X-VerbaNode-Version"] = APP_VERSION
+        response.headers["X-VerbaNode-API-Version"] = str(API_VERSION)
+        response.headers["X-VerbaNode-WebSocket-Protocol"] = str(PROTOCOL_VERSION)
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 def install_request_id_logging() -> None:
@@ -97,15 +110,7 @@ async def request_context_middleware(request: Request, call_next) -> Response:
         else:
             response = await call_next(request)
 
-        response.headers["X-Request-ID"] = request_id
-        for name, value in _SECURITY_HEADERS.items():
-            response.headers.setdefault(name, value)
-        if request.url.path.startswith("/api/"):
-            response.headers["X-VerbaNode-Version"] = APP_VERSION
-            response.headers["X-VerbaNode-API-Version"] = str(API_VERSION)
-            response.headers["X-VerbaNode-WebSocket-Protocol"] = str(PROTOCOL_VERSION)
-            response.headers.setdefault("Cache-Control", "no-store")
-        return response
+        return _apply_standard_headers(response, request, request_id)
     finally:
         _REQUEST_ID.reset(token)
 
@@ -180,6 +185,28 @@ async def validation_exception_handler(
     )
 
 
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Return a stable 500 envelope while keeping the real exception in logs."""
+    request_id = getattr(request.state, "request_id", None) or _resolve_request_id(request)
+    log_token = _REQUEST_ID.set(request_id)
+    try:
+        LOGGER.error(
+            "Unhandled HTTP request failure",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+    finally:
+        _REQUEST_ID.reset(log_token)
+    response = JSONResponse(
+        _error_payload(
+            code="internal_server_error",
+            message="Internal server error",
+            request_id=request_id,
+        ),
+        status_code=500,
+    )
+    return _apply_standard_headers(response, request, request_id)
+
+
 def install_http_hardening(
     app: FastAPI,
     *,
@@ -190,6 +217,7 @@ def install_http_hardening(
     app.middleware("http")(request_context_middleware)
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(Exception, unhandled_exception_handler)
 
 
 __all__ = [
@@ -198,4 +226,5 @@ __all__ = [
     "install_http_hardening",
     "install_request_id_logging",
     "request_context_middleware",
+    "unhandled_exception_handler",
 ]
