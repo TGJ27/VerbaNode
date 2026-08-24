@@ -49,9 +49,29 @@ class AudioLibraryManager:
     def playing_name(self) -> str | None:
         return self._playing_name
 
-    def _path(self, name: str) -> Path:
+    def _new_path(self, name: str) -> Path:
+        """Return a sanitized destination path for a new/renamed library item."""
         safe = _safe_filename(name)
         path = (self.directory / safe).resolve()
+        if path.parent != self.directory.resolve():
+            raise AudioLibraryError("Invalid audio filename")
+        return path
+
+    def _existing_path(self, name: str) -> Path:
+        """Resolve an existing library item by its exact displayed filename.
+
+        Existing names must not be sanitized again. Collision handling deliberately
+        creates names such as ``track (2).mp3`` and older VerbaNode versions may
+        also have written filenames containing characters that the current upload
+        sanitizer replaces. Re-sanitizing a name returned by ``list_files()`` can
+        therefore point at a different, non-existent file.
+        """
+        raw = str(name or "").strip()
+        if not raw or raw in {".", ".."} or "/" in raw or "\\" in raw or "\x00" in raw:
+            raise AudioLibraryError("Invalid audio filename")
+        if Path(raw).suffix.lower() not in _ALLOWED_SUFFIXES:
+            raise AudioLibraryError("Unsupported audio format")
+        path = (self.directory / raw).resolve()
         if path.parent != self.directory.resolve():
             raise AudioLibraryError("Invalid audio filename")
         return path
@@ -88,7 +108,7 @@ class AudioLibraryManager:
     def save(self, filename: str, payload: bytes) -> dict[str, Any]:
         if not payload:
             raise AudioLibraryError("Audio upload is empty")
-        path = self._path(filename)
+        path = self._new_path(filename)
         candidate = path
         counter = 2
         while candidate.exists():
@@ -98,10 +118,10 @@ class AudioLibraryManager:
         return self._metadata(candidate)
 
     def rename(self, old_name: str, new_name: str) -> dict[str, Any]:
-        old_path = self._path(old_name)
+        old_path = self._existing_path(old_name)
         if not old_path.exists():
             raise FileNotFoundError(old_name)
-        new_path = self._path(new_name)
+        new_path = self._new_path(new_name)
         if new_path.exists() and new_path != old_path:
             raise AudioLibraryError("An audio file with that name already exists")
         old_path.replace(new_path)
@@ -110,7 +130,7 @@ class AudioLibraryManager:
         return self._metadata(new_path, playing=self._playing_name == new_path.name)
 
     async def delete(self, name: str) -> bool:
-        path = self._path(name)
+        path = self._existing_path(name)
         if not path.exists():
             return False
         if self._playing_name == path.name:
@@ -120,7 +140,7 @@ class AudioLibraryManager:
         return True
 
     async def play(self, name: str) -> None:
-        path = self._path(name)
+        path = self._existing_path(name)
         if not path.exists():
             raise FileNotFoundError(name)
         async with self._lock:

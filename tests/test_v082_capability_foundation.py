@@ -139,7 +139,7 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
 
 
 def test_v082_capability_expiry_survives_current_schema(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.9.7"
+    assert APP_VERSION == "0.9.8"
     assert BUILD_LABEL == "local-mobile"
 
     settings = _settings(tmp_path)

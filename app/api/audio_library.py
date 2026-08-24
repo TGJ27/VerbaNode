@@ -80,6 +80,7 @@ async def delete_audio(name: str, token: Token) -> dict[str, bool]:
         deleted = await state.audio_library.delete(name)
     except AudioLibraryError as exc:
         raise _error(exc) from exc
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Audio file not found")
-    return {"ok": True}
+    # DELETE is intentionally idempotent. A stale client can ask to remove an
+    # item that has already disappeared; returning success lets it refresh the
+    # library instead of trapping the UI behind a misleading 404.
+    return {"ok": True, "deleted": deleted}

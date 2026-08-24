@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.9.7 is a Phase 1 stability release: host PTT is fail-safe across unexpected controller WebSocket loss, and unhandled HTTP faults now return a structured request-ID error envelope for diagnosis. It preserves the v0.9.6 Type-to-Talk self-healing queue, v0.9.2 workflow, and v0.9 LAN-only trusted-device foundation. RAG/large-knowledge retrieval is intentionally deferred. The coordinated native Android client is v0.3.7.
+> **Project status:** active development. v0.9.8 is the Phase 2 coordinated hardening release. Core keeps the v0.9.7 controller/PTT and request-ID protections and fixes Audio Library file identity so duplicate/legacy filenames can be played, renamed, and deleted reliably. RAG/large-knowledge retrieval is intentionally deferred. The coordinated native Android client is v0.3.9.
 
 ---
 
@@ -79,6 +79,13 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.9.8 Phase 2 coordinated hardening**
+  - Fixes Audio Library exact-file identity for duplicate collision names such as `clip (2).mp3` and compatible legacy filenames that contain characters not accepted by the current upload sanitizer.
+  - Existing library items are resolved by their exact listed filename instead of being sanitized a second time before play/rename/delete.
+  - Audio DELETE is idempotent: stale clients can refresh cleanly when an item is already gone instead of receiving a misleading 404.
+  - Adds regression coverage for duplicate-name deletion, legacy filename deletion, and idempotent missing-item deletion.
+  - Coordinated with Android v0.3.9 state/network/large-file hardening.
 
 - **v0.9.7 Phase 1 stability hardening**
   - Cancels host PTT after an unexpected controlling WebSocket disconnect even while the controller session token remains valid.

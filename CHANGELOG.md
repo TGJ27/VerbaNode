@@ -1,3 +1,11 @@
+## v0.9.8 - Phase 2 coordinated hardening
+
+- Fixed Audio Library play/rename/delete identity for duplicate-upload names such as `clip (2).mp3`; existing files are now resolved by the exact filename returned by the library listing rather than being passed through the new-upload sanitizer again.
+- Preserved compatibility with legacy audio filenames containing safe non-path characters that current uploads may sanitize.
+- Made Audio Library DELETE idempotent so stale clients can refresh successfully if a file has already disappeared.
+- Added regression tests covering duplicate collision filenames, legacy filenames, and missing-file deletion behavior.
+- Coordinated with VerbaNode Android v0.3.9 Phase 2 state/network and large-file streaming hardening.
+
 ## v0.9.7 - Phase 1 stability hardening
 
 - Fixed host Push-to-Talk cleanup after unexpected controller WebSocket loss. The disconnect path now checks whether the same controller token actually reconnected instead of incorrectly treating a still-valid controller session as an active socket.

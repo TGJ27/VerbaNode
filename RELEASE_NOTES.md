@@ -1,19 +1,21 @@
-# VerbaNode v0.9.7 — Phase 1 Stability Hardening
+# VerbaNode v0.9.8 — Phase 2 Coordinated Hardening
 
-v0.9.7 is a focused reliability release for controller transport and diagnostics. It does not change the Type-to-Talk schema or direct-speech behavior introduced in v0.9.6.
+v0.9.8 keeps the v0.9.7 controller/PTT and structured request-ID protections and fixes a concrete Audio Library file-identity bug exposed by duplicate/legacy filenames.
 
-## What changed
+## Fixed
 
-- **Fail-safe host PTT on WebSocket loss.** A controller token can remain valid for the normal idle timeout after its WebSocket disappears. v0.9.6 incorrectly used token validity to decide whether a dropped hold-to-talk session should be cancelled. v0.9.7 instead checks the live WebSocket slot after a short reconnect grace period.
-- **Reconnect-safe PTT cleanup.** If the same controller token reconnects within the grace period, host PTT remains active. If no replacement socket exists, Core cancels PTT and releases the host microphone path.
-- **Cleanup on abnormal socket failures.** Unexpected WebSocket handler failures now use the same fail-safe PTT cleanup path.
-- **Structured unexpected HTTP errors.** Unhandled server exceptions are logged with the request context and returned as a stable `internal_server_error` JSON envelope. The response includes `X-Request-ID` and does not expose exception details to clients.
-- **Regression tests.** Coverage now explicitly verifies dropped PTT sockets, fast same-token reconnect behavior, and request-ID-bearing 500 responses.
+- **Audio Library delete “file not found”.** Duplicate uploads are intentionally stored as names such as `clip (2).mp3`. Older code listed that exact filename but sanitized it again when play/rename/delete was requested, turning it into a different path and producing a false 404. Existing library items are now resolved by their exact listed basename.
+- **Legacy filename compatibility.** Compatible existing files containing non-path characters that the current upload sanitizer would replace can now be played, renamed, or deleted by the exact name shown in the dashboard/mobile app.
+- **Idempotent DELETE.** Deleting an item that has already disappeared returns a successful deletion result (`deleted: false`) so stale clients can refresh rather than remaining stuck behind an “Audio file not found” error.
+
+## Regression coverage
+
+Tests now verify duplicate collision names, compatible legacy names, and idempotent missing-item deletion. No database migration is required.
 
 ## Compatibility
 
-Database schema remains unchanged from v0.9.6. VerbaNode Android v0.3.7 is the coordinated Phase 1 mobile hardening release; older compatible clients can still use the Core API.
+VerbaNode Android v0.3.9 is the coordinated Phase 2 mobile hardening release. Older API-compatible clients continue to work.
 
 ## Upgrade
 
-Fully stop VerbaNode Core, replace the release files, and start it again. No database migration is required for v0.9.7.
+Fully stop VerbaNode Core, replace the release files, and start it again. No database migration is required for v0.9.8.
