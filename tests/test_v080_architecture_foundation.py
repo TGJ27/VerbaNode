@@ -57,7 +57,7 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v080_metadata_and_schema_migration(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.9.8"
+    assert APP_VERSION == "0.9.9"
     assert BUILD_LABEL == "local-mobile"
 
     db = Database(_settings(tmp_path))

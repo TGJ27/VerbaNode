@@ -30,13 +30,13 @@ from app.defaults import (
     ROPI_TEMPERATURE,
     ROPI_TOP_P,
 )
+from app.db_schema import BASE_SCHEMA_SQL, reconcile_runtime_schema, repair_type_to_talk_queue_schema
 from app.migrations import (
     CURRENT_SCHEMA_VERSION,
     MigrationError,
     VERBANODE_APPLICATION_ID,
     apply_migrations,
     read_schema_version,
-    repair_type_to_talk_queue_schema,
 )
 from app.services.kokoro_voices import voice_name
 
@@ -84,119 +84,14 @@ class Database:
             self.backup_to(recovery_path)
             self.prune_recovery_backups()
 
-        schema = """
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS agents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            color TEXT NOT NULL DEFAULT '#6c63ff',
-            avatar TEXT NOT NULL DEFAULT 'VA',
-            role TEXT NOT NULL,
-            system_prompt TEXT NOT NULL,
-            greeting TEXT NOT NULL,
-            llm_model TEXT NOT NULL,
-            temperature REAL NOT NULL DEFAULT 0.4,
-            top_p REAL NOT NULL DEFAULT 0.9,
-            max_tokens INTEGER NOT NULL DEFAULT 224,
-            context_size INTEGER NOT NULL DEFAULT 4096,
-            language TEXT NOT NULL DEFAULT 'en',
-            tts_mode TEXT NOT NULL DEFAULT 'edge_fallback',
-            edge_voice TEXT NOT NULL DEFAULT 'en-US-AriaNeural',
-            kokoro_voice_id INTEGER NOT NULL DEFAULT 0,
-            tts_rate REAL NOT NULL DEFAULT 1.0,
-            tts_volume REAL NOT NULL DEFAULT 1.0,
-            stt_model TEXT NOT NULL DEFAULT 'iic/SenseVoiceSmall',
-            tools_enabled TEXT NOT NULL DEFAULT '[]',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS information (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS agent_information (
-            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-            info_id INTEGER NOT NULL REFERENCES information(id) ON DELETE CASCADE,
-            PRIMARY KEY(agent_id, info_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS scripts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            text TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            language TEXT NOT NULL DEFAULT 'en',
-            tts_mode TEXT NOT NULL DEFAULT 'edge',
-            edge_voice TEXT NOT NULL DEFAULT 'en-US-AriaNeural',
-            kokoro_voice_id INTEGER NOT NULL DEFAULT 0,
-            tts_rate REAL NOT NULL DEFAULT 1.0,
-            tts_volume REAL NOT NULL DEFAULT 1.0,
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS script_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            script_id INTEGER NOT NULL REFERENCES scripts(id) ON DELETE CASCADE,
-            position INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'waiting',
-            pause_after_seconds REAL NOT NULL DEFAULT 0,
-            added_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-            title TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            source TEXT NOT NULL DEFAULT 'chat',
-            stt_confidence REAL,
-            stt_confidence_source TEXT,
-            created_at TEXT NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
-        CREATE INDEX IF NOT EXISTS idx_conversations_agent ON conversations(agent_id, updated_at DESC);
-
-        CREATE TABLE IF NOT EXISTS summaries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-            conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
-            content TEXT NOT NULL,
-            through_message_id INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(agent_id, conversation_id)
-        );
-        """
         with self._write_lock, self.connect() as conn:
-            conn.executescript(schema)
+            conn.executescript(BASE_SCHEMA_SQL)
             apply_migrations(conn)
-            # Health-check the direct-speech queue on every startup, even when
-            # schema metadata already says the database is current. This is
-            # deliberately independent of migration versioning so a stale
-            # trigger/object cannot survive a hand-copied or interrupted update.
-            repair_type_to_talk_queue_schema(conn)
+            # Runtime reconciliation is intentionally independent of migration
+            # metadata. It protects installations whose schema version is current
+            # but whose application-managed SQLite objects were hand-copied or
+            # interrupted during an earlier update.
+            reconcile_runtime_schema(conn)
         self._seed()
 
     def _seed(self) -> None:

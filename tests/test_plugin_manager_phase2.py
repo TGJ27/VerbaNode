@@ -92,5 +92,5 @@ def test_plugin_manager_dashboard_and_api_are_present() -> None:
     assert '.put("/api/plugins/{plugin_id}")' in plugins_api
     assert 'app.include_router(plugins_router)' in main
     assert '"plugin_manager": True' in client_contract
-    assert APP_VERSION == "0.9.8"
+    assert APP_VERSION == "0.9.9"
     assert BUILD_LABEL == "local-mobile"

@@ -1,3 +1,12 @@
+## v0.9.9 - Phase 3 structural hardening
+
+- Extracted the canonical base SQLite schema into `app/db_schema.py` so `Database` is no longer the owner of a large embedded schema block.
+- Centralized Type-to-Talk queue creation, column contract, trigger cleanup, repair, and production INSERT validation in the same schema module.
+- Reused the canonical queue contract from numbered migrations, startup health reconciliation, and request-time self-heal instead of maintaining parallel implementations.
+- Kept database schema version 10 because Phase 3 changes code organization rather than the on-disk data model.
+- Added structural regression tests for fresh-schema creation and malformed legacy queue convergence.
+- Coordinated with VerbaNode Android v0.4.0 Phase 3 state/model architecture cleanup and Home Type-to-Talk quick access.
+
 ## v0.9.8 - Phase 2 coordinated hardening
 
 - Fixed Audio Library play/rename/delete identity for duplicate-upload names such as `clip (2).mp3`; existing files are now resolved by the exact filename returned by the library listing rather than being passed through the new-upload sanitizer again.

@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.9.8 is the Phase 2 coordinated hardening release. Core keeps the v0.9.7 controller/PTT and request-ID protections and fixes Audio Library file identity so duplicate/legacy filenames can be played, renamed, and deleted reliably. RAG/large-knowledge retrieval is intentionally deferred. The coordinated native Android client is v0.3.9.
+> **Project status:** active development. v0.9.9 is the Phase 3 structural-hardening release. Core keeps the Phase 1/2 reliability fixes while centralizing the canonical SQLite schema contract and runtime repair logic so migrations and request-time recovery no longer duplicate Type-to-Talk schema definitions. RAG/large-knowledge retrieval is intentionally deferred. The coordinated native Android client is v0.4.0.
 
 ---
 
@@ -79,6 +79,13 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.9.9 Phase 3 structural hardening**
+  - Moves the canonical base SQLite schema out of the large `Database` implementation into a dedicated schema module.
+  - Centralizes Type-to-Talk table creation, validation, and runtime reconciliation so migrations, startup health checks, and request-time self-heal share one schema contract.
+  - Keeps database schema version 10 because this release changes code organization, not the on-disk data model.
+  - Adds structural regression tests for canonical schema creation and queue repair.
+  - Coordinated with VerbaNode Android v0.4.0, which splits read-side management loading from `AppViewModel`, introduces typed models for scripts/queues/direct speech/audio, and adds Type to Talk to Home.
 
 - **v0.9.8 Phase 2 coordinated hardening**
   - Fixes Audio Library exact-file identity for duplicate collision names such as `clip (2).mp3` and compatible legacy filenames that contain characters not accepted by the current upload sanitizer.

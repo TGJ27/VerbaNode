@@ -126,7 +126,7 @@ def test_diagnostics_ui_and_endpoints_are_present() -> None:
     assert '@router.get("/api/diagnostics")' in diagnostics_api
     assert '@router.post("/api/diagnostics/self-test")' in diagnostics_api
     assert '@router.get("/api/diagnostics/export")' in diagnostics_api
-    assert APP_VERSION == "0.9.8"
+    assert APP_VERSION == "0.9.9"
 
 
 def test_diagnostics_directory_is_runtime_only(tmp_path: Path) -> None:

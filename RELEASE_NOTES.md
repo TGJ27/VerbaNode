@@ -1,21 +1,21 @@
-# VerbaNode v0.9.8 — Phase 2 Coordinated Hardening
+# VerbaNode v0.9.9 — Phase 3 Structural Hardening
 
-v0.9.8 keeps the v0.9.7 controller/PTT and structured request-ID protections and fixes a concrete Audio Library file-identity bug exposed by duplicate/legacy filenames.
+v0.9.9 is a behavior-preserving structural release built on the Phase 1/2 reliability work. It reduces schema ownership duplication and makes future database changes easier to reason about without introducing a new on-disk migration.
 
-## Fixed
+## Structural changes
 
-- **Audio Library delete “file not found”.** Duplicate uploads are intentionally stored as names such as `clip (2).mp3`. Older code listed that exact filename but sanitized it again when play/rename/delete was requested, turning it into a different path and producing a false 404. Existing library items are now resolved by their exact listed basename.
-- **Legacy filename compatibility.** Compatible existing files containing non-path characters that the current upload sanitizer would replace can now be played, renamed, or deleted by the exact name shown in the dashboard/mobile app.
-- **Idempotent DELETE.** Deleting an item that has already disappeared returns a successful deletion result (`deleted: false`) so stale clients can refresh rather than remaining stuck behind an “Audio file not found” error.
-
-## Regression coverage
-
-Tests now verify duplicate collision names, compatible legacy names, and idempotent missing-item deletion. No database migration is required.
+- Added `app/db_schema.py` as the canonical home for the base SQLite schema and application-managed Type-to-Talk queue contract.
+- `Database.initialize()` now delegates base schema creation and startup reconciliation instead of embedding a large SQL block and queue-specific repair logic directly in `db.py`.
+- Numbered migrations now reuse the same Type-to-Talk creation/repair functions as startup and request-time recovery. This removes the previous parallel schema definitions that contributed to the v0.9.3–v0.9.6 repair complexity.
+- Centralized table-column inspection and the production-shaped Type-to-Talk INSERT validation in the schema module.
+- Added structural regression coverage proving a fresh database and malformed legacy Type-to-Talk queue converge on the same canonical schema.
 
 ## Compatibility
 
-VerbaNode Android v0.3.9 is the coordinated Phase 2 mobile hardening release. Older API-compatible clients continue to work.
+- Database schema remains **v10**. There is no new database migration in this release because the on-disk schema is unchanged.
+- Existing v0.9.8 databases and clients remain compatible.
+- VerbaNode Android v0.4.0 is the coordinated Phase 3 mobile release.
 
 ## Upgrade
 
-Fully stop VerbaNode Core, replace the release files, and start it again. No database migration is required for v0.9.8.
+Fully stop VerbaNode Core, replace the release files, and start it again. Normal startup schema reconciliation will run, but no schema-version upgrade is required.
