@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     api_max_json_body_bytes: int = Field(default=2097152, ge=65536, le=16777216)
     audio_library_max_upload_bytes: int = Field(default=52428800, ge=1048576, le=536870912)
     knowledge_path: Path = KNOWLEDGE_DIR
+    knowledge_max_upload_bytes: int = Field(default=1073741824, ge=1048576, le=4294967296)
     login_max_attempts: int = Field(default=5, ge=2, le=20)
     login_attempt_window_seconds: float = Field(default=60.0, ge=10.0, le=600.0)
     login_lockout_base_seconds: float = Field(default=5.0, ge=1.0, le=120.0)

@@ -1063,6 +1063,155 @@ class Database:
             ).fetchone()
         return self._decode_metadata_json(dict(row)) if row else {}
 
+    def list_knowledge_parent_blocks(self, document_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM knowledge_parent_blocks WHERE document_id=? ORDER BY ordinal,id",
+                (document_id,),
+            ).fetchall()
+        return [self._decode_metadata_json(dict(row)) for row in rows]
+
+    def list_knowledge_chunks(self, document_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM knowledge_chunks WHERE document_id=? ORDER BY ordinal,id",
+                (document_id,),
+            ).fetchall()
+        return [self._decode_metadata_json(dict(row)) for row in rows]
+
+    def list_knowledge_assets(self, document_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM knowledge_document_assets WHERE document_id=? ORDER BY ordinal,id",
+                (document_id,),
+            ).fetchall()
+        return [self._decode_metadata_json(dict(row)) for row in rows]
+
+    def update_knowledge_document_metadata(
+        self, document_id: int, metadata: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        now = utc_now()
+        with self._write_lock, self.connect() as conn:
+            existing = conn.execute(
+                "SELECT metadata_json FROM knowledge_documents WHERE id=?", (document_id,)
+            ).fetchone()
+            if not existing:
+                return None
+            try:
+                current = json.loads(existing[0] or "{}")
+                if not isinstance(current, dict):
+                    current = {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                current = {}
+            current.update(metadata or {})
+            conn.execute(
+                "UPDATE knowledge_documents SET metadata_json=?,updated_at=? WHERE id=?",
+                (json.dumps(current, ensure_ascii=False, sort_keys=True), now, document_id),
+            )
+        return self.get_knowledge_document(document_id)
+
+    def replace_knowledge_document_content(
+        self,
+        document_id: int,
+        blocks: list[dict[str, Any]],
+        assets: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Atomically replace normalized Phase-2 content for a document."""
+        now = utc_now()
+        chunk_count = 0
+        with self._write_lock, self.connect() as conn:
+            if not conn.execute(
+                "SELECT 1 FROM knowledge_documents WHERE id=?", (document_id,)
+            ).fetchone():
+                raise LookupError("Knowledge document not found")
+            conn.execute("DELETE FROM knowledge_document_assets WHERE document_id=?", (document_id,))
+            conn.execute("DELETE FROM knowledge_chunks WHERE document_id=?", (document_id,))
+            conn.execute("DELETE FROM knowledge_parent_blocks WHERE document_id=?", (document_id,))
+
+            parent_by_ordinal: dict[int, int] = {}
+            global_chunk_ordinal = 0
+            for block in blocks:
+                ordinal = int(block.get("ordinal") or 0)
+                cur = conn.execute(
+                    """
+                    INSERT INTO knowledge_parent_blocks(
+                        document_id,parent_block_id,block_type,ordinal,heading_path,page_start,page_end,
+                        text,metadata_json,created_at
+                    ) VALUES(?,NULL,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        document_id,
+                        str(block.get("block_type") or "section"),
+                        ordinal,
+                        str(block.get("heading_path") or ""),
+                        block.get("page_start"),
+                        block.get("page_end"),
+                        str(block.get("text") or ""),
+                        json.dumps(block.get("metadata") or {}, ensure_ascii=False, sort_keys=True),
+                        now,
+                    ),
+                )
+                parent_id = int(cur.lastrowid)
+                parent_by_ordinal[ordinal] = parent_id
+                for chunk in block.get("chunks") or []:
+                    conn.execute(
+                        """
+                        INSERT INTO knowledge_chunks(
+                            document_id,parent_block_id,ordinal,content_type,text,token_count,page_start,page_end,
+                            metadata_json,lexical_status,vector_status,created_at,updated_at
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            document_id,
+                            parent_id,
+                            global_chunk_ordinal,
+                            str(chunk.get("content_type") or "text"),
+                            str(chunk.get("text") or ""),
+                            max(0, int(chunk.get("token_count") or 0)),
+                            chunk.get("page_start"),
+                            chunk.get("page_end"),
+                            json.dumps(chunk.get("metadata") or {}, ensure_ascii=False, sort_keys=True),
+                            str(chunk.get("lexical_status") or "pending"),
+                            str(chunk.get("vector_status") or "pending"),
+                            now,
+                            now,
+                        ),
+                    )
+                    chunk_count += 1
+                    global_chunk_ordinal += 1
+
+            for ordinal, asset in enumerate(assets):
+                parent_ordinal = asset.get("parent_ordinal")
+                parent_id = parent_by_ordinal.get(int(parent_ordinal)) if parent_ordinal is not None else None
+                conn.execute(
+                    """
+                    INSERT INTO knowledge_document_assets(
+                        document_id,parent_block_id,ordinal,asset_type,mime_type,storage_key,label,
+                        page_start,page_end,ocr_text,metadata_json,created_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        document_id,
+                        parent_id,
+                        ordinal,
+                        str(asset.get("asset_type") or "image"),
+                        asset.get("mime_type"),
+                        asset.get("storage_key"),
+                        str(asset.get("label") or ""),
+                        asset.get("page_start"),
+                        asset.get("page_end"),
+                        str(asset.get("ocr_text") or ""),
+                        json.dumps(asset.get("metadata") or {}, ensure_ascii=False, sort_keys=True),
+                        now,
+                    ),
+                )
+        return {"parent_blocks": len(blocks), "chunks": chunk_count, "assets": len(assets)}
+
+    def delete_knowledge_document(self, document_id: int) -> bool:
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute("DELETE FROM knowledge_documents WHERE id=?", (document_id,))
+        return bool(cur.rowcount)
+
     def knowledge_library_ids_for_agent(self, agent_id: int) -> list[int]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -1113,6 +1262,7 @@ class Database:
             "parent_blocks": "knowledge_parent_blocks",
             "chunks": "knowledge_chunks",
             "agent_links": "agent_knowledge_libraries",
+            "assets": "knowledge_document_assets",
         }
         with self.connect() as conn:
             return {

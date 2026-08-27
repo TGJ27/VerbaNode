@@ -1,5 +1,5 @@
 # Lightweight installation for UI/database/Ollama/text chat.
-# Install requirements.txt when voice features are needed.
+# Install requirements.txt when voice features or Knowledge document ingestion are needed.
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.34,<1.0
 pydantic>=2.10,<3.0

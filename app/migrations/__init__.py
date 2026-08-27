@@ -478,6 +478,43 @@ def _knowledge_engine_foundation_v11(conn: sqlite3.Connection) -> None:
     )
 
 
+def _knowledge_document_assets_v12(conn: sqlite3.Connection) -> None:
+    """Add persistent extracted-asset metadata for Phase 2 ingestion.
+
+    The original source file remains authoritative. Asset rows retain OCR text,
+    page/slide location, and optional extracted image paths so a future VLM can
+    be added without redesigning the ingestion model.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_document_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+            parent_block_id INTEGER REFERENCES knowledge_parent_blocks(id) ON DELETE SET NULL,
+            ordinal INTEGER NOT NULL DEFAULT 0,
+            asset_type TEXT NOT NULL DEFAULT 'image',
+            mime_type TEXT,
+            storage_key TEXT,
+            label TEXT NOT NULL DEFAULT '',
+            page_start INTEGER,
+            page_end INTEGER,
+            ocr_text TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_assets_document "
+        "ON knowledge_document_assets(document_id,ordinal,id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_assets_parent "
+        "ON knowledge_document_assets(parent_block_id,id)"
+    )
+
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "numbered_migration_foundation", _foundation_v1),
     Migration(2, "persistent_action_ledger", _persistent_action_ledger_v2),
@@ -490,6 +527,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(9, "type_to_talk_schema_reconcile", _type_to_talk_schema_reconcile_v9),
     Migration(10, "type_to_talk_force_rebuild", _type_to_talk_force_rebuild_v10),
     Migration(11, "knowledge_engine_foundation", _knowledge_engine_foundation_v11),
+    Migration(12, "knowledge_document_assets", _knowledge_document_assets_v12),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 

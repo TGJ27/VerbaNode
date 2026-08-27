@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.10.0 starts Hybrid RAG Phase 1 with a local-first Knowledge Engine foundation: schema v11 adds libraries, document/job metadata, hierarchical parent/chunk storage, agent-library permissions, and authenticated Knowledge APIs. Parsing, embeddings, retrieval, reranking, and Chat/Voice cutover are intentionally not enabled in this phase. The existing Information path remains active only until the later migration/cutover phase. The native Android client remains compatible at v0.3.6.
+> **Project status:** active development. v0.10.1 completes Hybrid RAG Phase 2: the local-first Knowledge Engine now ingests PDF, DOCX, XLSX/XLSM, CSV/TSV, PPTX, HTML, Markdown, TXT, JSON, XML, common code/text files, and raster images; preserves headings/pages/slides/sheets/tables; and uses CPU OCR for scanned/image-only content when available. Retrieval, embeddings, reranking, and Chat/Voice cutover remain intentionally disabled until later phases. The existing Information path remains active only until migration/cutover. Android v0.3.6 remains compatible.
 
 ---
 
@@ -53,10 +53,12 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Conversation history is stored
   - Relevant context can be supplied when needed instead of resending the entire conversation every turn
 
-- **Knowledge Engine foundation (v0.10.0 / Hybrid RAG Phase 1)**
+- **Knowledge Engine ingestion (v0.10.1 / Hybrid RAG Phase 2)**
   - Local-first Knowledge libraries with explicit per-agent access
-  - Durable document, ingestion-job, parent-block, and child-chunk metadata
-  - Storage/API boundary designed for later BM25 + dense-vector + structured-table retrieval
+  - Universal mixed-document ingestion for PDF, Office files, spreadsheets, text/web formats, images, and scans
+  - Structure-preserving parent/child normalization for headings, pages, tables, slides, sheets, OCR, and metadata
+  - CPU-only OCR path; no VLM or image-semantic reasoning is enabled
+  - Retrieval-ready chunks are stored but BM25/vector indexing remains disabled until Phase 3
   - Existing Information entries remain temporarily active until the planned RAG cutover/migration phase
 
 - **Plugin architecture**
@@ -83,11 +85,17 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Start Menu / Desktop shortcuts
   - Uninstall support
 
+- **v0.10.1 Universal Knowledge ingestion**
+  - Adds schema v12 asset metadata and local `assets/` storage alongside sources/indexes/cache.
+  - Parses PDF, DOCX, XLSX/XLSM, CSV/TSV, PPTX, HTML, Markdown, TXT, JSON, XML, code/text files, and raster images.
+  - Preserves document structure and tables; scanned/image-only content can use local CPU OCR without a VLM.
+  - Adds streamed bounded uploads, background ingestion jobs, re-ingestion, document deletion, and normalized-content inspection.
+  - Keeps retrieval disabled until Phase 3 and keeps Android v0.3.6 compatible.
+  - Restores a fixed dashboard viewport and removes the Conversation control-rail scrollbar regression.
+
 - **v0.10.0 Knowledge Engine foundation**
-  - Adds schema v11 for Knowledge libraries, documents, ingestion jobs, hierarchical blocks/chunks, and agent-library permissions.
-  - Adds local runtime Knowledge storage (`sources`, `indexes`, `cache`) and authenticated `/api/knowledge/*` foundation APIs.
-  - Establishes the service boundary for the planned CPU-first hierarchical Hybrid RAG pipeline without enabling retrieval or changing prompts yet.
-  - Keeps Android v0.3.6 compatible; no mobile update is required for this backend-only phase.
+  - Added schema v11 for Knowledge libraries, documents, ingestion jobs, hierarchical blocks/chunks, and agent-library permissions.
+  - Added the local-first Knowledge service/API boundary used by Phase 2 and later retrieval phases.
 
 - **v0.9.6 Type-to-Talk self-healing queue**
   - Adds schema migration v10, which force-rebuilds the direct-speech queue for databases already stamped v9.

@@ -1,5 +1,15 @@
-"""VerbaNode local-first Knowledge Engine foundation."""
+"""Knowledge Engine package."""
 
-from app.knowledge.engine import KnowledgeEngine, KnowledgeEngineConflict, KnowledgeEngineNotFound
+from app.knowledge.engine import (
+    KnowledgeEngine,
+    KnowledgeEngineConflict,
+    KnowledgeEngineNotFound,
+    KnowledgeEngineValidation,
+)
 
-__all__ = ["KnowledgeEngine", "KnowledgeEngineConflict", "KnowledgeEngineNotFound"]
+__all__ = [
+    "KnowledgeEngine",
+    "KnowledgeEngineConflict",
+    "KnowledgeEngineNotFound",
+    "KnowledgeEngineValidation",
+]

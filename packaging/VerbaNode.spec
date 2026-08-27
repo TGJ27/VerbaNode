@@ -51,6 +51,14 @@ for package in (
     "PIL",
     "zeroconf",
     "qrcode",
+    "pdfplumber",
+    "pdfminer",
+    "pypdfium2",
+    "docx",
+    "openpyxl",
+    "pptx",
+    "bs4",
+    "rapidocr_onnxruntime",
 ):
     package_datas, package_binaries, package_hidden = safe_collect(package)
     datas += package_datas

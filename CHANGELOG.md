@@ -32,6 +32,17 @@
 
 # Changelog
 
+## v0.10.1 - Universal Knowledge ingestion (Hybrid RAG Phase 2)
+
+- Added universal local document ingestion for PDF, DOCX, XLSX/XLSM, CSV/TSV, PPTX, HTML, Markdown, TXT, JSON, XML, source/code files, and common raster images.
+- Added schema v12 `knowledge_document_assets` for OCR/image metadata without introducing a VLM.
+- Added structure-preserving extraction for headings, pages/slides/sheets, tables, image OCR, metadata, parent blocks, and retrieval-ready child chunks.
+- Added CPU OCR fallback for scanned/image-only content and preserved original source files for future reprocessing.
+- Added streamed bounded uploads, background ingestion jobs, re-ingestion, document deletion, supported-format reporting, and normalized-content inspection APIs.
+- Kept BM25, embeddings, vector search, reranking, and Chat/Voice retrieval disabled until later Hybrid RAG phases.
+- Removed the Conversation control-rail scrollbar/42vh cap and restored a fixed viewport dashboard layout with compact non-scrolling audio controls.
+- No Android change is required; Android v0.3.6 remains compatible.
+
 ## v0.9.4 - Type-to-Talk reliability hotfix
 
 - Fixed a Core-side HTTP 500 affecting Type-to-Talk from both the web dashboard and Android clients when the microphone/audio engine was idle, unavailable, or restarting.

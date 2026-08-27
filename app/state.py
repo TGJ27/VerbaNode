@@ -118,7 +118,9 @@ def build_state() -> AppState:
     settings = get_settings()
     db = Database(settings)
     db.initialize()
-    knowledge = KnowledgeEngine(db, settings.knowledge_dir)
+    knowledge = KnowledgeEngine(
+        db, settings.knowledge_dir, max_upload_bytes=settings.knowledge_max_upload_bytes
+    )
     events = EventHub()
     controller = ControllerManager(settings)
     devices = DeviceManager(db, pairing_ttl_seconds=settings.mobile_pairing_ttl_seconds)

@@ -57,9 +57,14 @@ def feature_manifest() -> dict[str, Any]:
         "script_defaults": True,
         "broad_audio_formats": True,
         "knowledge_engine": True,
-        "knowledge_engine_phase": "foundation",
+        "knowledge_engine_phase": "ingestion",
         "knowledge_libraries": True,
         "knowledge_agent_permissions": True,
+        "knowledge_ingestion": True,
+        "knowledge_ingestion_api_version": 1,
+        "knowledge_ocr": True,
+        "knowledge_tables": True,
+        "knowledge_vlm": False,
         "knowledge_retrieval": False,
     }
 

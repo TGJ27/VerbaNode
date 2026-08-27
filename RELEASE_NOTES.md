@@ -1,32 +1,41 @@
-# VerbaNode v0.10.0 — Knowledge Engine Foundation
+# VerbaNode v0.10.1 — Universal Knowledge Ingestion
 
-v0.10.0 begins the planned replacement of VerbaNode's current always-injected Information/Knowledge path with a local-first hierarchical Hybrid RAG Knowledge Engine. This release is **Phase 1 only**: it establishes durable storage, APIs, permissions, and service boundaries without changing Chat or Voice prompt behavior yet.
+v0.10.1 completes **Hybrid RAG Phase 2**. The local-first Knowledge Engine can now accept and normalize large mixed document sources while retrieval remains deliberately disabled until Phase 3.
 
 ## What is included
 
-- Database schema v11 adds `knowledge_libraries`, `knowledge_documents`, `knowledge_ingestion_jobs`, `knowledge_parent_blocks`, `knowledge_chunks`, and `agent_knowledge_libraries`.
-- Knowledge libraries can be created, renamed, enabled/disabled, listed, and deleted when empty. Library names are case-insensitively unique.
-- Agents can be explicitly assigned one or more Knowledge libraries through a dedicated permission mapping. Existing Agent payloads remain compatible.
-- Document metadata supports source type/name, MIME type, relative storage key, size, SHA-256, status/error, indexing timestamp, and JSON metadata.
-- Ingestion-job metadata supports queue/running/completion state, stage, progress, attempts, timestamps, and errors.
-- Parent blocks and child chunks preserve hierarchy, page ranges, heading paths, content type, token counts, and future lexical/vector indexing state.
-- Runtime Knowledge storage is isolated under the normal VerbaNode user-data root with `sources`, `indexes`, and `cache` directories. `VERBANODE_KNOWLEDGE_PATH` can override the location.
-- Authenticated Knowledge APIs are available under `/api/knowledge`. `/api/client-info` advertises the foundation and reports retrieval as disabled.
+- Database schema v12 adds persistent `knowledge_document_assets` so extracted/OCR image metadata is retained without requiring a VLM.
+- Upload/ingestion APIs now accept PDF, DOCX, XLSX/XLSM, CSV/TSV, PPTX, HTML, Markdown, TXT, JSON, XML, common source/code files, and common raster image formats.
+- Native structure is retained where possible: document headings, pages/slides/sheets, tables, captions/labels, source metadata, and page ranges are normalized into the Phase-1 parent-block/child-chunk model.
+- PDF parsing extracts text and tables; image-only/scanned pages use CPU OCR when the OCR runtime is available.
+- DOCX, PPTX, and standalone image ingestion can retain extracted image assets and OCR text. No VLM is used.
+- XLSX/CSV ingestion keeps row/column structure in table blocks instead of flattening an entire workbook into prompt prose.
+- Structure-aware chunking creates retrieval-ready child chunks with heading context and estimated token counts. Lexical/vector states remain `pending` for Phase 3.
+- Ingestion runs as a background task after the source has been safely stored. Jobs expose queued/running/completed/failed stage and progress state and support re-ingestion.
+- Original source files remain authoritative under the local Knowledge directory; generated assets are stored separately and can be rebuilt.
+- Added document deletion, re-ingestion, supported-format inspection, and normalized-content inspection APIs.
+- Uploads are streamed to disk and bounded by `VERBANODE_KNOWLEDGE_MAX_UPLOAD_BYTES` (1 GiB default).
 
-## Intentionally not enabled in Phase 1
+## Dashboard regression fix
 
-- PDF/DOCX/XLSX/PPTX parsers
-- OCR
+- The dashboard shell remains fixed to the viewport.
+- The Conversation control rail no longer has its own scrollbar or a `42vh` height cap.
+- Conversation controls were compacted so Global Audio Control, Now Speaking, and Quick Scripts fit the fixed rail at normal desktop heights.
+- Native scrollbars are hidden throughout the dashboard so nested scrollbar chrome does not reappear; the main shell itself does not move.
+- On narrow/mobile layouts, the duplicated desktop Conversation rail is not stacked below Chat; the existing mobile voice dock provides those controls inside the fixed viewport.
+
+## Intentionally not enabled yet
+
 - BM25/FTS indexing
-- embeddings or HNSW vector search
-- table retrieval
-- RRF/reranking
+- embeddings/HNSW vector indexing
+- hybrid retrieval/RRF
+- reranking
 - Chat/Voice RAG context injection
-- migration of the existing Information entries
-- Knowledge management UI in Web/Android
+- migration/removal of the existing Information prompt path
+- VLM/image semantic reasoning
 
-This separation is deliberate: Phase 1 gives later ingestion and retrieval work a stable schema and API contract without risking the existing conversation pipeline. The old Information entries continue to behave exactly as before until the planned cutover/migration phase; they are not the final architecture.
+The existing Information path therefore remains active only until the later cutover phase. Android v0.3.6 remains compatible and does not require an update for Phase 2.
 
 ## Upgrade
 
-Fully stop VerbaNode Core, replace the release files, and start Core again. Schema migration v11 runs automatically and a pre-migration backup is created by the existing recovery mechanism. Android v0.3.6 remains compatible and requires no update for Phase 1.
+Fully stop VerbaNode Core, replace the release files, and start Core again. Schema migration v12 runs automatically and the existing recovery system creates the normal pre-migration database snapshot.

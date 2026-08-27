@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile, status
 
 from app.api.deps import Token
-from app.knowledge import KnowledgeEngineConflict, KnowledgeEngineNotFound
+from app.knowledge import (
+    KnowledgeEngineConflict,
+    KnowledgeEngineNotFound,
+    KnowledgeEngineValidation,
+)
 from app.schemas import (
     AgentKnowledgeLibrariesUpdate,
     KnowledgeLibraryCreate,
@@ -21,12 +26,49 @@ def _translate_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, KnowledgeEngineConflict):
         return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, KnowledgeEngineValidation):
+        return HTTPException(status_code=400, detail=str(exc))
     return HTTPException(status_code=500, detail="Knowledge Engine operation failed")
+
+
+async def _run_ingestion(document_id: int, job_id: int) -> None:
+    try:
+        document = state.knowledge.ingest_document(document_id, job_id)
+    except Exception as exc:
+        await state.events.broadcast(
+            "knowledge_changed",
+            {
+                "kind": "document_ingestion_failed",
+                "document_id": document_id,
+                "job_id": job_id,
+                "error": str(exc),
+            },
+        )
+        return
+    await state.events.broadcast(
+        "knowledge_changed",
+        {
+            "kind": "document_ingested",
+            "document": document,
+            "job_id": job_id,
+        },
+    )
 
 
 @router.get("/status")
 async def knowledge_status(token: Token) -> dict[str, Any]:
     return state.knowledge.status()
+
+
+@router.get("/formats")
+async def knowledge_formats(token: Token) -> dict[str, Any]:
+    engine_status = state.knowledge.status()
+    return {
+        "formats": engine_status["supported_formats"],
+        "ocr_available": bool(engine_status["capabilities"]["ocr"]),
+        "vlm_enabled": False,
+        "max_upload_bytes": engine_status["max_upload_bytes"],
+    }
 
 
 @router.get("/libraries")
@@ -38,7 +80,7 @@ async def list_libraries(token: Token) -> list[dict[str, Any]]:
 async def get_library(library_id: int, token: Token) -> dict[str, Any]:
     try:
         return state.knowledge.get_library(library_id)
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
 
 
@@ -46,7 +88,7 @@ async def get_library(library_id: int, token: Token) -> dict[str, Any]:
 async def create_library(payload: KnowledgeLibraryCreate, token: Token) -> dict[str, Any]:
     try:
         item = state.knowledge.create_library(payload.model_dump())
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
     await state.events.broadcast("knowledge_changed", {"kind": "library_created", "library": item})
     return item
@@ -58,7 +100,7 @@ async def update_library(
 ) -> dict[str, Any]:
     try:
         item = state.knowledge.update_library(library_id, payload.model_dump())
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
     await state.events.broadcast("knowledge_changed", {"kind": "library_updated", "library": item})
     return item
@@ -68,7 +110,7 @@ async def update_library(
 async def delete_library(library_id: int, token: Token) -> dict[str, bool]:
     try:
         state.knowledge.delete_library(library_id)
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
     await state.events.broadcast("knowledge_changed", {"kind": "library_deleted", "library_id": library_id})
     return {"ok": True}
@@ -80,16 +122,120 @@ async def list_documents(
 ) -> list[dict[str, Any]]:
     try:
         return state.knowledge.list_documents(library_id)
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
+
+
+@router.post(
+    "/libraries/{library_id}/documents",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def upload_document(
+    library_id: int,
+    background_tasks: BackgroundTasks,
+    token: Token,
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+) -> dict[str, Any]:
+    filename = file.filename or "document"
+    try:
+        staged = state.knowledge.new_upload_path(filename)
+    except KnowledgeEngineValidation as exc:
+        raise _translate_error(exc) from exc
+    written = 0
+    try:
+        with staged.open("wb") as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > state.knowledge.max_upload_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Knowledge document exceeds the {state.knowledge.max_upload_bytes} byte upload limit",
+                    )
+                handle.write(chunk)
+        document, job = state.knowledge.register_staged_upload(
+            library_id=library_id,
+            staged_path=staged,
+            source_name=filename,
+            mime_type=file.content_type,
+            title=title,
+        )
+    except HTTPException:
+        staged.unlink(missing_ok=True)
+        raise
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        staged.unlink(missing_ok=True)
+        raise _translate_error(exc) from exc
+    finally:
+        await file.close()
+
+    background_tasks.add_task(_run_ingestion, int(document["id"]), int(job["id"]))
+    await state.events.broadcast(
+        "knowledge_changed",
+        {"kind": "document_queued", "document": document, "job": job},
+    )
+    return {"document": document, "job": job}
 
 
 @router.get("/documents/{document_id}")
 async def get_document(document_id: int, token: Token) -> dict[str, Any]:
     try:
         return state.knowledge.get_document(document_id)
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
+
+
+@router.get("/documents/{document_id}/content")
+async def get_document_content(
+    document_id: int,
+    token: Token,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    try:
+        content = state.knowledge.document_content(document_id)
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        raise _translate_error(exc) from exc
+    for key in ("parent_blocks", "chunks", "assets"):
+        values = content[key]
+        content[f"{key}_total"] = len(values)
+        content[key] = values[:limit]
+    return content
+
+
+@router.post(
+    "/documents/{document_id}/reingest",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def reingest_document(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    token: Token,
+) -> dict[str, Any]:
+    try:
+        job = state.knowledge.reingest_document(document_id)
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        raise _translate_error(exc) from exc
+    background_tasks.add_task(_run_ingestion, document_id, int(job["id"]))
+    await state.events.broadcast(
+        "knowledge_changed",
+        {"kind": "document_reingest_queued", "document_id": document_id, "job": job},
+    )
+    return {"document_id": document_id, "job": job}
+
+
+@router.delete("/documents/{document_id}")
+async def delete_document(document_id: int, token: Token) -> dict[str, bool]:
+    try:
+        state.knowledge.delete_document(document_id)
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        raise _translate_error(exc) from exc
+    await state.events.broadcast(
+        "knowledge_changed", {"kind": "document_deleted", "document_id": document_id}
+    )
+    return {"ok": True}
 
 
 @router.get("/jobs")
@@ -98,7 +244,7 @@ async def list_jobs(
 ) -> list[dict[str, Any]]:
     try:
         return state.knowledge.list_jobs(document_id)
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
 
 
@@ -106,7 +252,7 @@ async def list_jobs(
 async def get_agent_libraries(agent_id: int, token: Token) -> dict[str, Any]:
     try:
         ids = state.knowledge.agent_library_ids(agent_id)
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
     return {"agent_id": agent_id, "library_ids": ids}
 
@@ -117,7 +263,7 @@ async def set_agent_libraries(
 ) -> dict[str, Any]:
     try:
         ids = state.knowledge.set_agent_libraries(agent_id, payload.library_ids)
-    except (KnowledgeEngineNotFound, KnowledgeEngineConflict) as exc:
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
     result = {"agent_id": agent_id, "library_ids": ids}
     await state.events.broadcast("knowledge_changed", {"kind": "agent_libraries_updated", **result})

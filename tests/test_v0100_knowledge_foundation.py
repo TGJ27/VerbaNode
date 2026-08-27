@@ -28,10 +28,10 @@ def _build(tmp_path: Path) -> tuple[Database, KnowledgeEngine]:
 def test_v0100_schema_and_local_layout_foundation(tmp_path: Path) -> None:
     db, engine = _build(tmp_path)
 
-    assert APP_VERSION == "0.10.0"
-    assert CURRENT_SCHEMA_VERSION == 11
-    assert db.schema_version() == 11
-    for directory in (engine.root, engine.sources_dir, engine.indexes_dir, engine.cache_dir):
+    assert APP_VERSION == "0.10.1"
+    assert CURRENT_SCHEMA_VERSION == 12
+    assert db.schema_version() == 12
+    for directory in (engine.root, engine.sources_dir, engine.assets_dir, engine.indexes_dir, engine.cache_dir):
         assert directory.is_dir()
 
     with sqlite3.connect(db.path) as conn:
@@ -48,16 +48,17 @@ def test_v0100_schema_and_local_layout_foundation(tmp_path: Path) -> None:
         "knowledge_parent_blocks",
         "knowledge_chunks",
         "agent_knowledge_libraries",
+        "knowledge_document_assets",
     } <= tables
 
     status = engine.status()
     features = feature_manifest()
     assert features["knowledge_engine"] is True
-    assert features["knowledge_engine_phase"] == "foundation"
+    assert features["knowledge_engine_phase"] == "ingestion"
     assert features["knowledge_retrieval"] is False
     assert status["backend"] == "local"
-    assert status["phase"] == "foundation"
-    assert status["ingestion_enabled"] is False
+    assert status["phase"] == "ingestion"
+    assert status["ingestion_enabled"] is True
     assert status["retrieval_enabled"] is False
     assert status["legacy_information_injection_active"] is True
     assert status["counts"]["libraries"] == 0

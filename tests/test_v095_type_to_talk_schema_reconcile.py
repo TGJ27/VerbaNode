@@ -55,7 +55,7 @@ def test_v9_removes_legacy_type_to_talk_trigger_that_writes_error_column() -> No
 
     version = apply_migrations(conn)
 
-    assert version == CURRENT_SCHEMA_VERSION == 11
+    assert version == CURRENT_SCHEMA_VERSION == 12
     triggers = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='type_to_talk_queue'"
     ).fetchall()
@@ -79,7 +79,7 @@ def test_v9_rebuilds_malformed_queue_and_preserves_valid_text() -> None:
 
     version = apply_migrations(conn)
 
-    assert version == CURRENT_SCHEMA_VERSION == 11
+    assert version == CURRENT_SCHEMA_VERSION == 12
     columns = {
         row[1] for row in conn.execute("PRAGMA table_info(type_to_talk_queue)").fetchall()
     }
