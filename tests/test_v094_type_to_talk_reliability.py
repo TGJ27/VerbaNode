@@ -65,7 +65,7 @@ def test_v8_migration_repairs_missing_type_to_talk_table() -> None:
 
     version = apply_migrations(conn)
 
-    assert version == CURRENT_SCHEMA_VERSION == 10
+    assert version == CURRENT_SCHEMA_VERSION == 11
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "type_to_talk_queue" in tables
     indexes = {row[1] for row in conn.execute("PRAGMA index_list(type_to_talk_queue)")}

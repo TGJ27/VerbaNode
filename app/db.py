@@ -30,13 +30,13 @@ from app.defaults import (
     ROPI_TEMPERATURE,
     ROPI_TOP_P,
 )
-from app.db_schema import BASE_SCHEMA_SQL, reconcile_runtime_schema, repair_type_to_talk_queue_schema
 from app.migrations import (
     CURRENT_SCHEMA_VERSION,
     MigrationError,
     VERBANODE_APPLICATION_ID,
     apply_migrations,
     read_schema_version,
+    repair_type_to_talk_queue_schema,
 )
 from app.services.kokoro_voices import voice_name
 
@@ -84,14 +84,119 @@ class Database:
             self.backup_to(recovery_path)
             self.prune_recovery_backups()
 
+        schema = """
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL DEFAULT '#6c63ff',
+            avatar TEXT NOT NULL DEFAULT 'VA',
+            role TEXT NOT NULL,
+            system_prompt TEXT NOT NULL,
+            greeting TEXT NOT NULL,
+            llm_model TEXT NOT NULL,
+            temperature REAL NOT NULL DEFAULT 0.4,
+            top_p REAL NOT NULL DEFAULT 0.9,
+            max_tokens INTEGER NOT NULL DEFAULT 224,
+            context_size INTEGER NOT NULL DEFAULT 4096,
+            language TEXT NOT NULL DEFAULT 'en',
+            tts_mode TEXT NOT NULL DEFAULT 'edge_fallback',
+            edge_voice TEXT NOT NULL DEFAULT 'en-US-AriaNeural',
+            kokoro_voice_id INTEGER NOT NULL DEFAULT 0,
+            tts_rate REAL NOT NULL DEFAULT 1.0,
+            tts_volume REAL NOT NULL DEFAULT 1.0,
+            stt_model TEXT NOT NULL DEFAULT 'iic/SenseVoiceSmall',
+            tools_enabled TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS information (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_information (
+            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            info_id INTEGER NOT NULL REFERENCES information(id) ON DELETE CASCADE,
+            PRIMARY KEY(agent_id, info_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS scripts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            text TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            language TEXT NOT NULL DEFAULT 'en',
+            tts_mode TEXT NOT NULL DEFAULT 'edge',
+            edge_voice TEXT NOT NULL DEFAULT 'en-US-AriaNeural',
+            kokoro_voice_id INTEGER NOT NULL DEFAULT 0,
+            tts_rate REAL NOT NULL DEFAULT 1.0,
+            tts_volume REAL NOT NULL DEFAULT 1.0,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS script_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            script_id INTEGER NOT NULL REFERENCES scripts(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            pause_after_seconds REAL NOT NULL DEFAULT 0,
+            added_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'chat',
+            stt_confidence REAL,
+            stt_confidence_source TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+        CREATE INDEX IF NOT EXISTS idx_conversations_agent ON conversations(agent_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
+            content TEXT NOT NULL,
+            through_message_id INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(agent_id, conversation_id)
+        );
+        """
         with self._write_lock, self.connect() as conn:
-            conn.executescript(BASE_SCHEMA_SQL)
+            conn.executescript(schema)
             apply_migrations(conn)
-            # Runtime reconciliation is intentionally independent of migration
-            # metadata. It protects installations whose schema version is current
-            # but whose application-managed SQLite objects were hand-copied or
-            # interrupted during an earlier update.
-            reconcile_runtime_schema(conn)
+            # Health-check the direct-speech queue on every startup, even when
+            # schema metadata already says the database is current. This is
+            # deliberately independent of migration versioning so a stale
+            # trigger/object cannot survive a hand-copied or interrupted update.
+            repair_type_to_talk_queue_schema(conn)
         self._seed()
 
     def _seed(self) -> None:
@@ -529,6 +634,7 @@ class Database:
         data["language"] = str(data.get("language") or "en")
         data["tools_enabled"] = json.loads(data.get("tools_enabled") or "[]")
         data["info_ids"] = self.agent_info_ids(int(data["id"]))
+        data["knowledge_library_ids"] = self.knowledge_library_ids_for_agent(int(data["id"]))
         data["kokoro_voice_name"] = voice_name(data.get("kokoro_voice_id"))
         return data
 
@@ -666,6 +772,353 @@ class Database:
         with self._write_lock, self.connect() as conn:
             cur = conn.execute("DELETE FROM information WHERE id=?", (info_id,))
         return bool(cur.rowcount)
+
+    # Knowledge Engine foundation
+    @staticmethod
+    def _decode_metadata_json(data: dict[str, Any]) -> dict[str, Any]:
+        raw = data.pop("metadata_json", "{}")
+        try:
+            decoded = json.loads(raw or "{}")
+            data["metadata"] = decoded if isinstance(decoded, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            data["metadata"] = {}
+        return data
+
+    def list_knowledge_libraries(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT l.*,
+                       COUNT(DISTINCT d.id) AS document_count,
+                       COUNT(DISTINCT ak.agent_id) AS agent_count
+                FROM knowledge_libraries l
+                LEFT JOIN knowledge_documents d ON d.library_id=l.id
+                LEFT JOIN agent_knowledge_libraries ak
+                       ON ak.library_id=l.id AND ak.enabled=1
+                GROUP BY l.id
+                ORDER BY lower(l.name),l.id
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_knowledge_library(self, library_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT l.*,
+                       (SELECT COUNT(*) FROM knowledge_documents d WHERE d.library_id=l.id) AS document_count,
+                       (SELECT COUNT(*) FROM agent_knowledge_libraries ak
+                        WHERE ak.library_id=l.id AND ak.enabled=1) AS agent_count
+                FROM knowledge_libraries l
+                WHERE l.id=?
+                """,
+                (library_id,),
+            ).fetchone()
+        return row_dict(row)
+
+    def create_knowledge_library(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO knowledge_libraries(name,description,enabled,created_at,updated_at) VALUES(?,?,?,?,?)",
+                (
+                    str(payload["name"]).strip(),
+                    str(payload.get("description") or "").strip(),
+                    int(bool(payload.get("enabled", True))),
+                    now,
+                    now,
+                ),
+            )
+            library_id = int(cur.lastrowid)
+        return self.get_knowledge_library(library_id) or {}
+
+    def update_knowledge_library(
+        self, library_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE knowledge_libraries SET name=?,description=?,enabled=?,updated_at=? WHERE id=?",
+                (
+                    str(payload["name"]).strip(),
+                    str(payload.get("description") or "").strip(),
+                    int(bool(payload.get("enabled", True))),
+                    utc_now(),
+                    library_id,
+                ),
+            )
+            if not cur.rowcount:
+                return None
+        return self.get_knowledge_library(library_id)
+
+    def delete_knowledge_library(self, library_id: int) -> bool:
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute("DELETE FROM knowledge_libraries WHERE id=?", (library_id,))
+        return bool(cur.rowcount)
+
+    def list_knowledge_documents(
+        self, library_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM knowledge_documents"
+        params: tuple[Any, ...] = ()
+        if library_id is not None:
+            sql += " WHERE library_id=?"
+            params = (library_id,)
+        sql += " ORDER BY id DESC"
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [self._decode_metadata_json(dict(row)) for row in rows]
+
+    def get_knowledge_document(self, document_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM knowledge_documents WHERE id=?", (document_id,)
+            ).fetchone()
+        return self._decode_metadata_json(dict(row)) if row else None
+
+    def register_knowledge_document(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        metadata = payload.get("metadata") or {}
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO knowledge_documents(
+                    library_id,title,source_name,source_type,mime_type,storage_key,
+                    size_bytes,sha256,status,error,metadata_json,indexed_at,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    int(payload["library_id"]),
+                    str(payload["title"]).strip(),
+                    str(payload["source_name"]).strip(),
+                    str(payload.get("source_type") or "unknown"),
+                    payload.get("mime_type"),
+                    payload.get("storage_key"),
+                    max(0, int(payload.get("size_bytes") or 0)),
+                    payload.get("sha256"),
+                    str(payload.get("status") or "registered"),
+                    payload.get("error"),
+                    json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+                    payload.get("indexed_at"),
+                    now,
+                    now,
+                ),
+            )
+            document_id = int(cur.lastrowid)
+        return self.get_knowledge_document(document_id) or {}
+
+    def update_knowledge_document_status(
+        self,
+        document_id: int,
+        *,
+        status: str,
+        error: str | None = None,
+        indexed_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE knowledge_documents SET status=?,error=?,indexed_at=?,updated_at=? WHERE id=?",
+                (status, error, indexed_at, utc_now(), document_id),
+            )
+            if not cur.rowcount:
+                return None
+        return self.get_knowledge_document(document_id)
+
+    def create_knowledge_ingestion_job(
+        self, document_id: int, *, job_type: str = "ingest"
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO knowledge_ingestion_jobs(
+                    document_id,job_type,status,stage,progress,attempts,error,queued_at,
+                    started_at,completed_at,created_at,updated_at
+                ) VALUES(?,?,'queued','queued',0.0,0,NULL,?,NULL,NULL,?,?)
+                """,
+                (document_id, job_type, now, now, now),
+            )
+            job_id = int(cur.lastrowid)
+        return self.get_knowledge_ingestion_job(job_id) or {}
+
+    def get_knowledge_ingestion_job(self, job_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM knowledge_ingestion_jobs WHERE id=?", (job_id,)
+            ).fetchone()
+        return row_dict(row)
+
+    def list_knowledge_ingestion_jobs(
+        self, document_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM knowledge_ingestion_jobs"
+        params: tuple[Any, ...] = ()
+        if document_id is not None:
+            sql += " WHERE document_id=?"
+            params = (document_id,)
+        sql += " ORDER BY id DESC"
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_knowledge_ingestion_job(
+        self,
+        job_id: int,
+        *,
+        status: str,
+        stage: str,
+        progress: float,
+        error: str | None = None,
+        attempts: int | None = None,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        progress = max(0.0, min(1.0, float(progress)))
+        with self._write_lock, self.connect() as conn:
+            existing = conn.execute(
+                "SELECT attempts,started_at,completed_at FROM knowledge_ingestion_jobs WHERE id=?",
+                (job_id,),
+            ).fetchone()
+            if not existing:
+                return None
+            cur = conn.execute(
+                """
+                UPDATE knowledge_ingestion_jobs
+                SET status=?,stage=?,progress=?,error=?,attempts=?,started_at=?,completed_at=?,updated_at=?
+                WHERE id=?
+                """,
+                (
+                    status,
+                    stage,
+                    progress,
+                    error,
+                    int(existing[0] if attempts is None else attempts),
+                    existing[1] if started_at is None else started_at,
+                    existing[2] if completed_at is None else completed_at,
+                    utc_now(),
+                    job_id,
+                ),
+            )
+            if not cur.rowcount:
+                return None
+        return self.get_knowledge_ingestion_job(job_id)
+
+    def add_knowledge_parent_block(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO knowledge_parent_blocks(
+                    document_id,parent_block_id,block_type,ordinal,heading_path,page_start,page_end,
+                    text,metadata_json,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    int(payload["document_id"]),
+                    payload.get("parent_block_id"),
+                    str(payload.get("block_type") or "section"),
+                    int(payload.get("ordinal") or 0),
+                    str(payload.get("heading_path") or ""),
+                    payload.get("page_start"),
+                    payload.get("page_end"),
+                    str(payload.get("text") or ""),
+                    json.dumps(payload.get("metadata") or {}, ensure_ascii=False, sort_keys=True),
+                    now,
+                ),
+            )
+            block_id = int(cur.lastrowid)
+            row = conn.execute(
+                "SELECT * FROM knowledge_parent_blocks WHERE id=?", (block_id,)
+            ).fetchone()
+        return self._decode_metadata_json(dict(row)) if row else {}
+
+    def add_knowledge_chunk(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO knowledge_chunks(
+                    document_id,parent_block_id,ordinal,content_type,text,token_count,page_start,page_end,
+                    metadata_json,lexical_status,vector_status,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    int(payload["document_id"]),
+                    payload.get("parent_block_id"),
+                    int(payload.get("ordinal") or 0),
+                    str(payload.get("content_type") or "text"),
+                    str(payload.get("text") or ""),
+                    max(0, int(payload.get("token_count") or 0)),
+                    payload.get("page_start"),
+                    payload.get("page_end"),
+                    json.dumps(payload.get("metadata") or {}, ensure_ascii=False, sort_keys=True),
+                    str(payload.get("lexical_status") or "pending"),
+                    str(payload.get("vector_status") or "pending"),
+                    now,
+                    now,
+                ),
+            )
+            chunk_id = int(cur.lastrowid)
+            row = conn.execute(
+                "SELECT * FROM knowledge_chunks WHERE id=?", (chunk_id,)
+            ).fetchone()
+        return self._decode_metadata_json(dict(row)) if row else {}
+
+    def knowledge_library_ids_for_agent(self, agent_id: int) -> list[int]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT library_id FROM agent_knowledge_libraries
+                WHERE agent_id=? AND enabled=1
+                ORDER BY library_id
+                """,
+                (agent_id,),
+            ).fetchall()
+        return [int(row[0]) for row in rows]
+
+    def set_agent_knowledge_libraries(
+        self, agent_id: int, library_ids: list[int]
+    ) -> list[int]:
+        unique_ids = sorted({int(value) for value in library_ids})
+        now = utc_now()
+        with self._write_lock, self.connect() as conn:
+            agent = conn.execute("SELECT id FROM agents WHERE id=?", (agent_id,)).fetchone()
+            if not agent:
+                raise LookupError("Agent not found")
+            if unique_ids:
+                placeholders = ",".join("?" for _ in unique_ids)
+                existing = {
+                    int(row[0])
+                    for row in conn.execute(
+                        f"SELECT id FROM knowledge_libraries WHERE id IN ({placeholders})",
+                        tuple(unique_ids),
+                    ).fetchall()
+                }
+                missing = [value for value in unique_ids if value not in existing]
+                if missing:
+                    raise ValueError(
+                        "Knowledge library not found: " + ", ".join(str(value) for value in missing)
+                    )
+            conn.execute("DELETE FROM agent_knowledge_libraries WHERE agent_id=?", (agent_id,))
+            conn.executemany(
+                "INSERT INTO agent_knowledge_libraries(agent_id,library_id,enabled,created_at) VALUES(?,?,1,?)",
+                [(agent_id, library_id, now) for library_id in unique_ids],
+            )
+        return unique_ids
+
+    def knowledge_counts(self) -> dict[str, int]:
+        tables = {
+            "libraries": "knowledge_libraries",
+            "documents": "knowledge_documents",
+            "jobs": "knowledge_ingestion_jobs",
+            "parent_blocks": "knowledge_parent_blocks",
+            "chunks": "knowledge_chunks",
+            "agent_links": "agent_knowledge_libraries",
+        }
+        with self.connect() as conn:
+            return {
+                key: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+                for key, table in tables.items()
+            }
 
     # Scripts and queue
     def list_scripts(self) -> list[dict[str, Any]]:

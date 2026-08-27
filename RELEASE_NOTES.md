@@ -1,21 +1,32 @@
-# VerbaNode v0.9.9 — Phase 3 Structural Hardening
+# VerbaNode v0.10.0 — Knowledge Engine Foundation
 
-v0.9.9 is a behavior-preserving structural release built on the Phase 1/2 reliability work. It reduces schema ownership duplication and makes future database changes easier to reason about without introducing a new on-disk migration.
+v0.10.0 begins the planned replacement of VerbaNode's current always-injected Information/Knowledge path with a local-first hierarchical Hybrid RAG Knowledge Engine. This release is **Phase 1 only**: it establishes durable storage, APIs, permissions, and service boundaries without changing Chat or Voice prompt behavior yet.
 
-## Structural changes
+## What is included
 
-- Added `app/db_schema.py` as the canonical home for the base SQLite schema and application-managed Type-to-Talk queue contract.
-- `Database.initialize()` now delegates base schema creation and startup reconciliation instead of embedding a large SQL block and queue-specific repair logic directly in `db.py`.
-- Numbered migrations now reuse the same Type-to-Talk creation/repair functions as startup and request-time recovery. This removes the previous parallel schema definitions that contributed to the v0.9.3–v0.9.6 repair complexity.
-- Centralized table-column inspection and the production-shaped Type-to-Talk INSERT validation in the schema module.
-- Added structural regression coverage proving a fresh database and malformed legacy Type-to-Talk queue converge on the same canonical schema.
+- Database schema v11 adds `knowledge_libraries`, `knowledge_documents`, `knowledge_ingestion_jobs`, `knowledge_parent_blocks`, `knowledge_chunks`, and `agent_knowledge_libraries`.
+- Knowledge libraries can be created, renamed, enabled/disabled, listed, and deleted when empty. Library names are case-insensitively unique.
+- Agents can be explicitly assigned one or more Knowledge libraries through a dedicated permission mapping. Existing Agent payloads remain compatible.
+- Document metadata supports source type/name, MIME type, relative storage key, size, SHA-256, status/error, indexing timestamp, and JSON metadata.
+- Ingestion-job metadata supports queue/running/completion state, stage, progress, attempts, timestamps, and errors.
+- Parent blocks and child chunks preserve hierarchy, page ranges, heading paths, content type, token counts, and future lexical/vector indexing state.
+- Runtime Knowledge storage is isolated under the normal VerbaNode user-data root with `sources`, `indexes`, and `cache` directories. `VERBANODE_KNOWLEDGE_PATH` can override the location.
+- Authenticated Knowledge APIs are available under `/api/knowledge`. `/api/client-info` advertises the foundation and reports retrieval as disabled.
 
-## Compatibility
+## Intentionally not enabled in Phase 1
 
-- Database schema remains **v10**. There is no new database migration in this release because the on-disk schema is unchanged.
-- Existing v0.9.8 databases and clients remain compatible.
-- VerbaNode Android v0.4.0 is the coordinated Phase 3 mobile release.
+- PDF/DOCX/XLSX/PPTX parsers
+- OCR
+- BM25/FTS indexing
+- embeddings or HNSW vector search
+- table retrieval
+- RRF/reranking
+- Chat/Voice RAG context injection
+- migration of the existing Information entries
+- Knowledge management UI in Web/Android
+
+This separation is deliberate: Phase 1 gives later ingestion and retrieval work a stable schema and API contract without risking the existing conversation pipeline. The old Information entries continue to behave exactly as before until the planned cutover/migration phase; they are not the final architecture.
 
 ## Upgrade
 
-Fully stop VerbaNode Core, replace the release files, and start it again. Normal startup schema reconciliation will run, but no schema-version upgrade is required.
+Fully stop VerbaNode Core, replace the release files, and start Core again. Schema migration v11 runs automatically and a pre-migration backup is created by the existing recovery mechanism. Android v0.3.6 remains compatible and requires no update for Phase 1.

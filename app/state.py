@@ -26,6 +26,7 @@ from app.services.discovery import LanDiscoveryAdvertiser
 from app.services.conversation import ConversationManager
 from app.services.events import EventHub
 from app.services.llm import OllamaService
+from app.knowledge import KnowledgeEngine
 from app.services.pipeline import PipelineMonitor
 from app.services.script_queue import ScriptQueueManager
 from app.services.stt import FunASRService
@@ -56,6 +57,7 @@ class AppState:
     script_queue: ScriptQueueManager
     type_to_talk: TypeToTalkManager
     diagnostics: DiagnosticsManager
+    knowledge: KnowledgeEngine
 
     def reconcile_audio_devices(self) -> dict[str, int | None]:
         runtime = self.db.get_runtime_settings()
@@ -116,6 +118,7 @@ def build_state() -> AppState:
     settings = get_settings()
     db = Database(settings)
     db.initialize()
+    knowledge = KnowledgeEngine(db, settings.knowledge_dir)
     events = EventHub()
     controller = ControllerManager(settings)
     devices = DeviceManager(db, pairing_ttl_seconds=settings.mobile_pairing_ttl_seconds)
@@ -253,6 +256,7 @@ def build_state() -> AppState:
         script_queue=script_queue,
         type_to_talk=type_to_talk,
         diagnostics=diagnostics,
+        knowledge=knowledge,
     )
 
 

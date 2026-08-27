@@ -56,6 +56,11 @@ def feature_manifest() -> dict[str, Any]:
         "type_to_talk_queue": True,
         "script_defaults": True,
         "broad_audio_formats": True,
+        "knowledge_engine": True,
+        "knowledge_engine_phase": "foundation",
+        "knowledge_libraries": True,
+        "knowledge_agent_permissions": True,
+        "knowledge_retrieval": False,
     }
 
 
@@ -115,6 +120,8 @@ def client_info_payload(*, instance_id: str | None = None, instance_name: str | 
             "heartbeat": "/api/heartbeat",
             "session": "/api/session",
             "devices": "/api/devices",
+            "knowledge_status": "/api/knowledge/status",
+            "knowledge_libraries": "/api/knowledge/libraries",
             "pairing_start": "/api/devices/pairing/start",
             "pairing_claim": "/api/pairing/claim",
         },

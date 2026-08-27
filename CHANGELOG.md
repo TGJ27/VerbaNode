@@ -1,27 +1,12 @@
-## v0.9.9 - Phase 3 structural hardening
+## v0.10.0 - Knowledge Engine foundation (Hybrid RAG Phase 1)
 
-- Extracted the canonical base SQLite schema into `app/db_schema.py` so `Database` is no longer the owner of a large embedded schema block.
-- Centralized Type-to-Talk queue creation, column contract, trigger cleanup, repair, and production INSERT validation in the same schema module.
-- Reused the canonical queue contract from numbered migrations, startup health reconciliation, and request-time self-heal instead of maintaining parallel implementations.
-- Kept database schema version 10 because Phase 3 changes code organization rather than the on-disk data model.
-- Added structural regression tests for fresh-schema creation and malformed legacy queue convergence.
-- Coordinated with VerbaNode Android v0.4.0 Phase 3 state/model architecture cleanup and Home Type-to-Talk quick access.
-
-## v0.9.8 - Phase 2 coordinated hardening
-
-- Fixed Audio Library play/rename/delete identity for duplicate-upload names such as `clip (2).mp3`; existing files are now resolved by the exact filename returned by the library listing rather than being passed through the new-upload sanitizer again.
-- Preserved compatibility with legacy audio filenames containing safe non-path characters that current uploads may sanitize.
-- Made Audio Library DELETE idempotent so stale clients can refresh successfully if a file has already disappeared.
-- Added regression tests covering duplicate collision filenames, legacy filenames, and missing-file deletion behavior.
-- Coordinated with VerbaNode Android v0.3.9 Phase 2 state/network and large-file streaming hardening.
-
-## v0.9.7 - Phase 1 stability hardening
-
-- Fixed host Push-to-Talk cleanup after unexpected controller WebSocket loss. The disconnect path now checks whether the same controller token actually reconnected instead of incorrectly treating a still-valid controller session as an active socket.
-- Added a one-second reconnect grace window so a quick same-token WebSocket replacement does not cancel an in-progress host PTT hold.
-- Applied the same host-PTT cleanup to unexpected WebSocket handler failures, not only normal disconnect exceptions.
-- Added a global HTTP exception boundary that logs the real exception and returns a non-leaking structured `internal_server_error` response containing the request ID.
-- Added regression coverage for dropped-PTT sockets, fast same-token reconnects, and unexpected HTTP 500 envelopes.
+- Added database schema v11 with canonical Knowledge Engine tables for libraries, documents, ingestion jobs, hierarchical parent blocks/chunks, and agent-to-library permissions.
+- Added a local-first Knowledge Engine service boundary and stable runtime layout under the VerbaNode user-data directory (`knowledge/sources`, `knowledge/indexes`, and `knowledge/cache`).
+- Added authenticated `/api/knowledge/*` foundation endpoints for engine status, library CRUD, document/job inspection, and agent-library assignments.
+- Added client feature negotiation for the Knowledge Engine foundation while explicitly advertising that parsing/retrieval/chat integration are not enabled yet.
+- Added document/job/block/chunk persistence primitives for Phase 2 ingestion without selecting a parser, embedding model, vector backend, or reranker prematurely.
+- Kept the existing Information prompt path active during Phase 1 only; the planned later cutover will migrate existing entries and remove unconditional factual prompt injection.
+- No Android client change is required for this backend foundation release.
 
 ## v0.9.6 - Type-to-Talk migration-independent self-heal
 

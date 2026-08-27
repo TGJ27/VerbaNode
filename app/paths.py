@@ -39,6 +39,7 @@ PLUGIN_DIR = USER_DATA_ROOT / "plugins" if IS_FROZEN else SOURCE_ROOT / "plugins
 DIAGNOSTICS_DIR = USER_DATA_ROOT / "diagnostics"
 RUNTIME_AUDIO_DIR = USER_DATA_ROOT / "runtime_audio"
 AUDIO_LIBRARY_DIR = USER_DATA_ROOT / "audio_library"
+KNOWLEDGE_DIR = USER_DATA_ROOT / "knowledge"
 BACKUP_DIR = USER_DATA_ROOT / "backups"
 LOG_DIR = USER_DATA_ROOT / "logs"
 
@@ -134,6 +135,7 @@ def ensure_runtime_layout() -> None:
         DIAGNOSTICS_DIR,
         RUNTIME_AUDIO_DIR,
         AUDIO_LIBRARY_DIR,
+        KNOWLEDGE_DIR,
         BACKUP_DIR,
         LOG_DIR,
     ):

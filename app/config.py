@@ -12,6 +12,7 @@ from app.paths import (
     DIAGNOSTICS_DIR,
     MODEL_DIR,
     LOG_DIR,
+    KNOWLEDGE_DIR,
     PLUGIN_DIR,
     RESOURCE_ROOT,
     RUNTIME_AUDIO_DIR,
@@ -63,6 +64,7 @@ class Settings(BaseSettings):
     websocket_heartbeat_timeout_seconds: float = Field(default=45.0, ge=15.0, le=600.0)
     api_max_json_body_bytes: int = Field(default=2097152, ge=65536, le=16777216)
     audio_library_max_upload_bytes: int = Field(default=52428800, ge=1048576, le=536870912)
+    knowledge_path: Path = KNOWLEDGE_DIR
     login_max_attempts: int = Field(default=5, ge=2, le=20)
     login_attempt_window_seconds: float = Field(default=60.0, ge=10.0, le=600.0)
     login_lockout_base_seconds: float = Field(default=5.0, ge=1.0, le=120.0)
@@ -127,6 +129,14 @@ class Settings(BaseSettings):
         return path
 
     @property
+    def knowledge_dir(self) -> Path:
+        path = self.knowledge_path
+        if not path.is_absolute():
+            path = DATA_DIR.parent / path
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
     def runtime_audio_dir(self) -> Path:
         path = RUNTIME_AUDIO_DIR
         path.mkdir(parents=True, exist_ok=True)
@@ -165,6 +175,8 @@ def get_settings() -> Settings:
         settings.kokoro_dir = MODEL_DIR.parent / settings.kokoro_dir
     if not settings.tts_cache_path.is_absolute():
         settings.tts_cache_path = DATA_DIR.parent / settings.tts_cache_path
+    if not settings.knowledge_path.is_absolute():
+        settings.knowledge_path = DATA_DIR.parent / settings.knowledge_path
     if not settings.external_plugins_path.is_absolute():
         settings.external_plugins_path = PLUGIN_DIR.parent / settings.external_plugins_path
     if not settings.capability_audit_path.is_absolute():

@@ -19,6 +19,7 @@ from app.api.configuration_options import router as configuration_options_router
 from app.api.diagnostics import router as diagnostics_router
 from app.api.devices import router as devices_router
 from app.api.information import router as information_router
+from app.api.knowledge import router as knowledge_router
 from app.api.models import router as models_router
 from app.api.plugins import router as plugins_router
 from app.api.scripts import router as scripts_router
@@ -55,6 +56,7 @@ app.include_router(actions_router)
 app.include_router(capabilities_router)
 app.include_router(agents_router)
 app.include_router(information_router)
+app.include_router(knowledge_router)
 app.include_router(scripts_router)
 app.include_router(plugins_router)
 app.include_router(conversations_router)

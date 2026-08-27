@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.9.9 is the Phase 3 structural-hardening release. Core keeps the Phase 1/2 reliability fixes while centralizing the canonical SQLite schema contract and runtime repair logic so migrations and request-time recovery no longer duplicate Type-to-Talk schema definitions. RAG/large-knowledge retrieval is intentionally deferred. The coordinated native Android client is v0.4.0.
+> **Project status:** active development. v0.10.0 starts Hybrid RAG Phase 1 with a local-first Knowledge Engine foundation: schema v11 adds libraries, document/job metadata, hierarchical parent/chunk storage, agent-library permissions, and authenticated Knowledge APIs. Parsing, embeddings, retrieval, reranking, and Chat/Voice cutover are intentionally not enabled in this phase. The existing Information path remains active only until the later migration/cutover phase. The native Android client remains compatible at v0.3.6.
 
 ---
 
@@ -53,8 +53,11 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Conversation history is stored
   - Relevant context can be supplied when needed instead of resending the entire conversation every turn
 
-- **Information / knowledge entries**
-  - Reusable information can be enabled globally or assigned to selected agents
+- **Knowledge Engine foundation (v0.10.0 / Hybrid RAG Phase 1)**
+  - Local-first Knowledge libraries with explicit per-agent access
+  - Durable document, ingestion-job, parent-block, and child-chunk metadata
+  - Storage/API boundary designed for later BM25 + dense-vector + structured-table retrieval
+  - Existing Information entries remain temporarily active until the planned RAG cutover/migration phase
 
 - **Plugin architecture**
   - Built-in plugins
@@ -80,25 +83,11 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Start Menu / Desktop shortcuts
   - Uninstall support
 
-- **v0.9.9 Phase 3 structural hardening**
-  - Moves the canonical base SQLite schema out of the large `Database` implementation into a dedicated schema module.
-  - Centralizes Type-to-Talk table creation, validation, and runtime reconciliation so migrations, startup health checks, and request-time self-heal share one schema contract.
-  - Keeps database schema version 10 because this release changes code organization, not the on-disk data model.
-  - Adds structural regression tests for canonical schema creation and queue repair.
-  - Coordinated with VerbaNode Android v0.4.0, which splits read-side management loading from `AppViewModel`, introduces typed models for scripts/queues/direct speech/audio, and adds Type to Talk to Home.
-
-- **v0.9.8 Phase 2 coordinated hardening**
-  - Fixes Audio Library exact-file identity for duplicate collision names such as `clip (2).mp3` and compatible legacy filenames that contain characters not accepted by the current upload sanitizer.
-  - Existing library items are resolved by their exact listed filename instead of being sanitized a second time before play/rename/delete.
-  - Audio DELETE is idempotent: stale clients can refresh cleanly when an item is already gone instead of receiving a misleading 404.
-  - Adds regression coverage for duplicate-name deletion, legacy filename deletion, and idempotent missing-item deletion.
-  - Coordinated with Android v0.3.9 state/network/large-file hardening.
-
-- **v0.9.7 Phase 1 stability hardening**
-  - Cancels host PTT after an unexpected controlling WebSocket disconnect even while the controller session token remains valid.
-  - Gives the same controller token a short reconnect grace period so fast socket replacement does not interrupt a held recording.
-  - Returns structured `internal_server_error` responses with `X-Request-ID` for unexpected HTTP failures while keeping exception details in server logs.
-  - Coordinated with VerbaNode Android v0.3.7 connection/PTT lifecycle hardening.
+- **v0.10.0 Knowledge Engine foundation**
+  - Adds schema v11 for Knowledge libraries, documents, ingestion jobs, hierarchical blocks/chunks, and agent-library permissions.
+  - Adds local runtime Knowledge storage (`sources`, `indexes`, `cache`) and authenticated `/api/knowledge/*` foundation APIs.
+  - Establishes the service boundary for the planned CPU-first hierarchical Hybrid RAG pipeline without enabling retrieval or changing prompts yet.
+  - Keeps Android v0.3.6 compatible; no mobile update is required for this backend-only phase.
 
 - **v0.9.6 Type-to-Talk self-healing queue**
   - Adds schema migration v10, which force-rebuilds the direct-speech queue for databases already stamped v9.

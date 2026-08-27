@@ -82,6 +82,28 @@ class InfoCreate(BaseModel):
     enabled: bool = True
 
 
+class KnowledgeLibraryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=4000)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def normalize_library(self) -> "KnowledgeLibraryCreate":
+        self.name = self.name.strip()
+        self.description = self.description.strip()
+        if not self.name:
+            raise ValueError("Knowledge library name cannot be blank")
+        return self
+
+
+class KnowledgeLibraryUpdate(KnowledgeLibraryCreate):
+    pass
+
+
+class AgentKnowledgeLibrariesUpdate(BaseModel):
+    library_ids: list[int] = Field(default_factory=list, max_length=500)
+
+
 class ScriptCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     text: str = Field(min_length=1, max_length=20000)

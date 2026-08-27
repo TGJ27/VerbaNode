@@ -6,12 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from app.db_schema import (
-    create_type_to_talk_queue,
-    repair_type_to_talk_queue_schema,
-    table_columns,
-)
-
 
 VERBANODE_APPLICATION_ID = 0x564E4F44  # ASCII "VNOD"
 
@@ -35,6 +29,9 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
 
 def _add_column_if_missing(
     conn: sqlite3.Connection,
@@ -42,7 +39,7 @@ def _add_column_if_missing(
     column: str,
     declaration: str,
 ) -> None:
-    if column not in table_columns(conn, table):
+    if column not in _columns(conn, table):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
@@ -159,7 +156,21 @@ def _trusted_devices_v5(conn: sqlite3.Connection) -> None:
 
 
 def _type_to_talk_queue_v7(conn: sqlite3.Connection) -> None:
-    create_type_to_talk_queue(conn)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS type_to_talk_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_type_to_talk_queue_position "
+        "ON type_to_talk_queue(position,id)"
+    )
 
 
 def _type_to_talk_integrity_repair_v8(conn: sqlite3.Connection) -> None:
@@ -170,6 +181,138 @@ def _type_to_talk_integrity_repair_v8(conn: sqlite3.Connection) -> None:
     conn.execute(
         "UPDATE type_to_talk_queue SET status='waiting' WHERE status='playing'"
     )
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _type_to_talk_related_triggers(conn: sqlite3.Connection) -> list[str]:
+    """Return every persistent trigger that touches the direct-speech queue.
+
+    A legacy trigger does not have to be *attached* to type_to_talk_queue to
+    break inserts into it; a trigger on another table can still reference the
+    queue in its body.  Inspect the trigger SQL, not just tbl_name.
+    """
+    rows = conn.execute(
+        "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND sql IS NOT NULL"
+    ).fetchall()
+    return [
+        str(row[0])
+        for row in rows
+        if "type_to_talk_queue" in str(row[1] or "").lower()
+    ]
+
+
+def _read_type_to_talk_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
+    tables = {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "type_to_talk_queue" not in tables:
+        return []
+
+    columns = _columns(conn, "type_to_talk_queue")
+    if "text" not in columns:
+        return []
+
+    wanted = [name for name in ("id", "text", "position", "status", "created_at") if name in columns]
+    sql = "SELECT " + ",".join(_quote_identifier(name) for name in wanted) + " FROM type_to_talk_queue"
+    try:
+        rows = conn.execute(sql).fetchall()
+    except sqlite3.DatabaseError:
+        return []
+
+    result: list[dict[str, object]] = []
+    for row in rows:
+        values = dict(zip(wanted, row))
+        text = str(values.get("text") or "").strip()
+        if not text:
+            continue
+        result.append(values)
+    return result
+
+
+def repair_type_to_talk_queue_schema(
+    conn: sqlite3.Connection, *, force_rebuild: bool = False
+) -> None:
+    """Make the Type-to-Talk queue match the canonical production schema.
+
+    This helper is intentionally usable both by numbered migrations and at
+    runtime.  The runtime path matters because a database may already be marked
+    at the current schema version while still containing a stale trigger/object
+    from an interrupted or hand-copied upgrade.
+    """
+    required = {"id", "text", "position", "status", "created_at"}
+    tables = {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    exists = "type_to_talk_queue" in tables
+    columns = _columns(conn, "type_to_talk_queue") if exists else set()
+    trigger_names = _type_to_talk_related_triggers(conn)
+
+    # Any trigger touching this application-managed queue is unsupported. Drop
+    # it before rebuilding so even cross-table legacy triggers cannot re-break
+    # the new queue.
+    for trigger_name in trigger_names:
+        conn.execute(f"DROP TRIGGER IF EXISTS {_quote_identifier(trigger_name)}")
+
+    rebuild = force_rebuild or not exists or columns != required or bool(trigger_names)
+    if rebuild:
+        preserved = _read_type_to_talk_rows(conn) if exists else []
+        conn.execute("DROP TABLE IF EXISTS type_to_talk_queue")
+        _type_to_talk_queue_v7(conn)
+
+        now = _utc_now()
+        normalized: list[tuple[int | None, str, int, str, str]] = []
+        for order, item in enumerate(preserved):
+            raw_id = item.get("id")
+            try:
+                item_id = int(raw_id) if raw_id is not None and int(raw_id) > 0 else None
+            except (TypeError, ValueError):
+                item_id = None
+            text = str(item.get("text") or "").strip()
+            created_at = str(item.get("created_at") or now)
+            # Playback cannot safely resume across a schema repair/restart.
+            normalized.append((item_id, text, order, "waiting", created_at))
+
+        for item_id, text, position, status, created_at in normalized:
+            if item_id is None:
+                conn.execute(
+                    "INSERT INTO type_to_talk_queue(text,position,status,created_at) VALUES(?,?,?,?)",
+                    (text, position, status, created_at),
+                )
+            else:
+                conn.execute(
+                    "INSERT OR IGNORE INTO type_to_talk_queue(id,text,position,status,created_at) VALUES(?,?,?,?,?)",
+                    (item_id, text, position, status, created_at),
+                )
+    else:
+        conn.execute(
+            "UPDATE type_to_talk_queue SET status='waiting' "
+            "WHERE status NOT IN ('waiting','playing') OR status='playing'"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_type_to_talk_queue_position "
+            "ON type_to_talk_queue(position,id)"
+        )
+
+    # Execute a real insert inside a savepoint, then roll it back. EXPLAIN alone
+    # is not sufficient assurance for every legacy trigger/schema combination.
+    conn.execute("SAVEPOINT type_to_talk_schema_probe")
+    try:
+        conn.execute(
+            "INSERT INTO type_to_talk_queue(text,position,status,created_at) "
+            "VALUES('schema-probe',2147483647,'waiting','probe')"
+        )
+    finally:
+        conn.execute("ROLLBACK TO SAVEPOINT type_to_talk_schema_probe")
+        conn.execute("RELEASE SAVEPOINT type_to_talk_schema_probe")
 
 
 def _type_to_talk_schema_reconcile_v9(conn: sqlite3.Connection) -> None:
@@ -187,6 +330,154 @@ def _type_to_talk_force_rebuild_v10(conn: sqlite3.Connection) -> None:
     repair_type_to_talk_queue_schema(conn, force_rebuild=True)
 
 
+def _knowledge_engine_foundation_v11(conn: sqlite3.Connection) -> None:
+    """Create the local-first Knowledge Engine metadata foundation.
+
+    Phase 1 deliberately stores only canonical metadata and content blocks.
+    Parsing, OCR, embeddings, vector indexes, BM25 population, and RAG prompt
+    integration are introduced by later phases. Keeping the relational model
+    independent of any embedding/vector provider lets a future remote backend
+    reuse the same public API contract.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_libraries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            library_id INTEGER NOT NULL REFERENCES knowledge_libraries(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            source_name TEXT NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'unknown',
+            mime_type TEXT,
+            storage_key TEXT,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT,
+            status TEXT NOT NULL DEFAULT 'registered',
+            error TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            indexed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_documents_library ON knowledge_documents(library_id,id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_documents_status ON knowledge_documents(status,updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_documents_sha256 ON knowledge_documents(sha256)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_ingestion_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+            job_type TEXT NOT NULL DEFAULT 'ingest',
+            status TEXT NOT NULL DEFAULT 'queued',
+            stage TEXT NOT NULL DEFAULT 'queued',
+            progress REAL NOT NULL DEFAULT 0.0,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            queued_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_status ON knowledge_ingestion_jobs(status,queued_at,id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_document ON knowledge_ingestion_jobs(document_id,id DESC)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_parent_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+            parent_block_id INTEGER REFERENCES knowledge_parent_blocks(id) ON DELETE SET NULL,
+            block_type TEXT NOT NULL DEFAULT 'section',
+            ordinal INTEGER NOT NULL DEFAULT 0,
+            heading_path TEXT NOT NULL DEFAULT '',
+            page_start INTEGER,
+            page_end INTEGER,
+            text TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_parent_document ON knowledge_parent_blocks(document_id,ordinal,id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_parent_parent ON knowledge_parent_blocks(parent_block_id,id)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+            parent_block_id INTEGER REFERENCES knowledge_parent_blocks(id) ON DELETE SET NULL,
+            ordinal INTEGER NOT NULL DEFAULT 0,
+            content_type TEXT NOT NULL DEFAULT 'text',
+            text TEXT NOT NULL DEFAULT '',
+            token_count INTEGER NOT NULL DEFAULT 0,
+            page_start INTEGER,
+            page_end INTEGER,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            lexical_status TEXT NOT NULL DEFAULT 'pending',
+            vector_status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document ON knowledge_chunks(document_id,ordinal,id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_parent ON knowledge_chunks(parent_block_id,ordinal,id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_index_state ON knowledge_chunks(lexical_status,vector_status,id)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_knowledge_libraries (
+            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+            library_id INTEGER NOT NULL REFERENCES knowledge_libraries(id) ON DELETE CASCADE,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(agent_id,library_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_knowledge_library ON agent_knowledge_libraries(library_id,agent_id)"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "numbered_migration_foundation", _foundation_v1),
     Migration(2, "persistent_action_ledger", _persistent_action_ledger_v2),
@@ -198,6 +489,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(8, "type_to_talk_integrity_repair", _type_to_talk_integrity_repair_v8),
     Migration(9, "type_to_talk_schema_reconcile", _type_to_talk_schema_reconcile_v9),
     Migration(10, "type_to_talk_force_rebuild", _type_to_talk_force_rebuild_v10),
+    Migration(11, "knowledge_engine_foundation", _knowledge_engine_foundation_v11),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 
