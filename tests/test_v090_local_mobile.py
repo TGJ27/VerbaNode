@@ -24,9 +24,9 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v090_metadata_and_mobile_contract() -> None:
-    assert APP_VERSION == "0.10.1"
+    assert APP_VERSION == "0.10.2"
     assert BUILD_LABEL == "local-mobile"
-    assert CURRENT_SCHEMA_VERSION == 12
+    assert CURRENT_SCHEMA_VERSION == 13
     features = feature_manifest()
     assert features["mobile_pairing"] is True
     assert features["trusted_devices"] is True
@@ -49,7 +49,7 @@ def test_v5_trusted_device_schema_is_migrated(tmp_path: Path) -> None:
     with sqlite3.connect(settings.db_path) as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(trusted_devices)")}
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 12
+    assert version == 13
     assert {
         "device_id",
         "name",

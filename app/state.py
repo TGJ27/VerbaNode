@@ -119,7 +119,10 @@ def build_state() -> AppState:
     db = Database(settings)
     db.initialize()
     knowledge = KnowledgeEngine(
-        db, settings.knowledge_dir, max_upload_bytes=settings.knowledge_max_upload_bytes
+        db,
+        settings.knowledge_dir,
+        max_upload_bytes=settings.knowledge_max_upload_bytes,
+        embedding_threads=settings.knowledge_embedding_threads,
     )
     events = EventHub()
     controller = ControllerManager(settings)

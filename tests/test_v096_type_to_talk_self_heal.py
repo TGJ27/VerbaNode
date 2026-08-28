@@ -62,8 +62,8 @@ def test_v10_runs_for_database_already_stamped_v9_and_removes_error_trigger() ->
 
     version = apply_migrations(conn)
 
-    assert version == CURRENT_SCHEMA_VERSION == 12
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 12
+    assert version == CURRENT_SCHEMA_VERSION == 13
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
     assert conn.execute(
         "SELECT name FROM sqlite_master WHERE type='trigger' AND sql LIKE '%type_to_talk_queue%'"
     ).fetchall() == []
@@ -77,7 +77,7 @@ def test_database_initialize_repairs_queue_even_when_schema_metadata_is_current(
     settings = _settings(tmp_path)
     db = Database(settings)
     db.initialize()
-    assert db.schema_version() == CURRENT_SCHEMA_VERSION == 12
+    assert db.schema_version() == CURRENT_SCHEMA_VERSION == 13
 
     _install_legacy_error_trigger(settings.db_path)
 

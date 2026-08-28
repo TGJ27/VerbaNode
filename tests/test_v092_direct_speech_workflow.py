@@ -32,8 +32,8 @@ def _db(tmp_path: Path) -> Database:
 
 
 def test_v092_contract_and_schema() -> None:
-    assert APP_VERSION == "0.10.1"
-    assert CURRENT_SCHEMA_VERSION == 12
+    assert APP_VERSION == "0.10.2"
+    assert CURRENT_SCHEMA_VERSION == 13
     features = feature_manifest()
     assert features["type_to_talk_queue"] is True
     assert features["script_defaults"] is True

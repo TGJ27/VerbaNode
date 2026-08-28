@@ -1,41 +1,39 @@
-# VerbaNode v0.10.1 — Universal Knowledge Ingestion
+# VerbaNode v0.10.2 — Hybrid Knowledge Retrieval
 
-v0.10.1 completes **Hybrid RAG Phase 2**. The local-first Knowledge Engine can now accept and normalize large mixed document sources while retrieval remains deliberately disabled until Phase 3.
+v0.10.2 completes **Hybrid RAG Phase 3**. The normalized Knowledge content created by Phase 2 is now independently searchable through a CPU/local hybrid retrieval engine. Chat and Voice are deliberately not connected to RAG yet; this release gives us a stable surface for retrieval benchmarking before reranking and prompt cutover.
 
 ## What is included
 
-- Database schema v12 adds persistent `knowledge_document_assets` so extracted/OCR image metadata is retained without requiring a VLM.
-- Upload/ingestion APIs now accept PDF, DOCX, XLSX/XLSM, CSV/TSV, PPTX, HTML, Markdown, TXT, JSON, XML, common source/code files, and common raster image formats.
-- Native structure is retained where possible: document headings, pages/slides/sheets, tables, captions/labels, source metadata, and page ranges are normalized into the Phase-1 parent-block/child-chunk model.
-- PDF parsing extracts text and tables; image-only/scanned pages use CPU OCR when the OCR runtime is available.
-- DOCX, PPTX, and standalone image ingestion can retain extracted image assets and OCR text. No VLM is used.
-- XLSX/CSV ingestion keeps row/column structure in table blocks instead of flattening an entire workbook into prompt prose.
-- Structure-aware chunking creates retrieval-ready child chunks with heading context and estimated token counts. Lexical/vector states remain `pending` for Phase 3.
-- Ingestion runs as a background task after the source has been safely stored. Jobs expose queued/running/completed/failed stage and progress state and support re-ingestion.
-- Original source files remain authoritative under the local Knowledge directory; generated assets are stored separately and can be rebuilt.
-- Added document deletion, re-ingestion, supported-format inspection, and normalized-content inspection APIs.
-- Uploads are streamed to disk and bounded by `VERBANODE_KNOWLEDGE_MAX_UPLOAD_BYTES` (1 GiB default).
+- Database schema v13 adds external-content SQLite FTS5 indexes for Knowledge chunks and structured table rows, persistent vector-record metadata, and per-library index status metadata.
+- BM25/FTS5 handles exact terminology, IDs, model numbers, error codes, filenames, numbers, and ordinary lexical matches.
+- Dense retrieval uses CPU-only `intfloat/multilingual-e5-small` through FastEmbed. The model produces 384-dimensional multilingual vectors and uses explicit `query:` / `passage:` prefixes.
+- Each Knowledge library receives its own local cosine ANN index. USearch HNSW is the preferred backend with float16 vector storage; a portable NumPy exact-search fallback keeps dense retrieval functional if the native ANN runtime cannot load.
+- Structured tables are indexed as rows while preserving headers/cells and their source chunk/document metadata. Table matches are returned with the matched header, cells, and row representation.
+- Hybrid mode merges lexical, dense-vector, and structured-table candidates with Reciprocal Rank Fusion (RRF). Raw BM25 and cosine scales are therefore never incorrectly averaged together.
+- Enabled-library filters and agent-to-library permissions are resolved **before** retrieval so disallowed libraries never enter the candidate set.
+- `/api/knowledge/search` exposes `hybrid`, `lexical`, `vector`, and `table` modes for Phase-3 testing. `/api/knowledge/index/status` exposes model/backend/count state.
+- Background index maintenance includes per-document reindex plus per-library/all-library rebuild. Existing Phase-2 libraries are fully rebuilt when their first dense index is created so older documents are not omitted.
+- Dense indexing/search errors are isolated. BM25 and structured-table search continue to work and the API reports a warning/partial index state rather than making Knowledge unavailable.
+- `VERBANODE_KNOWLEDGE_EMBEDDING_THREADS` controls local embedding CPU threads (default 2).
+- Windows packaging collects the FastEmbed and USearch runtime modules required by the dynamically loaded retrieval backend.
 
-## Dashboard regression fix
+## Local CPU behavior
 
-- The dashboard shell remains fixed to the viewport.
-- The Conversation control rail no longer has its own scrollbar or a `42vh` height cap.
-- Conversation controls were compacted so Global Audio Control, Now Speaking, and Quick Scripts fit the fixed rail at normal desktop heights.
-- Native scrollbars are hidden throughout the dashboard so nested scrollbar chrome does not reappear; the main shell itself does not move.
-- On narrow/mobile layouts, the duplicated desktop Conversation rail is not stacked below Chat; the existing mobile voice dock provides those controls inside the fixed viewport.
+The embedding model is loaded lazily. Starting Core does not download or load it. The first dense indexing or vector search can download the model into the local Knowledge cache when it is not already present. Subsequent operations reuse that local model. BM25/FTS5 and table retrieval do not require the embedding model.
+
+The full `requirements.txt` enables dense retrieval. Minimal/core-only development installs that omit FastEmbed/USearch can still run lexical/table retrieval and will report dense retrieval as unavailable.
 
 ## Intentionally not enabled yet
 
-- BM25/FTS indexing
-- embeddings/HNSW vector indexing
-- hybrid retrieval/RRF
-- reranking
-- Chat/Voice RAG context injection
-- migration/removal of the existing Information prompt path
-- VLM/image semantic reasoning
+- cross-encoder reranking (Phase 4)
+- query routing/normalization and confidence fallback (Phase 4)
+- parent/neighbor expansion and final context packing (Phase 4)
+- Chat/Voice RAG context injection (Phase 5)
+- migration/removal of the existing Information prompt path (later cutover)
+- VLM/image-semantic reasoning
 
-The existing Information path therefore remains active only until the later cutover phase. Android v0.3.6 remains compatible and does not require an update for Phase 2.
+The existing Information path therefore remains temporarily active and unchanged. Android v0.3.6 remains compatible and does not require an update for Phase 3.
 
 ## Upgrade
 
-Fully stop VerbaNode Core, replace the release files, and start Core again. Schema migration v12 runs automatically and the existing recovery system creates the normal pre-migration database snapshot.
+Fully stop VerbaNode Core, replace the release files, and start Core again. Schema migration v13 runs automatically and the existing recovery system creates the normal pre-migration database snapshot. Existing Phase-2 chunks are backfilled into FTS5 by migration; use the Knowledge index rebuild endpoint when you want to generate dense vectors for already-ingested libraries.

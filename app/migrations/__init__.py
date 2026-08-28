@@ -515,6 +515,166 @@ def _knowledge_document_assets_v12(conn: sqlite3.Connection) -> None:
 
 
 
+def _knowledge_hybrid_retrieval_v13(conn: sqlite3.Connection) -> None:
+    """Add Phase-3 lexical/vector/table retrieval persistence.
+
+    FTS5 uses external-content tables so the token index does not duplicate the
+    full chunk/row text. Vector values live in the local ANN index files; SQLite
+    only stores durable membership/compatibility metadata so indexes can be
+    repaired or rebuilt without coupling the relational schema to one ANN
+    implementation.
+    """
+    for column, declaration in (
+        ("embedding_model", "TEXT"),
+        ("lexical_indexed_at", "TEXT"),
+        ("vector_indexed_at", "TEXT"),
+    ):
+        _add_column_if_missing(conn, "knowledge_chunks", column, declaration)
+
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
+            text,
+            content='knowledge_chunks',
+            content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_fts_ai
+        AFTER INSERT ON knowledge_chunks BEGIN
+            INSERT INTO knowledge_chunks_fts(rowid,text) VALUES(new.id,new.text);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_fts_ad
+        AFTER DELETE ON knowledge_chunks BEGIN
+            INSERT INTO knowledge_chunks_fts(knowledge_chunks_fts,rowid,text)
+            VALUES('delete',old.id,old.text);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_chunks_fts_au
+        AFTER UPDATE OF text ON knowledge_chunks BEGIN
+            INSERT INTO knowledge_chunks_fts(knowledge_chunks_fts,rowid,text)
+            VALUES('delete',old.id,old.text);
+            INSERT INTO knowledge_chunks_fts(rowid,text) VALUES(new.id,new.text);
+        END
+        """
+    )
+    conn.execute("INSERT INTO knowledge_chunks_fts(knowledge_chunks_fts) VALUES('rebuild')")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_table_rows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chunk_id INTEGER NOT NULL REFERENCES knowledge_chunks(id) ON DELETE CASCADE,
+            document_id INTEGER NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+            library_id INTEGER NOT NULL REFERENCES knowledge_libraries(id) ON DELETE CASCADE,
+            row_number INTEGER NOT NULL DEFAULT 0,
+            header_json TEXT NOT NULL DEFAULT '[]',
+            cells_json TEXT NOT NULL DEFAULT '[]',
+            row_text TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            UNIQUE(chunk_id,row_number)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_table_rows_document "
+        "ON knowledge_table_rows(document_id,chunk_id,row_number)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_table_rows_library "
+        "ON knowledge_table_rows(library_id,chunk_id,row_number)"
+    )
+    conn.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_table_rows_fts USING fts5(
+            row_text,
+            content='knowledge_table_rows',
+            content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_table_rows_fts_ai
+        AFTER INSERT ON knowledge_table_rows BEGIN
+            INSERT INTO knowledge_table_rows_fts(rowid,row_text) VALUES(new.id,new.row_text);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_table_rows_fts_ad
+        AFTER DELETE ON knowledge_table_rows BEGIN
+            INSERT INTO knowledge_table_rows_fts(knowledge_table_rows_fts,rowid,row_text)
+            VALUES('delete',old.id,old.row_text);
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_knowledge_table_rows_fts_au
+        AFTER UPDATE OF row_text ON knowledge_table_rows BEGIN
+            INSERT INTO knowledge_table_rows_fts(knowledge_table_rows_fts,rowid,row_text)
+            VALUES('delete',old.id,old.row_text);
+            INSERT INTO knowledge_table_rows_fts(rowid,row_text) VALUES(new.id,new.row_text);
+        END
+        """
+    )
+    conn.execute("INSERT INTO knowledge_table_rows_fts(knowledge_table_rows_fts) VALUES('rebuild')")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_vector_records (
+            chunk_id INTEGER PRIMARY KEY REFERENCES knowledge_chunks(id) ON DELETE CASCADE,
+            document_id INTEGER NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+            library_id INTEGER NOT NULL REFERENCES knowledge_libraries(id) ON DELETE CASCADE,
+            model_name TEXT NOT NULL,
+            dimension INTEGER NOT NULL,
+            backend TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL,
+            indexed_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_vector_records_library "
+        "ON knowledge_vector_records(library_id,model_name,chunk_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_knowledge_vector_records_document "
+        "ON knowledge_vector_records(document_id,chunk_id)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge_index_metadata (
+            library_id INTEGER PRIMARY KEY REFERENCES knowledge_libraries(id) ON DELETE CASCADE,
+            embedding_model TEXT,
+            embedding_dimension INTEGER,
+            vector_backend TEXT,
+            vector_index_path TEXT,
+            vector_count INTEGER NOT NULL DEFAULT 0,
+            table_row_count INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending',
+            error TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "numbered_migration_foundation", _foundation_v1),
     Migration(2, "persistent_action_ledger", _persistent_action_ledger_v2),
@@ -528,6 +688,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(10, "type_to_talk_force_rebuild", _type_to_talk_force_rebuild_v10),
     Migration(11, "knowledge_engine_foundation", _knowledge_engine_foundation_v11),
     Migration(12, "knowledge_document_assets", _knowledge_document_assets_v12),
+    Migration(13, "knowledge_hybrid_retrieval", _knowledge_hybrid_retrieval_v13),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 

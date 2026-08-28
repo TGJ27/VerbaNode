@@ -1254,6 +1254,398 @@ class Database:
             )
         return unique_ids
 
+    def knowledge_enabled_library_ids(self) -> list[int]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM knowledge_libraries WHERE enabled=1 ORDER BY id"
+            ).fetchall()
+        return [int(row[0]) for row in rows]
+
+    def knowledge_chunk_ids(self, document_id: int) -> list[int]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM knowledge_chunks WHERE document_id=? ORDER BY id",
+                (document_id,),
+            ).fetchall()
+        return [int(row[0]) for row in rows]
+
+    def knowledge_chunks_for_index(
+        self,
+        *,
+        library_id: int | None = None,
+        document_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if library_id is not None:
+            clauses.append("d.library_id=?")
+            params.append(int(library_id))
+        if document_id is not None:
+            clauses.append("c.document_id=?")
+            params.append(int(document_id))
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT c.*,d.library_id,d.title AS document_title,d.source_name,
+                       l.name AS library_name,l.enabled AS library_enabled,
+                       COALESCE(p.heading_path,'') AS heading_path,
+                       p.block_type AS parent_block_type
+                FROM knowledge_chunks c
+                JOIN knowledge_documents d ON d.id=c.document_id
+                JOIN knowledge_libraries l ON l.id=d.library_id
+                LEFT JOIN knowledge_parent_blocks p ON p.id=c.parent_block_id
+                {where}
+                ORDER BY d.library_id,c.document_id,c.ordinal,c.id
+                """,
+                tuple(params),
+            ).fetchall()
+        return [self._decode_metadata_json(dict(row)) for row in rows]
+
+    def knowledge_chunks_by_ids(self, chunk_ids: list[int]) -> list[dict[str, Any]]:
+        ids = sorted({int(value) for value in chunk_ids if int(value) > 0})
+        if not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT c.*,c.id AS chunk_id,d.library_id,d.title AS document_title,d.source_name,
+                       l.name AS library_name,l.enabled AS library_enabled,
+                       COALESCE(p.heading_path,'') AS heading_path,
+                       p.block_type AS parent_block_type
+                FROM knowledge_chunks c
+                JOIN knowledge_documents d ON d.id=c.document_id
+                JOIN knowledge_libraries l ON l.id=d.library_id
+                LEFT JOIN knowledge_parent_blocks p ON p.id=c.parent_block_id
+                WHERE c.id IN ({placeholders})
+                """,
+                tuple(ids),
+            ).fetchall()
+        return [self._decode_metadata_json(dict(row)) for row in rows]
+
+    def mark_knowledge_chunks_lexical(
+        self, chunk_ids: list[int], *, status: str, indexed_at: str | None
+    ) -> None:
+        ids = sorted({int(value) for value in chunk_ids if int(value) > 0})
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
+        with self._write_lock, self.connect() as conn:
+            conn.execute(
+                f"UPDATE knowledge_chunks SET lexical_status=?,lexical_indexed_at=?,updated_at=? "
+                f"WHERE id IN ({placeholders})",
+                (status, indexed_at, utc_now(), *ids),
+            )
+
+    def mark_knowledge_chunks_vector(
+        self,
+        chunk_ids: list[int],
+        *,
+        status: str,
+        model_name: str,
+        indexed_at: str | None,
+    ) -> None:
+        ids = sorted({int(value) for value in chunk_ids if int(value) > 0})
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
+        with self._write_lock, self.connect() as conn:
+            conn.execute(
+                f"UPDATE knowledge_chunks SET vector_status=?,embedding_model=?,vector_indexed_at=?,updated_at=? "
+                f"WHERE id IN ({placeholders})",
+                (status, model_name, indexed_at, utc_now(), *ids),
+            )
+
+    def rebuild_knowledge_lexical_index(self) -> None:
+        with self._write_lock, self.connect() as conn:
+            conn.execute("INSERT INTO knowledge_chunks_fts(knowledge_chunks_fts) VALUES('rebuild')")
+
+    def replace_knowledge_table_rows(
+        self, document_id: int, rows: list[dict[str, Any]]
+    ) -> int:
+        now = utc_now()
+        with self._write_lock, self.connect() as conn:
+            conn.execute("DELETE FROM knowledge_table_rows WHERE document_id=?", (document_id,))
+            for row in rows:
+                conn.execute(
+                    """
+                    INSERT INTO knowledge_table_rows(
+                        chunk_id,document_id,library_id,row_number,header_json,cells_json,
+                        row_text,metadata_json,created_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        int(row["chunk_id"]),
+                        int(row["document_id"]),
+                        int(row["library_id"]),
+                        int(row.get("row_number") or 0),
+                        json.dumps(row.get("header") or [], ensure_ascii=False),
+                        json.dumps(row.get("cells") or [], ensure_ascii=False),
+                        str(row.get("row_text") or ""),
+                        json.dumps(row.get("metadata") or {}, ensure_ascii=False, sort_keys=True),
+                        now,
+                    ),
+                )
+        return len(rows)
+
+    def knowledge_table_row_count(self, *, library_id: int | None = None) -> int:
+        sql = "SELECT COUNT(*) FROM knowledge_table_rows"
+        params: tuple[Any, ...] = ()
+        if library_id is not None:
+            sql += " WHERE library_id=?"
+            params = (int(library_id),)
+        with self.connect() as conn:
+            return int(conn.execute(sql, params).fetchone()[0])
+
+    def search_knowledge_lexical(
+        self, fts_query: str, library_ids: list[int], limit: int
+    ) -> list[dict[str, Any]]:
+        ids = sorted({int(value) for value in library_ids if int(value) > 0})
+        if not fts_query or not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        params: list[Any] = [fts_query, *ids, max(1, int(limit))]
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT c.*,c.id AS chunk_id,d.library_id,d.title AS document_title,d.source_name,
+                       l.name AS library_name,COALESCE(p.heading_path,'') AS heading_path,
+                       p.block_type AS parent_block_type,
+                       bm25(knowledge_chunks_fts) AS lexical_bm25
+                FROM knowledge_chunks_fts
+                JOIN knowledge_chunks c ON c.id=knowledge_chunks_fts.rowid
+                JOIN knowledge_documents d ON d.id=c.document_id
+                JOIN knowledge_libraries l ON l.id=d.library_id
+                LEFT JOIN knowledge_parent_blocks p ON p.id=c.parent_block_id
+                WHERE knowledge_chunks_fts MATCH ?
+                  AND d.library_id IN ({placeholders})
+                  AND l.enabled=1
+                ORDER BY lexical_bm25 ASC,c.id ASC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            item = self._decode_metadata_json(dict(row))
+            raw = float(item.pop("lexical_bm25", 0.0) or 0.0)
+            item["lexical_score"] = -raw
+            results.append(item)
+        return results
+
+    def search_knowledge_table_rows(
+        self, fts_query: str, library_ids: list[int], limit: int
+    ) -> list[dict[str, Any]]:
+        ids = sorted({int(value) for value in library_ids if int(value) > 0})
+        if not fts_query or not ids:
+            return []
+        placeholders = ",".join("?" for _ in ids)
+        params: list[Any] = [fts_query, *ids, max(1, int(limit))]
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT c.*,c.id AS chunk_id,d.library_id,d.title AS document_title,d.source_name,
+                       l.name AS library_name,COALESCE(p.heading_path,'') AS heading_path,
+                       p.block_type AS parent_block_type,
+                       r.row_number,r.row_text,r.header_json,r.cells_json,
+                       bm25(knowledge_table_rows_fts) AS table_bm25
+                FROM knowledge_table_rows_fts
+                JOIN knowledge_table_rows r ON r.id=knowledge_table_rows_fts.rowid
+                JOIN knowledge_chunks c ON c.id=r.chunk_id
+                JOIN knowledge_documents d ON d.id=c.document_id
+                JOIN knowledge_libraries l ON l.id=d.library_id
+                LEFT JOIN knowledge_parent_blocks p ON p.id=c.parent_block_id
+                WHERE knowledge_table_rows_fts MATCH ?
+                  AND r.library_id IN ({placeholders})
+                  AND l.enabled=1
+                ORDER BY table_bm25 ASC,r.id ASC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        results: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        for row in rows:
+            item = self._decode_metadata_json(dict(row))
+            chunk_id = int(item.get("chunk_id") or item.get("id") or 0)
+            if chunk_id in seen:
+                continue
+            seen.add(chunk_id)
+            raw = float(item.pop("table_bm25", 0.0) or 0.0)
+            item["table_score"] = -raw
+            item["matched_row"] = item.pop("row_text", "")
+            item["matched_row_number"] = int(item.pop("row_number", 0) or 0)
+            try:
+                item["matched_header"] = json.loads(item.pop("header_json", "[]") or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                item["matched_header"] = []
+            try:
+                item["matched_cells"] = json.loads(item.pop("cells_json", "[]") or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                item["matched_cells"] = []
+            results.append(item)
+        return results
+
+    def upsert_knowledge_vector_records(self, records: list[dict[str, Any]]) -> None:
+        if not records:
+            return
+        with self._write_lock, self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO knowledge_vector_records(
+                    chunk_id,document_id,library_id,model_name,dimension,backend,text_sha256,indexed_at
+                ) VALUES(?,?,?,?,?,?,?,?)
+                ON CONFLICT(chunk_id) DO UPDATE SET
+                    document_id=excluded.document_id,
+                    library_id=excluded.library_id,
+                    model_name=excluded.model_name,
+                    dimension=excluded.dimension,
+                    backend=excluded.backend,
+                    text_sha256=excluded.text_sha256,
+                    indexed_at=excluded.indexed_at
+                """,
+                [
+                    (
+                        int(row["chunk_id"]), int(row["document_id"]), int(row["library_id"]),
+                        str(row["model_name"]), int(row["dimension"]), str(row["backend"]),
+                        str(row["text_sha256"]), str(row["indexed_at"]),
+                    )
+                    for row in records
+                ],
+            )
+
+    def replace_knowledge_vector_records(
+        self, library_id: int, records: list[dict[str, Any]]
+    ) -> None:
+        with self._write_lock, self.connect() as conn:
+            conn.execute("DELETE FROM knowledge_vector_records WHERE library_id=?", (library_id,))
+            if records:
+                conn.executemany(
+                    """
+                    INSERT INTO knowledge_vector_records(
+                        chunk_id,document_id,library_id,model_name,dimension,backend,text_sha256,indexed_at
+                    ) VALUES(?,?,?,?,?,?,?,?)
+                    """,
+                    [
+                        (
+                            int(row["chunk_id"]), int(row["document_id"]), int(row["library_id"]),
+                            str(row["model_name"]), int(row["dimension"]), str(row["backend"]),
+                            str(row["text_sha256"]), str(row["indexed_at"]),
+                        )
+                        for row in records
+                    ],
+                )
+
+    def delete_knowledge_vector_records(self, chunk_ids: list[int]) -> None:
+        ids = sorted({int(value) for value in chunk_ids if int(value) > 0})
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
+        with self._write_lock, self.connect() as conn:
+            conn.execute(
+                f"DELETE FROM knowledge_vector_records WHERE chunk_id IN ({placeholders})",
+                tuple(ids),
+            )
+
+    def knowledge_vector_records(self, library_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM knowledge_vector_records WHERE library_id=? ORDER BY chunk_id",
+                (library_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_knowledge_index_metadata(
+        self,
+        library_id: int,
+        *,
+        embedding_model: str | None,
+        embedding_dimension: int | None,
+        vector_backend: str | None,
+        vector_index_path: Any,
+        vector_count: int,
+        table_row_count: int,
+        status: str,
+        error: str | None,
+    ) -> None:
+        path_value = (
+            json.dumps(vector_index_path, ensure_ascii=False, sort_keys=True)
+            if isinstance(vector_index_path, (dict, list))
+            else (str(vector_index_path) if vector_index_path else None)
+        )
+        with self._write_lock, self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO knowledge_index_metadata(
+                    library_id,embedding_model,embedding_dimension,vector_backend,vector_index_path,
+                    vector_count,table_row_count,status,error,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(library_id) DO UPDATE SET
+                    embedding_model=excluded.embedding_model,
+                    embedding_dimension=excluded.embedding_dimension,
+                    vector_backend=excluded.vector_backend,
+                    vector_index_path=excluded.vector_index_path,
+                    vector_count=excluded.vector_count,
+                    table_row_count=excluded.table_row_count,
+                    status=excluded.status,
+                    error=excluded.error,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    library_id, embedding_model, embedding_dimension, vector_backend, path_value,
+                    max(0, int(vector_count)), max(0, int(table_row_count)), status, error, utc_now(),
+                ),
+            )
+
+    def clear_knowledge_index_metadata(self, library_id: int) -> None:
+        with self._write_lock, self.connect() as conn:
+            conn.execute("DELETE FROM knowledge_index_metadata WHERE library_id=?", (library_id,))
+
+    def list_knowledge_index_metadata(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT m.*,l.name AS library_name
+                FROM knowledge_index_metadata m
+                JOIN knowledge_libraries l ON l.id=m.library_id
+                ORDER BY m.library_id
+                """
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            raw = item.get("vector_index_path")
+            if raw:
+                try:
+                    item["vector_index"] = json.loads(raw)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    item["vector_index"] = raw
+            item.pop("vector_index_path", None)
+            result.append(item)
+        return result
+
+    def knowledge_retrieval_counts(self) -> dict[str, int]:
+        with self.connect() as conn:
+            return {
+                "chunks": int(conn.execute("SELECT COUNT(*) FROM knowledge_chunks").fetchone()[0]),
+                "lexical_ready": int(conn.execute(
+                    "SELECT COUNT(*) FROM knowledge_chunks WHERE lexical_status='ready'"
+                ).fetchone()[0]),
+                "vector_ready": int(conn.execute(
+                    "SELECT COUNT(*) FROM knowledge_chunks WHERE vector_status='ready'"
+                ).fetchone()[0]),
+                "vector_error": int(conn.execute(
+                    "SELECT COUNT(*) FROM knowledge_chunks WHERE vector_status='error'"
+                ).fetchone()[0]),
+                "vector_records": int(conn.execute(
+                    "SELECT COUNT(*) FROM knowledge_vector_records"
+                ).fetchone()[0]),
+                "table_rows": int(conn.execute(
+                    "SELECT COUNT(*) FROM knowledge_table_rows"
+                ).fetchone()[0]),
+            }
+
     def knowledge_counts(self) -> dict[str, int]:
         tables = {
             "libraries": "knowledge_libraries",
@@ -1263,6 +1655,8 @@ class Database:
             "chunks": "knowledge_chunks",
             "agent_links": "agent_knowledge_libraries",
             "assets": "knowledge_document_assets",
+            "table_rows": "knowledge_table_rows",
+            "vector_records": "knowledge_vector_records",
         }
         with self.connect() as conn:
             return {

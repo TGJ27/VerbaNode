@@ -104,6 +104,29 @@ class AgentKnowledgeLibrariesUpdate(BaseModel):
     library_ids: list[int] = Field(default_factory=list, max_length=500)
 
 
+class KnowledgeSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=4000)
+    library_ids: list[int] = Field(default_factory=list, max_length=500)
+    agent_id: int | None = Field(default=None, ge=1)
+    mode: Literal["hybrid", "lexical", "vector", "table"] = "hybrid"
+    top_k: int = Field(default=8, ge=1, le=50)
+    candidate_k: int = Field(default=30, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def normalize_search(self) -> "KnowledgeSearchRequest":
+        self.query = self.query.strip()
+        self.library_ids = sorted({int(value) for value in self.library_ids if int(value) > 0})
+        if not self.query:
+            raise ValueError("Knowledge search query cannot be blank")
+        if self.candidate_k < self.top_k:
+            self.candidate_k = self.top_k
+        return self
+
+
+class KnowledgeIndexRebuildRequest(BaseModel):
+    library_id: int | None = Field(default=None, ge=1)
+
+
 class ScriptCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     text: str = Field(min_length=1, max_length=20000)

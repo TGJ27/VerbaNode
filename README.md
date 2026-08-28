@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.10.1 completes Hybrid RAG Phase 2: the local-first Knowledge Engine now ingests PDF, DOCX, XLSX/XLSM, CSV/TSV, PPTX, HTML, Markdown, TXT, JSON, XML, common code/text files, and raster images; preserves headings/pages/slides/sheets/tables; and uses CPU OCR for scanned/image-only content when available. Retrieval, embeddings, reranking, and Chat/Voice cutover remain intentionally disabled until later phases. The existing Information path remains active only until migration/cutover. Android v0.3.6 remains compatible.
+> **Project status:** active development. v0.10.2 completes Hybrid RAG Phase 3: normalized Knowledge content is now searchable through SQLite FTS5/BM25, CPU multilingual dense embeddings, local HNSW vector indexes, structured table-row retrieval, and Reciprocal Rank Fusion (RRF). Retrieval can be tested independently through the Knowledge API; reranking and Chat/Voice context injection remain intentionally disabled until later phases. The existing Information path remains active only until migration/cutover. No VLM is used. Android v0.3.6 remains compatible.
 
 ---
 
@@ -53,12 +53,15 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Conversation history is stored
   - Relevant context can be supplied when needed instead of resending the entire conversation every turn
 
-- **Knowledge Engine ingestion (v0.10.1 / Hybrid RAG Phase 2)**
-  - Local-first Knowledge libraries with explicit per-agent access
+- **Hybrid Knowledge retrieval (v0.10.2 / Hybrid RAG Phase 3)**
+  - Local-first Knowledge libraries with explicit per-agent access and pre-retrieval filtering
   - Universal mixed-document ingestion for PDF, Office files, spreadsheets, text/web formats, images, and scans
   - Structure-preserving parent/child normalization for headings, pages, tables, slides, sheets, OCR, and metadata
-  - CPU-only OCR path; no VLM or image-semantic reasoning is enabled
-  - Retrieval-ready chunks are stored but BM25/vector indexing remains disabled until Phase 3
+  - SQLite FTS5/BM25 lexical search for exact names, codes, identifiers, and technical terminology
+  - CPU-only `intfloat/multilingual-e5-small` dense embeddings (384 dimensions) with per-library local HNSW indexes
+  - Structured table-row search and Reciprocal Rank Fusion (RRF) across lexical, vector, and table channels
+  - Dense retrieval degrades safely: BM25/table search stays available if the embedding runtime/model is unavailable
+  - No VLM or image-semantic reasoning; reranking and Chat/Voice RAG injection remain later phases
   - Existing Information entries remain temporarily active until the planned RAG cutover/migration phase
 
 - **Plugin architecture**
@@ -84,6 +87,13 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.10.2 Hybrid Knowledge retrieval**
+  - Adds schema v13 for FTS5 lexical indexes, structured table-row indexes, vector-record metadata, and per-library index metadata.
+  - Adds CPU multilingual E5 embeddings and local USearch HNSW indexes, with a portable NumPy exact-search fallback when the native ANN backend is unavailable.
+  - Adds `/api/knowledge/search`, `/api/knowledge/index/status`, document reindex, and library/all-library rebuild APIs.
+  - Fuses BM25, dense-vector, and table-row candidates with RRF while enforcing enabled-library and agent-library filters before retrieval.
+  - Keeps reranking and Chat/Voice context injection disabled for Phase 4/5 validation; no VLM is introduced.
 
 - **v0.10.1 Universal Knowledge ingestion**
   - Adds schema v12 asset metadata and local `assets/` storage alongside sources/indexes/cache.

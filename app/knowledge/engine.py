@@ -18,6 +18,12 @@ from app.knowledge.ingestion import (
     source_sha256,
     supported_formats,
 )
+from app.knowledge.retrieval import (
+    EmbeddingProvider,
+    HybridRetriever,
+    KnowledgeRetrievalError,
+    LocalVectorIndex,
+)
 
 
 class KnowledgeEngineNotFound(LookupError):
@@ -39,15 +45,24 @@ def _utc_now() -> str:
 class KnowledgeEngine:
     """Local-first Knowledge Engine service boundary.
 
-    v0.10.1 / Phase 2 adds universal document ingestion and a normalized
-    hierarchical representation. Retrieval remains disabled until Phase 3, so
-    current Chat/Voice prompt behavior is unchanged by this release.
+    v0.10.2 / Phase 3 adds standalone hybrid retrieval over the normalized
+    Phase-2 content. Chat/Voice still use the legacy prompt path until the later
+    cutover phase, which lets retrieval quality be tested independently first.
     """
 
-    FOUNDATION_VERSION = 2
-    IMPLEMENTATION_PHASE = "ingestion"
+    FOUNDATION_VERSION = 3
+    IMPLEMENTATION_PHASE = "hybrid_retrieval"
 
-    def __init__(self, db: Database, root: Path, *, max_upload_bytes: int = 1073741824):
+    def __init__(
+        self,
+        db: Database,
+        root: Path,
+        *,
+        max_upload_bytes: int = 1073741824,
+        embedding_threads: int = 2,
+        embedding_provider: EmbeddingProvider | None = None,
+        vector_index: LocalVectorIndex | None = None,
+    ):
         self.db = db
         self.root = Path(root)
         self.max_upload_bytes = max(1024 * 1024, int(max_upload_bytes))
@@ -57,6 +72,14 @@ class KnowledgeEngine:
         self.cache_dir = self.root / "cache"
         self.upload_cache_dir = self.cache_dir / "uploads"
         self.initialize_layout()
+        self.retrieval = HybridRetriever(
+            self.db,
+            self.indexes_dir,
+            self.cache_dir,
+            embedding_provider=embedding_provider,
+            vector_index=vector_index,
+            embedding_threads=embedding_threads,
+        )
 
     def initialize_layout(self) -> None:
         for path in (
@@ -70,14 +93,17 @@ class KnowledgeEngine:
             path.mkdir(parents=True, exist_ok=True)
 
     def status(self) -> dict[str, Any]:
+        retrieval = self.retrieval.status()
         return {
             "engine_version": self.FOUNDATION_VERSION,
             "phase": self.IMPLEMENTATION_PHASE,
             "backend": "local",
             "ingestion_enabled": True,
-            "retrieval_enabled": False,
+            "retrieval_enabled": True,
+            "retrieval_chat_enabled": False,
             "legacy_information_injection_active": True,
             "counts": self.db.knowledge_counts(),
+            "retrieval": retrieval,
             "supported_formats": supported_formats(),
             "max_upload_bytes": self.max_upload_bytes,
             "capabilities": {
@@ -95,9 +121,13 @@ class KnowledgeEngine:
                 "native_pptx": True,
                 "images_without_vlm": True,
                 "vlm": False,
-                "bm25": False,
-                "embeddings": False,
-                "vector_search": False,
+                "bm25": True,
+                "embeddings": True,
+                "embedding_model": retrieval["embedding_model"],
+                "vector_search": True,
+                "hnsw": bool(retrieval["hnsw_available"]),
+                "structured_table_search": True,
+                "rrf": True,
                 "reranking": False,
                 "chat_integration": False,
             },
@@ -137,6 +167,7 @@ class KnowledgeEngine:
             raise KnowledgeEngineConflict("Knowledge library contains documents; delete its documents first")
         if not self.db.delete_knowledge_library(library_id):
             raise KnowledgeEngineNotFound("Knowledge library not found")
+        self.retrieval.delete_library_index(library_id)
 
     def list_documents(self, library_id: int | None = None) -> list[dict[str, Any]]:
         if library_id is not None:
@@ -310,15 +341,42 @@ class KnowledgeEngine:
                 attempts=attempts,
                 error=None,
             )
+            old_chunk_ids = self.db.knowledge_chunk_ids(document_id)
+            if old_chunk_ids:
+                self.retrieval.remove_chunks(int(document["library_id"]), old_chunk_ids)
             counts = self.db.replace_knowledge_document_content(document_id, blocks, assets)
+            self.db.update_knowledge_ingestion_job(
+                job_id,
+                status="running",
+                stage="indexing",
+                progress=0.90,
+                attempts=attempts,
+                error=None,
+            )
+            try:
+                index_result = self.retrieval.index_document(document_id)
+            except Exception as index_exc:
+                index_result = {
+                    "ready": False,
+                    "vector_error": str(index_exc).strip() or index_exc.__class__.__name__,
+                    "lexical_indexed": 0,
+                    "vector_indexed": 0,
+                    "table_rows": 0,
+                }
             metadata = {
                 **(result.metadata or {}),
                 "ingestion_version": 2,
+                "retrieval_index_version": 1,
                 "parser": document.get("source_type") or "unknown",
                 "parent_block_count": counts["parent_blocks"],
                 "chunk_count": counts["chunks"],
                 "asset_count": counts["assets"],
-                "retrieval_indexed": False,
+                "retrieval_indexed": bool(index_result.get("ready")),
+                "lexical_indexed_chunks": int(index_result.get("lexical_indexed") or 0),
+                "vector_indexed_chunks": int(index_result.get("vector_indexed") or 0),
+                "structured_table_rows": int(index_result.get("table_rows") or 0),
+                "embedding_model": self.retrieval.model_name,
+                "retrieval_error": index_result.get("vector_error"),
                 "vlm_used": False,
             }
             self.db.update_knowledge_document_metadata(document_id, metadata)
@@ -326,12 +384,12 @@ class KnowledgeEngine:
                 document_id,
                 status="parsed",
                 error=None,
-                indexed_at=None,
+                indexed_at=_utc_now() if index_result.get("ready") else None,
             ) or self.get_document(document_id)
             self.db.update_knowledge_ingestion_job(
                 job_id,
                 status="completed",
-                stage="parsed",
+                stage="indexed" if index_result.get("ready") else "indexed_partial",
                 progress=1.0,
                 attempts=attempts,
                 error=None,
@@ -368,6 +426,9 @@ class KnowledgeEngine:
     def delete_document(self, document_id: int) -> None:
         document = self.get_document(document_id)
         storage_key = str(document.get("storage_key") or "")
+        chunk_ids = self.db.knowledge_chunk_ids(document_id)
+        if chunk_ids:
+            self.retrieval.remove_chunks(int(document["library_id"]), chunk_ids)
         if not self.db.delete_knowledge_document(document_id):
             raise KnowledgeEngineNotFound("Knowledge document not found")
         if storage_key:
@@ -381,6 +442,45 @@ class KnowledgeEngine:
                 folder = source.parent
                 shutil.rmtree(folder, ignore_errors=True)
         shutil.rmtree(self.assets_dir / str(document_id), ignore_errors=True)
+
+    def retrieval_status(self) -> dict[str, Any]:
+        return {
+            **self.retrieval.status(),
+            "libraries": self.db.list_knowledge_index_metadata(),
+        }
+
+    def search(
+        self,
+        query: str,
+        *,
+        library_ids: list[int] | None = None,
+        agent_id: int | None = None,
+        mode: str = "hybrid",
+        top_k: int = 8,
+        candidate_k: int = 30,
+    ) -> dict[str, Any]:
+        if agent_id is not None and not self.db.get_agent(agent_id):
+            raise KnowledgeEngineNotFound("Agent not found")
+        try:
+            return self.retrieval.search(
+                query,
+                library_ids=library_ids,
+                agent_id=agent_id,
+                mode=mode,
+                top_k=top_k,
+                candidate_k=candidate_k,
+            )
+        except KnowledgeRetrievalError as exc:
+            raise KnowledgeEngineValidation(str(exc)) from exc
+
+    def rebuild_index(self, library_id: int | None = None) -> dict[str, Any]:
+        try:
+            if library_id is None:
+                return self.retrieval.rebuild_all()
+            self.get_library(library_id)
+            return self.retrieval.rebuild_library(library_id)
+        except KnowledgeRetrievalError as exc:
+            raise KnowledgeEngineValidation(str(exc)) from exc
 
     def agent_library_ids(self, agent_id: int) -> list[int]:
         if not self.db.get_agent(agent_id):

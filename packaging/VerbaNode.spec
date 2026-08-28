@@ -59,6 +59,8 @@ for package in (
     "pptx",
     "bs4",
     "rapidocr_onnxruntime",
+    "fastembed",
+    "usearch",
 ):
     package_datas, package_binaries, package_hidden = safe_collect(package)
     datas += package_datas

@@ -1,3 +1,30 @@
+# Changelog
+
+## v0.10.2 - Hybrid Knowledge retrieval (Hybrid RAG Phase 3)
+
+- Added database schema v13 with external-content FTS5 indexes for Knowledge chunks and structured table rows, plus vector-record and per-library index metadata.
+- Added SQLite FTS5/BM25 lexical retrieval for exact technical terms, identifiers, model numbers, codes, and ordinary text.
+- Added CPU-only `intfloat/multilingual-e5-small` (384-dimensional) embeddings through FastEmbed with explicit E5 query/passage prefixes.
+- Added persistent per-library USearch HNSW cosine indexes using float16 storage, with a portable NumPy exact-search fallback if the native backend is unavailable.
+- Added structured table-row indexing so headers/cells remain queryable without flattening away table identity.
+- Added Reciprocal Rank Fusion (RRF) across lexical, dense-vector, and table channels and applied enabled-library/agent-library filters before retrieval.
+- Added authenticated Knowledge search/index-status APIs plus background document reindex and library/all-library rebuild endpoints.
+- Dense-index failures are isolated: lexical/table retrieval remains available and the affected document/index exposes a partial/error state instead of disabling Knowledge search.
+- Added packaged FastEmbed/USearch collection and configurable local embedding CPU threads.
+- Kept reranking and Chat/Voice RAG context injection disabled until Phase 4/5; the legacy Information injection remains temporarily active until cutover/migration.
+- No VLM is introduced, and Android v0.3.6 remains compatible.
+
+## v0.10.1 - Universal Knowledge ingestion (Hybrid RAG Phase 2)
+
+- Added universal local document ingestion for PDF, DOCX, XLSX/XLSM, CSV/TSV, PPTX, HTML, Markdown, TXT, JSON, XML, source/code files, and common raster images.
+- Added schema v12 `knowledge_document_assets` for OCR/image metadata without introducing a VLM.
+- Added structure-preserving extraction for headings, pages/slides/sheets, tables, image OCR, metadata, parent blocks, and retrieval-ready child chunks.
+- Added CPU OCR fallback for scanned/image-only content and preserved original source files for future reprocessing.
+- Added streamed bounded uploads, background ingestion jobs, re-ingestion, document deletion, supported-format reporting, and normalized-content inspection APIs.
+- Kept BM25, embeddings, vector search, reranking, and Chat/Voice retrieval disabled until later Hybrid RAG phases.
+- Removed the Conversation control-rail scrollbar/42vh cap and restored a fixed viewport dashboard layout with compact non-scrolling audio controls.
+- No Android change is required; Android v0.3.6 remains compatible.
+
 ## v0.10.0 - Knowledge Engine foundation (Hybrid RAG Phase 1)
 
 - Added database schema v11 with canonical Knowledge Engine tables for libraries, documents, ingestion jobs, hierarchical parent blocks/chunks, and agent-to-library permissions.
@@ -29,19 +56,6 @@
 - Isolate all competing-playback cleanup during Type-to-Talk submission so stale/restarting subsystems cannot raise HTTP 500.
 - Add schema migration v8 to self-repair the Type-to-Talk queue table/index and reset stale playing rows.
 - Return an explicit 503 with diagnostic detail if queue insertion itself is unavailable.
-
-# Changelog
-
-## v0.10.1 - Universal Knowledge ingestion (Hybrid RAG Phase 2)
-
-- Added universal local document ingestion for PDF, DOCX, XLSX/XLSM, CSV/TSV, PPTX, HTML, Markdown, TXT, JSON, XML, source/code files, and common raster images.
-- Added schema v12 `knowledge_document_assets` for OCR/image metadata without introducing a VLM.
-- Added structure-preserving extraction for headings, pages/slides/sheets, tables, image OCR, metadata, parent blocks, and retrieval-ready child chunks.
-- Added CPU OCR fallback for scanned/image-only content and preserved original source files for future reprocessing.
-- Added streamed bounded uploads, background ingestion jobs, re-ingestion, document deletion, supported-format reporting, and normalized-content inspection APIs.
-- Kept BM25, embeddings, vector search, reranking, and Chat/Voice retrieval disabled until later Hybrid RAG phases.
-- Removed the Conversation control-rail scrollbar/42vh cap and restored a fixed viewport dashboard layout with compact non-scrolling audio controls.
-- No Android change is required; Android v0.3.6 remains compatible.
 
 ## v0.9.4 - Type-to-Talk reliability hotfix
 

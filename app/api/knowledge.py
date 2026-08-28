@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +14,10 @@ from app.knowledge import (
 )
 from app.schemas import (
     AgentKnowledgeLibrariesUpdate,
+    KnowledgeIndexRebuildRequest,
     KnowledgeLibraryCreate,
     KnowledgeLibraryUpdate,
+    KnowledgeSearchRequest,
 )
 from app.state import state
 
@@ -55,9 +58,72 @@ async def _run_ingestion(document_id: int, job_id: int) -> None:
     )
 
 
+async def _run_index_rebuild(library_id: int | None) -> None:
+    try:
+        result = await asyncio.to_thread(state.knowledge.rebuild_index, library_id)
+    except Exception as exc:
+        await state.events.broadcast(
+            "knowledge_changed",
+            {
+                "kind": "retrieval_index_failed",
+                "library_id": library_id,
+                "error": str(exc),
+            },
+        )
+        return
+    await state.events.broadcast(
+        "knowledge_changed",
+        {
+            "kind": "retrieval_index_rebuilt",
+            "library_id": library_id,
+            "result": result,
+        },
+    )
+
+
 @router.get("/status")
 async def knowledge_status(token: Token) -> dict[str, Any]:
     return state.knowledge.status()
+
+
+@router.get("/index/status")
+async def knowledge_index_status(token: Token) -> dict[str, Any]:
+    return state.knowledge.retrieval_status()
+
+
+@router.post("/search")
+async def knowledge_search(payload: KnowledgeSearchRequest, token: Token) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            state.knowledge.search,
+            payload.query,
+            library_ids=payload.library_ids or None,
+            agent_id=payload.agent_id,
+            mode=payload.mode,
+            top_k=payload.top_k,
+            candidate_k=payload.candidate_k,
+        )
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        raise _translate_error(exc) from exc
+
+
+@router.post("/index/rebuild", status_code=status.HTTP_202_ACCEPTED)
+async def rebuild_knowledge_index(
+    payload: KnowledgeIndexRebuildRequest,
+    background_tasks: BackgroundTasks,
+    token: Token,
+) -> dict[str, Any]:
+    if payload.library_id is not None:
+        try:
+            state.knowledge.get_library(payload.library_id)
+        except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+            raise _translate_error(exc) from exc
+    background_tasks.add_task(_run_index_rebuild, payload.library_id)
+    return {
+        "accepted": True,
+        "library_id": payload.library_id,
+        "scope": "library" if payload.library_id is not None else "all",
+    }
 
 
 @router.get("/formats")
@@ -224,6 +290,38 @@ async def reingest_document(
         {"kind": "document_reingest_queued", "document_id": document_id, "job": job},
     )
     return {"document_id": document_id, "job": job}
+
+
+@router.post("/documents/{document_id}/reindex", status_code=status.HTTP_202_ACCEPTED)
+async def reindex_document_retrieval(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    token: Token,
+) -> dict[str, Any]:
+    try:
+        document = state.knowledge.get_document(document_id)
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        raise _translate_error(exc) from exc
+
+    async def run_document_index() -> None:
+        try:
+            result = await asyncio.to_thread(state.knowledge.retrieval.index_document, document_id)
+            await state.events.broadcast(
+                "knowledge_changed",
+                {"kind": "document_reindexed", "document_id": document_id, "result": result},
+            )
+        except Exception as exc:
+            await state.events.broadcast(
+                "knowledge_changed",
+                {
+                    "kind": "document_reindex_failed",
+                    "document_id": document_id,
+                    "error": str(exc),
+                },
+            )
+
+    background_tasks.add_task(run_document_index)
+    return {"accepted": True, "document_id": document_id, "library_id": document["library_id"]}
 
 
 @router.delete("/documents/{document_id}")

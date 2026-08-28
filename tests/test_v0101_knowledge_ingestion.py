@@ -41,12 +41,12 @@ def _stage_and_ingest(engine: KnowledgeEngine, library_id: int, source: Path):
 
 def test_phase2_schema_and_status(tmp_path: Path) -> None:
     db, engine, _library = _build(tmp_path)
-    assert CURRENT_SCHEMA_VERSION == 12
-    assert db.schema_version() == 12
+    assert CURRENT_SCHEMA_VERSION == 13
+    assert db.schema_version() == 13
     status = engine.status()
-    assert status["phase"] == "ingestion"
+    assert status["phase"] == "hybrid_retrieval"
     assert status["ingestion_enabled"] is True
-    assert status["retrieval_enabled"] is False
+    assert status["retrieval_enabled"] is True
     assert status["capabilities"]["tables"] is True
     assert status["capabilities"]["vlm"] is False
     assert ".pdf" in status["supported_formats"]
@@ -68,8 +68,8 @@ def test_plain_text_ingestion_builds_parent_child_content(tmp_path: Path) -> Non
     assert content["parent_blocks"]
     assert content["chunks"]
     assert any("Reset Procedure" in chunk["text"] for chunk in content["chunks"])
-    assert all(chunk["lexical_status"] == "pending" for chunk in content["chunks"])
-    assert all(chunk["vector_status"] == "pending" for chunk in content["chunks"])
+    assert all(chunk["lexical_status"] == "ready" for chunk in content["chunks"])
+    assert all(chunk["vector_status"] in {"ready", "error"} for chunk in content["chunks"])
 
 
 def test_docx_tables_and_headings_are_preserved(tmp_path: Path) -> None:
