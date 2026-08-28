@@ -28,7 +28,7 @@ def _build(tmp_path: Path) -> tuple[Database, KnowledgeEngine]:
 def test_v0100_schema_and_local_layout_foundation(tmp_path: Path) -> None:
     db, engine = _build(tmp_path)
 
-    assert APP_VERSION == "0.10.2"
+    assert APP_VERSION == "0.10.3"
     assert CURRENT_SCHEMA_VERSION == 13
     assert db.schema_version() == 13
     for directory in (engine.root, engine.sources_dir, engine.assets_dir, engine.indexes_dir, engine.cache_dir):
@@ -54,10 +54,10 @@ def test_v0100_schema_and_local_layout_foundation(tmp_path: Path) -> None:
     status = engine.status()
     features = feature_manifest()
     assert features["knowledge_engine"] is True
-    assert features["knowledge_engine_phase"] == "hybrid_retrieval"
+    assert features["knowledge_engine_phase"] == "intelligent_retrieval"
     assert features["knowledge_retrieval"] is True
     assert status["backend"] == "local"
-    assert status["phase"] == "hybrid_retrieval"
+    assert status["phase"] == "intelligent_retrieval"
     assert status["ingestion_enabled"] is True
     assert status["retrieval_enabled"] is True
     assert status["legacy_information_injection_active"] is True

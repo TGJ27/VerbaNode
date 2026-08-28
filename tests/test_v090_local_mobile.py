@@ -24,7 +24,7 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v090_metadata_and_mobile_contract() -> None:
-    assert APP_VERSION == "0.10.2"
+    assert APP_VERSION == "0.10.3"
     assert BUILD_LABEL == "local-mobile"
     assert CURRENT_SCHEMA_VERSION == 13
     features = feature_manifest()

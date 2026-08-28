@@ -111,6 +111,11 @@ class KnowledgeSearchRequest(BaseModel):
     mode: Literal["hybrid", "lexical", "vector", "table"] = "hybrid"
     top_k: int = Field(default=8, ge=1, le=50)
     candidate_k: int = Field(default=30, ge=1, le=200)
+    adaptive: bool = True
+    build_context: bool = True
+    context_top_k: int = Field(default=6, ge=1, le=12)
+    context_token_budget: int = Field(default=3500, ge=256, le=12000)
+    neighbor_window: int = Field(default=1, ge=0, le=2)
 
     @model_validator(mode="after")
     def normalize_search(self) -> "KnowledgeSearchRequest":

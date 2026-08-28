@@ -45,13 +45,14 @@ def _utc_now() -> str:
 class KnowledgeEngine:
     """Local-first Knowledge Engine service boundary.
 
-    v0.10.2 / Phase 3 adds standalone hybrid retrieval over the normalized
-    Phase-2 content. Chat/Voice still use the legacy prompt path until the later
-    cutover phase, which lets retrieval quality be tested independently first.
+    v0.10.3 / Phase 4 adds intelligent standalone retrieval over the Phase-3
+    indexes: query routing, CPU reranking, confidence fallback, duplicate
+    suppression, and hierarchical context construction. Chat/Voice still use
+    the legacy prompt path until the later cutover phase.
     """
 
-    FOUNDATION_VERSION = 3
-    IMPLEMENTATION_PHASE = "hybrid_retrieval"
+    FOUNDATION_VERSION = 4
+    IMPLEMENTATION_PHASE = "intelligent_retrieval"
 
     def __init__(
         self,
@@ -128,7 +129,11 @@ class KnowledgeEngine:
                 "hnsw": bool(retrieval["hnsw_available"]),
                 "structured_table_search": True,
                 "rrf": True,
-                "reranking": False,
+                "query_routing": True,
+                "reranking": True,
+                "confidence_fallback": True,
+                "deduplication": True,
+                "hierarchical_context": True,
                 "chat_integration": False,
             },
         }
@@ -458,6 +463,11 @@ class KnowledgeEngine:
         mode: str = "hybrid",
         top_k: int = 8,
         candidate_k: int = 30,
+        adaptive: bool = True,
+        build_context: bool = True,
+        context_top_k: int = 6,
+        context_token_budget: int = 3500,
+        neighbor_window: int = 1,
     ) -> dict[str, Any]:
         if agent_id is not None and not self.db.get_agent(agent_id):
             raise KnowledgeEngineNotFound("Agent not found")
@@ -469,6 +479,11 @@ class KnowledgeEngine:
                 mode=mode,
                 top_k=top_k,
                 candidate_k=candidate_k,
+                adaptive=adaptive,
+                build_context=build_context,
+                context_top_k=context_top_k,
+                context_token_budget=context_token_budget,
+                neighbor_window=neighbor_window,
             )
         except KnowledgeRetrievalError as exc:
             raise KnowledgeEngineValidation(str(exc)) from exc

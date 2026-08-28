@@ -102,6 +102,11 @@ async def knowledge_search(payload: KnowledgeSearchRequest, token: Token) -> dic
             mode=payload.mode,
             top_k=payload.top_k,
             candidate_k=payload.candidate_k,
+            adaptive=payload.adaptive,
+            build_context=payload.build_context,
+            context_top_k=payload.context_top_k,
+            context_token_budget=payload.context_token_budget,
+            neighbor_window=payload.neighbor_window,
         )
     except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc

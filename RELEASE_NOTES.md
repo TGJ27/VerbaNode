@@ -1,39 +1,41 @@
-# VerbaNode v0.10.2 — Hybrid Knowledge Retrieval
+# VerbaNode v0.10.3 — Intelligent Knowledge Retrieval
 
-v0.10.2 completes **Hybrid RAG Phase 3**. The normalized Knowledge content created by Phase 2 is now independently searchable through a CPU/local hybrid retrieval engine. Chat and Voice are deliberately not connected to RAG yet; this release gives us a stable surface for retrieval benchmarking before reranking and prompt cutover.
+v0.10.3 completes **Hybrid RAG Phase 4**. The Phase-3 BM25, multilingual dense-vector, and structured-table indexes now feed an adaptive CPU-first retrieval pipeline that can decide how to search, rerank the evidence, detect weak retrieval, remove repeated chunks, and assemble bounded hierarchical context. Chat and Voice are deliberately still disconnected from RAG until Phase 5 so retrieval can be benchmarked independently before prompt cutover.
 
 ## What is included
 
-- Database schema v13 adds external-content SQLite FTS5 indexes for Knowledge chunks and structured table rows, persistent vector-record metadata, and per-library index status metadata.
-- BM25/FTS5 handles exact terminology, IDs, model numbers, error codes, filenames, numbers, and ordinary lexical matches.
-- Dense retrieval uses CPU-only `intfloat/multilingual-e5-small` through FastEmbed. The model produces 384-dimensional multilingual vectors and uses explicit `query:` / `passage:` prefixes.
-- Each Knowledge library receives its own local cosine ANN index. USearch HNSW is the preferred backend with float16 vector storage; a portable NumPy exact-search fallback keeps dense retrieval functional if the native ANN runtime cannot load.
-- Structured tables are indexed as rows while preserving headers/cells and their source chunk/document metadata. Table matches are returned with the matched header, cells, and row representation.
-- Hybrid mode merges lexical, dense-vector, and structured-table candidates with Reciprocal Rank Fusion (RRF). Raw BM25 and cosine scales are therefore never incorrectly averaged together.
-- Enabled-library filters and agent-to-library permissions are resolved **before** retrieval so disallowed libraries never enter the candidate set.
-- `/api/knowledge/search` exposes `hybrid`, `lexical`, `vector`, and `table` modes for Phase-3 testing. `/api/knowledge/index/status` exposes model/backend/count state.
-- Background index maintenance includes per-document reindex plus per-library/all-library rebuild. Existing Phase-2 libraries are fully rebuilt when their first dense index is created so older documents are not omitted.
-- Dense indexing/search errors are isolated. BM25 and structured-table search continue to work and the API reports a warning/partial index state rather than making Knowledge unavailable.
-- `VERBANODE_KNOWLEDGE_EMBEDDING_THREADS` controls local embedding CPU threads (default 2).
-- Windows packaging collects the FastEmbed and USearch runtime modules required by the dynamically loaded retrieval backend.
+- Deterministic query normalization preserves technical identifiers while cleaning whitespace/Unicode punctuation.
+- A cheap query router classifies each question as `exact`, `semantic`, `table`, or `table_exact` and exposes its routing rationale in search diagnostics.
+- Hybrid RRF is now query-aware: exact/code questions favor BM25, semantic questions favor the dense E5 channel, and tabular/numeric questions favor structured table rows.
+- A lightweight deterministic **CPU feature reranker** reorders the top candidate set using term coverage, heading/title coverage, exact identifiers, dense similarity, channel agreement, RRF strength, phrase matches, and table intent. It does not require another neural model download and adds negligible memory compared with a cross-encoder.
+- Low-confidence hybrid searches automatically perform one bounded wider candidate pass. This does not call the LLM, generate alternate queries, or use HyDE, keeping CPU latency predictable.
+- Same-document exact/near-duplicate chunks are removed after reranking so overlapping chunks do not consume the final context budget.
+- Top evidence is expanded hierarchically: compact parent sections are preferred; large sections use the matched chunk plus nearby sibling chunks. The matched chunk is always kept first when truncation is required.
+- The context builder enforces a configurable token budget, emits stable `K1`, `K2`, ... evidence blocks, preserves source/title/heading/page metadata, and reports `safe_to_inject` based on retrieval confidence.
+- `/api/knowledge/search` remains the standalone benchmark/debug surface and now accepts `adaptive`, `build_context`, `context_top_k`, `context_token_budget`, and `neighbor_window` options.
+- Knowledge retrieval API negotiation advances to version 2. Database schema remains **v13**, so Phase 4 requires no schema migration.
 
-## Local CPU behavior
+## CI fix included
 
-The embedding model is loaded lazily. Starting Core does not download or load it. The first dense indexing or vector search can download the model into the local Knowledge cache when it is not already present. Subsequent operations reuse that local model. BM25/FTS5 and table retrieval do not require the embedding model.
+The clean Windows GitHub Actions runner previously failed while collecting `tests/test_v0101_knowledge_ingestion.py` with:
 
-The full `requirements.txt` enables dense retrieval. Minimal/core-only development installs that omit FastEmbed/USearch can still run lexical/table retrieval and will report dense retrieval as unavailable.
+`ModuleNotFoundError: No module named 'docx'`
+
+The test job installed the lightweight Core requirements but not the Phase-2 document fixture libraries. `requirements-dev.txt` now explicitly includes the Knowledge ingestion test dependencies (`python-docx`, `openpyxl`, `python-pptx`, `pdfplumber`, `beautifulsoup4`, Pillow, ReportLab, and NumPy), and the workflow installs that dev set directly. This also prevents the next clean-runner failures that would otherwise have appeared after `python-docx` (for example ReportLab used by the PDF fixture).
+
+## CPU behavior
+
+Phase 4 deliberately does **not** add a second neural reranker model. The existing multilingual E5 query embedding remains the only neural retrieval inference in the normal hybrid path. RRF, routing, feature reranking, confidence calculation, deduplication, and context construction are all small deterministic CPU operations. A future optional neural cross-encoder can be benchmarked behind the reranking boundary without changing the search API or Phase-5 prompt integration.
 
 ## Intentionally not enabled yet
 
-- cross-encoder reranking (Phase 4)
-- query routing/normalization and confidence fallback (Phase 4)
-- parent/neighbor expansion and final context packing (Phase 4)
 - Chat/Voice RAG context injection (Phase 5)
 - migration/removal of the existing Information prompt path (later cutover)
 - VLM/image-semantic reasoning
+- LLM multi-query expansion or HyDE as a default retrieval step
 
-The existing Information path therefore remains temporarily active and unchanged. Android v0.3.6 remains compatible and does not require an update for Phase 3.
+The existing Information path therefore remains temporarily active and unchanged. Android v0.3.6 remains compatible and does not require an update for Phase 4.
 
 ## Upgrade
 
-Fully stop VerbaNode Core, replace the release files, and start Core again. Schema migration v13 runs automatically and the existing recovery system creates the normal pre-migration database snapshot. Existing Phase-2 chunks are backfilled into FTS5 by migration; use the Knowledge index rebuild endpoint when you want to generate dense vectors for already-ingested libraries.
+Fully stop VerbaNode Core, replace the release files, and start Core again. No database migration is required because the Knowledge schema remains v13. Existing Phase-3 indexes continue to work; Phase 4 operates on top of those indexes immediately.

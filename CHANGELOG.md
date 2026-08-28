@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.10.3 - Intelligent Knowledge retrieval (Hybrid RAG Phase 4)
+
+- Added deterministic query normalization and an adaptive router for exact/identifier, semantic, table, and table+exact questions.
+- Added query-aware RRF weights so BM25 dominates identifier/code lookups, vector retrieval is favored for semantic paraphrases, and structured-table retrieval is favored for numeric/tabular questions.
+- Added a lightweight CPU feature reranker that combines query-term coverage, heading/title coverage, exact identifier matches, dense cosine similarity, channel agreement, RRF strength, phrase matches, and table intent without introducing another neural model or model download.
+- Added confidence scoring and a single bounded candidate-widening fallback for low-confidence hybrid retrieval; no LLM query rewriting or HyDE call is used.
+- Added same-document near-duplicate suppression to reduce overlapping/repeated chunks before context construction.
+- Added hierarchical parent/neighbor expansion and a token-budgeted context builder that emits stable `K1`, `K2`, ... evidence blocks with source/title/heading/page metadata.
+- Added a `safe_to_inject` confidence gate to context previews in preparation for the Phase-5 Chat/Voice cutover; Chat/Voice still do not consume RAG in this release.
+- Advanced Knowledge retrieval API negotiation to version 2 and exposed Phase-4 capabilities in `/api/client-info` and Knowledge status.
+- Fixed clean Windows GitHub Actions collection of Phase-2 ingestion tests by declaring `python-docx`, `openpyxl`, `python-pptx`, `pdfplumber`, `beautifulsoup4`, Pillow, ReportLab, and NumPy in `requirements-dev.txt`; CI now installs that single dev dependency set.
+- Database schema remains v13; Phase 4 requires no data migration.
+- No VLM is introduced and Android v0.3.6 remains compatible.
+
 ## v0.10.2 - Hybrid Knowledge retrieval (Hybrid RAG Phase 3)
 
 - Added database schema v13 with external-content FTS5 indexes for Knowledge chunks and structured table rows, plus vector-record and per-library index metadata.

@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.10.2 completes Hybrid RAG Phase 3: normalized Knowledge content is now searchable through SQLite FTS5/BM25, CPU multilingual dense embeddings, local HNSW vector indexes, structured table-row retrieval, and Reciprocal Rank Fusion (RRF). Retrieval can be tested independently through the Knowledge API; reranking and Chat/Voice context injection remain intentionally disabled until later phases. The existing Information path remains active only until migration/cutover. No VLM is used. Android v0.3.6 remains compatible.
+> **Project status:** active development. v0.10.3 completes Hybrid RAG Phase 4: the Phase-3 BM25/vector/table indexes now feed adaptive query routing, weighted RRF, a lightweight deterministic CPU reranker, confidence-based widening, near-duplicate suppression, and bounded parent/neighbor context construction. Retrieval remains independently testable and is still **not** injected into Chat/Voice until Phase 5. The existing Information path remains active only until migration/cutover. No VLM is used. Android v0.3.6 remains compatible.
 
 ---
 
@@ -53,15 +53,20 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Conversation history is stored
   - Relevant context can be supplied when needed instead of resending the entire conversation every turn
 
-- **Hybrid Knowledge retrieval (v0.10.2 / Hybrid RAG Phase 3)**
+- **Intelligent Hybrid Knowledge retrieval (v0.10.3 / Hybrid RAG Phase 4)**
   - Local-first Knowledge libraries with explicit per-agent access and pre-retrieval filtering
   - Universal mixed-document ingestion for PDF, Office files, spreadsheets, text/web formats, images, and scans
   - Structure-preserving parent/child normalization for headings, pages, tables, slides, sheets, OCR, and metadata
   - SQLite FTS5/BM25 lexical search for exact names, codes, identifiers, and technical terminology
   - CPU-only `intfloat/multilingual-e5-small` dense embeddings (384 dimensions) with per-library local HNSW indexes
-  - Structured table-row search and Reciprocal Rank Fusion (RRF) across lexical, vector, and table channels
+  - Structured table-row search with query-aware weighted Reciprocal Rank Fusion (RRF) across lexical, vector, and table channels
+  - Cheap query normalization/routing distinguishes exact identifiers, semantic questions, and table/numeric questions
+  - Lightweight deterministic CPU reranking combines dense similarity, exact identifiers, term/heading coverage, channel agreement, and content type without downloading a second model
+  - Low-confidence hybrid searches widen candidate retrieval once without an extra LLM query-rewrite/HyDE call
+  - Near-duplicate chunks are suppressed and top evidence expands to coherent parent/neighbor context under a configurable token budget
+  - Context previews expose source/page metadata plus a `safe_to_inject` confidence gate for the later Phase-5 Chat/Voice cutover
   - Dense retrieval degrades safely: BM25/table search stays available if the embedding runtime/model is unavailable
-  - No VLM or image-semantic reasoning; reranking and Chat/Voice RAG injection remain later phases
+  - No VLM or image-semantic reasoning; Chat/Voice RAG injection remains Phase 5
   - Existing Information entries remain temporarily active until the planned RAG cutover/migration phase
 
 - **Plugin architecture**
@@ -87,6 +92,15 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.10.3 Intelligent Knowledge retrieval**
+  - Adds exact/semantic/table query routing and query-aware RRF channel weights.
+  - Adds a bounded CPU feature reranker with no second neural-model download.
+  - Adds confidence scoring and one-pass candidate widening for weak hybrid matches.
+  - Adds same-document near-duplicate suppression plus parent/neighbor evidence expansion and token-budgeted context previews.
+  - Adds a `safe_to_inject` context gate while intentionally leaving Chat/Voice integration disabled until Phase 5.
+  - Fixes clean GitHub Actions test collection by installing the Phase-2 document fixture dependencies (`python-docx`, `openpyxl`, `python-pptx`, `pdfplumber`, `reportlab`, etc.) through `requirements-dev.txt`.
+  - Keeps database schema v13; no migration is required for Phase 4.
 
 - **v0.10.2 Hybrid Knowledge retrieval**
   - Adds schema v13 for FTS5 lexical indexes, structured table-row indexes, vector-record metadata, and per-library index metadata.
