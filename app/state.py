@@ -228,6 +228,7 @@ def build_state() -> AppState:
         llm,
         tts,
         monitor=monitor,
+        knowledge=knowledge,
     )
     script_queue = ScriptQueueManager(db, tts, events, conversation.active_agent)
     type_to_talk = TypeToTalkManager(db, tts, events)

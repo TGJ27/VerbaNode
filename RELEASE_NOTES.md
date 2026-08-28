@@ -1,41 +1,44 @@
-# VerbaNode v0.10.3 — Intelligent Knowledge Retrieval
+# VerbaNode v0.11.0 — Hybrid RAG Chat/Voice Cutover
 
-v0.10.3 completes **Hybrid RAG Phase 4**. The Phase-3 BM25, multilingual dense-vector, and structured-table indexes now feed an adaptive CPU-first retrieval pipeline that can decide how to search, rerank the evidence, detect weak retrieval, remove repeated chunks, and assemble bounded hierarchical context. Chat and Voice are deliberately still disconnected from RAG until Phase 5 so retrieval can be benchmarked independently before prompt cutover.
+v0.11.0 completes **Hybrid RAG Phase 5**. The Knowledge Engine is no longer only a standalone search/debug subsystem: normal LLM turns from Web Chat, typed input, browser PTT, and continuous Voice now retrieve bounded evidence from the active agent's assigned Knowledge Libraries before the prompt is built.
 
-## What is included
+## Prompt behavior changed
 
-- Deterministic query normalization preserves technical identifiers while cleaning whitespace/Unicode punctuation.
-- A cheap query router classifies each question as `exact`, `semantic`, `table`, or `table_exact` and exposes its routing rationale in search diagnostics.
-- Hybrid RRF is now query-aware: exact/code questions favor BM25, semantic questions favor the dense E5 channel, and tabular/numeric questions favor structured table rows.
-- A lightweight deterministic **CPU feature reranker** reorders the top candidate set using term coverage, heading/title coverage, exact identifiers, dense similarity, channel agreement, RRF strength, phrase matches, and table intent. It does not require another neural model download and adds negligible memory compared with a cross-encoder.
-- Low-confidence hybrid searches automatically perform one bounded wider candidate pass. This does not call the LLM, generate alternate queries, or use HyDE, keeping CPU latency predictable.
-- Same-document exact/near-duplicate chunks are removed after reranking so overlapping chunks do not consume the final context budget.
-- Top evidence is expanded hierarchically: compact parent sections are preferred; large sections use the matched chunk plus nearby sibling chunks. The matched chunk is always kept first when truncation is required.
-- The context builder enforces a configurable token budget, emits stable `K1`, `K2`, ... evidence blocks, preserves source/title/heading/page metadata, and reports `safe_to_inject` based on retrieval confidence.
-- `/api/knowledge/search` remains the standalone benchmark/debug surface and now accepts `adaptive`, `build_context`, `context_top_k`, `context_token_budget`, and `neighbor_window` options.
-- Knowledge retrieval API negotiation advances to version 2. Database schema remains **v13**, so Phase 4 requires no schema migration.
+The old Information system is no longer concatenated into every prompt. Legacy Information rows and agent links remain in the database only so Phase 6 can migrate them safely; they are not used as factual LLM context in v0.11.0.
 
-## CI fix included
+For an ordinary turn, Core now:
 
-The clean Windows GitHub Actions runner previously failed while collecting `tests/test_v0101_knowledge_ingestion.py` with:
+1. checks whether the request is a deterministic live-tool command; those commands skip RAG;
+2. resolves the active agent's enabled Knowledge Libraries;
+3. runs the Phase-4 hybrid retrieval pipeline (BM25 + multilingual dense vectors + structured tables + weighted RRF + CPU reranking);
+4. applies confidence fallback/deduplication and builds parent/neighbor context;
+5. injects evidence only when `safe_to_inject` is true;
+6. continues with no knowledge context if retrieval is weak or unavailable; and
+7. returns compact source/confidence metadata with the completed turn.
 
-`ModuleNotFoundError: No module named 'docx'`
+The knowledge context budget is derived from the active agent's model context size and capped so system/agent policy, selective conversation memory, tools, the current user message, and model output retain room. The full knowledge library is never appended to the prompt.
 
-The test job installed the lightweight Core requirements but not the Phase-2 document fixture libraries. `requirements-dev.txt` now explicitly includes the Knowledge ingestion test dependencies (`python-docx`, `openpyxl`, `python-pptx`, `pdfplumber`, `beautifulsoup4`, Pillow, ReportLab, and NumPy), and the workflow installs that dev set directly. This also prevents the next clean-runner failures that would otherwise have appeared after `python-docx` (for example ReportLab used by the PDF fixture).
+## Shared Chat and Voice path
 
-## CPU behavior
+All normal conversational entry points already converge on `ConversationManager.process_user_text()`. Phase 5 integrates RAG at that shared boundary, so Web Chat, typed input, browser PTT, host PTT/voice, and continuous conversation receive the same retrieval behavior without duplicating retrieval logic in clients.
 
-Phase 4 deliberately does **not** add a second neural reranker model. The existing multilingual E5 query embedding remains the only neural retrieval inference in the normal hybrid path. RRF, routing, feature reranking, confidence calculation, deduplication, and context construction are all small deterministic CPU operations. A future optional neural cross-encoder can be benchmarked behind the reranking boundary without changing the search API or Phase-5 prompt integration.
+## Failure behavior
 
-## Intentionally not enabled yet
+Knowledge retrieval is intentionally non-fatal. Missing dense-model/runtime support can still fall back to lexical/table retrieval inside the Knowledge Engine, and an unexpected retrieval/index failure causes the turn to continue without RAG rather than returning an error to the user. Low-confidence evidence is likewise omitted instead of being forced into the prompt.
 
-- Chat/Voice RAG context injection (Phase 5)
-- migration/removal of the existing Information prompt path (later cutover)
-- VLM/image-semantic reasoning
-- LLM multi-query expansion or HyDE as a default retrieval step
+## CI regression fixed
 
-The existing Information path therefore remains temporarily active and unchanged. Android v0.3.6 remains compatible and does not require an update for Phase 4.
+A historical test still asserted `version == CURRENT_SCHEMA_VERSION == 10`, even though the Knowledge phases advanced the canonical schema to v13. That test now validates against the migration registry/current schema value rather than an obsolete literal, preventing future numbered migrations from breaking the same assertion again.
+
+## Compatibility
+
+- Database schema: **v13** (unchanged; no migration)
+- Knowledge retrieval API: v2 (unchanged)
+- Knowledge prompt integration capability: v1
+- VLM: not used
+- Android v0.3.6 remains compatible; Android does not perform retrieval locally
+- Phase 6 will migrate legacy Information records into Knowledge Libraries and retire the old management model
 
 ## Upgrade
 
-Fully stop VerbaNode Core, replace the release files, and start Core again. No database migration is required because the Knowledge schema remains v13. Existing Phase-3 indexes continue to work; Phase 4 operates on top of those indexes immediately.
+Fully stop VerbaNode Core, replace the release files, and start Core again. Existing Phase-3/4 Knowledge indexes remain usable immediately. Because schema v13 is unchanged, no database migration runs for this release.

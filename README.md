@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.10.3 completes Hybrid RAG Phase 4: the Phase-3 BM25/vector/table indexes now feed adaptive query routing, weighted RRF, a lightweight deterministic CPU reranker, confidence-based widening, near-duplicate suppression, and bounded parent/neighbor context construction. Retrieval remains independently testable and is still **not** injected into Chat/Voice until Phase 5. The existing Information path remains active only until migration/cutover. No VLM is used. Android v0.3.6 remains compatible.
+> **Project status:** active development. v0.11.0 completes Hybrid RAG Phase 5: Chat, typed input, browser PTT, and continuous Voice now use the shared Knowledge Engine retrieval/context pipeline. Only medium/high-confidence evidence from the active agent's assigned Knowledge Libraries is injected; legacy Information records are no longer appended to every LLM prompt and are retained only for the Phase-6 migration. Retrieval failures degrade to normal chat without knowledge rather than blocking a turn. No VLM is used. Android v0.3.6 remains compatible.
 
 ---
 
@@ -53,7 +53,7 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Conversation history is stored
   - Relevant context can be supplied when needed instead of resending the entire conversation every turn
 
-- **Intelligent Hybrid Knowledge retrieval (v0.10.3 / Hybrid RAG Phase 4)**
+- **Integrated Hybrid Knowledge retrieval (v0.11.0 / Hybrid RAG Phase 5)**
   - Local-first Knowledge libraries with explicit per-agent access and pre-retrieval filtering
   - Universal mixed-document ingestion for PDF, Office files, spreadsheets, text/web formats, images, and scans
   - Structure-preserving parent/child normalization for headings, pages, tables, slides, sheets, OCR, and metadata
@@ -64,10 +64,12 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Lightweight deterministic CPU reranking combines dense similarity, exact identifiers, term/heading coverage, channel agreement, and content type without downloading a second model
   - Low-confidence hybrid searches widen candidate retrieval once without an extra LLM query-rewrite/HyDE call
   - Near-duplicate chunks are suppressed and top evidence expands to coherent parent/neighbor context under a configurable token budget
-  - Context previews expose source/page metadata plus a `safe_to_inject` confidence gate for the later Phase-5 Chat/Voice cutover
+  - Chat, typed input, browser PTT, and continuous Voice now consume the same bounded context builder through the shared ConversationManager
+  - Only `safe_to_inject` medium/high-confidence evidence enters the LLM prompt; weak retrieval is omitted
+  - Retrieved-source metadata is returned with completed turns without streaming the entire knowledge base
   - Dense retrieval degrades safely: BM25/table search stays available if the embedding runtime/model is unavailable
-  - No VLM or image-semantic reasoning; Chat/Voice RAG injection remains Phase 5
-  - Existing Information entries remain temporarily active until the planned RAG cutover/migration phase
+  - No VLM or image-semantic reasoning
+  - Legacy Information records remain stored only for Phase-6 conversion and are no longer injected into prompts
 
 - **Plugin architecture**
   - Built-in plugins
@@ -92,6 +94,16 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.11.0 Knowledge Chat/Voice cutover**
+  - Connects the Phase-4 hybrid retrieval/context builder to all normal LLM turns from Chat, typed input, browser PTT, and continuous Voice.
+  - Stops unconditional legacy Information injection; factual context now enters the prompt only through hybrid retrieval.
+  - Skips RAG for deterministic live-tool routes so time/weather/tool commands do not pay embedding/retrieval cost.
+  - Uses a context budget derived from the active agent model context size and only injects evidence that passes `safe_to_inject`.
+  - Returns compact knowledge source/confidence metadata with the completed turn while keeping source text bounded inside the prompt only.
+  - Retrieval/model/index failures are fail-open for conversation: VerbaNode continues without RAG instead of failing the user turn.
+  - Keeps schema v13; Phase 5 requires no database migration.
+  - Fixes the stale CI schema regression by making the historical migration test follow `CURRENT_SCHEMA_VERSION` instead of hardcoding schema 10.
 
 - **v0.10.3 Intelligent Knowledge retrieval**
   - Adds exact/semantic/table query routing and query-aware RRF channel weights.

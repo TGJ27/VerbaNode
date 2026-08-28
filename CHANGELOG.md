@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.11.0 - Knowledge Chat/Voice cutover (Hybrid RAG Phase 5)
+
+- Connected the Phase-4 hybrid retrieval/context builder to the shared conversation path used by Web Chat, typed input, browser PTT, and continuous Voice.
+- Removed unconditional legacy Information injection from LLM turns. Legacy rows remain persisted only for the planned Phase-6 migration.
+- Added per-turn agent-library filtering, bounded context budgeting, confidence-gated evidence injection, and compact source metadata on `knowledge_retrieval` / `assistant_complete` events and API results.
+- Deterministic core-tool requests bypass RAG so live tool commands do not incur embedding/retrieval work.
+- Retrieval failures and low-confidence matches fail open to normal conversation with no knowledge context rather than failing or contaminating the turn.
+- Updated Knowledge/client capability negotiation to advertise Chat and Voice integration while explicitly reporting legacy prompt injection as disabled.
+- Fixed the stale schema-version CI regression by replacing the hardcoded `== 10` migration assertion with registry-driven `CURRENT_SCHEMA_VERSION` validation.
+- Database schema remains v13; no migration is required for Phase 5.
+
 ## v0.10.3 - Intelligent Knowledge retrieval (Hybrid RAG Phase 4)
 
 - Added deterministic query normalization and an adaptive router for exact/identifier, semantic, table, and table+exact questions.

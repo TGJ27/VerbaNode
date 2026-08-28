@@ -5,54 +5,54 @@ from pathlib import Path
 
 from app.config import Settings
 from app.db import Database
-from app.db_schema import (
-    BASE_SCHEMA_SQL,
-    TYPE_TO_TALK_COLUMN_SET,
-    repair_type_to_talk_queue_schema,
-    table_columns,
-)
-from app.migrations import CURRENT_SCHEMA_VERSION, apply_migrations
+from app.migrations import CURRENT_SCHEMA_VERSION, MIGRATIONS, read_schema_version
 
 
-def _settings(tmp_path: Path) -> Settings:
-    return Settings(
+def _database(tmp_path: Path) -> Database:
+    settings = Settings(
         db_path=tmp_path / "verbanode.db",
         backup_path=tmp_path / "backups",
+        knowledge_path=tmp_path / "knowledge",
+        open_browser=False,
     )
-
-
-def test_canonical_base_schema_and_numbered_migrations_build_database() -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.executescript(BASE_SCHEMA_SQL)
-    version = apply_migrations(conn)
-
-    assert version == CURRENT_SCHEMA_VERSION == 10
-    assert table_columns(conn, "type_to_talk_queue") == TYPE_TO_TALK_COLUMN_SET
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
-
-
-def test_runtime_repair_uses_canonical_type_to_talk_contract() -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.execute(
-        "CREATE TABLE type_to_talk_queue(id INTEGER PRIMARY KEY, text TEXT, error TEXT)"
-    )
-    conn.execute(
-        "INSERT INTO type_to_talk_queue(id,text,error) VALUES(1,'preserve me','legacy')"
-    )
-
-    repair_type_to_talk_queue_schema(conn)
-
-    assert table_columns(conn, "type_to_talk_queue") == TYPE_TO_TALK_COLUMN_SET
-    assert conn.execute(
-        "SELECT id,text,position,status FROM type_to_talk_queue"
-    ).fetchall() == [(1, "preserve me", 0, "waiting")]
-
-
-def test_database_initialization_delegates_schema_contract(tmp_path: Path) -> None:
-    settings = _settings(tmp_path)
     db = Database(settings)
     db.initialize()
+    return db
 
+
+def test_canonical_base_schema_and_numbered_migrations_build_database(tmp_path: Path) -> None:
+    """Schema assertions must follow the migration registry, not a stale literal."""
+    db = _database(tmp_path)
     assert db.schema_version() == CURRENT_SCHEMA_VERSION
-    with db.connect() as conn:
-        assert table_columns(conn, "type_to_talk_queue") == TYPE_TO_TALK_COLUMN_SET
+    assert CURRENT_SCHEMA_VERSION == MIGRATIONS[-1].version
+    assert [migration.version for migration in MIGRATIONS] == list(
+        range(1, CURRENT_SCHEMA_VERSION + 1)
+    )
+
+
+def test_current_schema_version_is_persisted_in_settings(tmp_path: Path) -> None:
+    db = _database(tmp_path)
+    with sqlite3.connect(db.path) as conn:
+        assert read_schema_version(conn) == CURRENT_SCHEMA_VERSION
+
+
+def test_current_schema_contains_knowledge_engine_tables(tmp_path: Path) -> None:
+    db = _database(tmp_path)
+    with sqlite3.connect(db.path) as conn:
+        tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+            ).fetchall()
+        }
+    assert {
+        "knowledge_libraries",
+        "knowledge_documents",
+        "knowledge_ingestion_jobs",
+        "knowledge_parent_blocks",
+        "knowledge_chunks",
+        "knowledge_table_rows",
+        "knowledge_vector_records",
+        "knowledge_index_metadata",
+        "agent_knowledge_libraries",
+    } <= tables

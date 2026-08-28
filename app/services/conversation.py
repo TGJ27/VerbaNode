@@ -35,6 +35,7 @@ class ConversationManager:
         llm: OllamaService,
         tts: TtsService,
         monitor: PipelineMonitor | None = None,
+        knowledge: Any | None = None,
     ):
         self.settings = settings
         self.db = db
@@ -44,6 +45,7 @@ class ConversationManager:
         self.llm = llm
         self.tts = tts
         self.monitor = monitor or PipelineMonitor()
+        self.knowledge = knowledge
         self.script_queue: ScriptQueueManager | None = None
         self._conversation_task: asyncio.Task | None = None
         self._stop_event = threading.Event()
@@ -345,6 +347,131 @@ class ConversationManager:
         result.pop("interrupted_audio", None)
         return result
 
+    @staticmethod
+    def _knowledge_prompt_entries(retrieval: dict[str, Any]) -> list[dict[str, Any]]:
+        context = retrieval.get("context") or {}
+        if not bool(context.get("safe_to_inject")):
+            return []
+        entries: list[dict[str, Any]] = []
+        for evidence in context.get("evidence") or []:
+            evidence_id = str(evidence.get("evidence_id") or "K?")
+            source = str(
+                evidence.get("source_name")
+                or evidence.get("document_title")
+                or "Knowledge"
+            ).strip()
+            heading = str(evidence.get("heading_path") or "").strip()
+            page_start = evidence.get("page_start")
+            page_end = evidence.get("page_end")
+            label = f"[{evidence_id}] {source}"
+            if heading:
+                label += f" — {heading}"
+            if page_start:
+                page_label = (
+                    f"page {page_start}"
+                    if not page_end or page_end == page_start
+                    else f"pages {page_start}-{page_end}"
+                )
+                label += f" — {page_label}"
+            text = str(evidence.get("text") or "").strip()
+            if text:
+                entries.append({"title": label, "content": text})
+        return entries
+
+    async def _retrieve_knowledge_for_turn(
+        self, text: str, agent: dict[str, Any]
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Retrieve bounded RAG evidence without making chat depend on retrieval uptime."""
+        if self.knowledge is None:
+            return {
+                "used": False,
+                "safe_to_inject": False,
+                "reason": "knowledge_engine_unavailable",
+                "sources": [],
+            }, []
+
+        agent_id = int(agent["id"])
+        try:
+            library_ids = await asyncio.to_thread(self.knowledge.agent_library_ids, agent_id)
+        except Exception as exc:
+            LOGGER.warning("Knowledge library resolution failed for agent %s: %s", agent_id, exc)
+            return {
+                "used": False,
+                "safe_to_inject": False,
+                "reason": "library_resolution_failed",
+                "sources": [],
+                "warning": str(exc).strip() or exc.__class__.__name__,
+            }, []
+
+        if not library_ids:
+            return {
+                "used": False,
+                "safe_to_inject": False,
+                "reason": "no_assigned_libraries",
+                "library_ids": [],
+                "sources": [],
+            }, []
+
+        context_size = max(1024, int(agent.get("context_size") or 4096))
+        # Knowledge gets at most about one third of the model context. The rest
+        # remains available for operating/agent policies, selected conversation
+        # memory, tool schemas, the user message, and model output.
+        token_budget = max(384, min(3500, int(context_size * 0.32)))
+        try:
+            retrieval = await asyncio.to_thread(
+                self.knowledge.search,
+                text,
+                agent_id=agent_id,
+                top_k=8,
+                candidate_k=30,
+                adaptive=True,
+                build_context=True,
+                context_top_k=6,
+                context_token_budget=token_budget,
+                neighbor_window=1,
+            )
+        except Exception as exc:
+            LOGGER.warning("Knowledge retrieval failed; continuing without RAG context: %s", exc)
+            return {
+                "used": False,
+                "safe_to_inject": False,
+                "reason": "retrieval_failed",
+                "library_ids": library_ids,
+                "sources": [],
+                "warning": str(exc).strip() or exc.__class__.__name__,
+            }, []
+
+        context = retrieval.get("context") or {}
+        safe = bool(context.get("safe_to_inject"))
+        entries = self._knowledge_prompt_entries(retrieval) if safe else []
+        sources = [
+            {
+                "evidence_id": item.get("evidence_id"),
+                "document_id": item.get("document_id"),
+                "library_id": item.get("library_id"),
+                "document_title": item.get("document_title"),
+                "source_name": item.get("source_name"),
+                "heading_path": item.get("heading_path"),
+                "page_start": item.get("page_start"),
+                "page_end": item.get("page_end"),
+                "content_type": item.get("content_type"),
+            }
+            for item in context.get("evidence") or []
+        ]
+        metadata = {
+            "used": bool(entries),
+            "safe_to_inject": safe,
+            "reason": "retrieved" if safe else "low_confidence",
+            "library_ids": retrieval.get("library_ids") or library_ids,
+            "routing": retrieval.get("routing") or {},
+            "confidence": retrieval.get("confidence") or {},
+            "sources": sources if safe else [],
+            "estimated_tokens": int(context.get("estimated_tokens") or 0) if safe else 0,
+            "elapsed_ms": retrieval.get("elapsed_ms"),
+            "warnings": retrieval.get("warnings") or [],
+        }
+        return metadata, entries
+
     async def process_user_text(
         self,
         *,
@@ -382,7 +509,23 @@ class ConversationManager:
                 {"generation_id": generation_id, "turn_id": turn_context.turn_id, "capture_id": turn_context.capture_id, "conversation_id": conversation_id},
             )
 
-            information = self.db.enabled_information_for_agent(int(agent["id"]))
+            # Phase 5 cutover: legacy Information records are no longer appended
+            # to every prompt. Only high-confidence evidence retrieved from the
+            # agent's assigned Knowledge Libraries can enter the LLM context.
+            direct_intent = self.llm.tools.match_core_intent(
+                text, agent.get("tools_enabled") or []
+            )
+            knowledge_metadata: dict[str, Any] = {
+                "used": False,
+                "safe_to_inject": False,
+                "reason": "direct_tool" if direct_intent else "not_retrieved",
+                "sources": [],
+            }
+            information: list[dict[str, Any]] = []
+            if direct_intent is None:
+                knowledge_metadata, information = await self._retrieve_knowledge_for_turn(text, agent)
+                await self.events.broadcast("knowledge_retrieval", knowledge_metadata)
+
             summary_row = self.db.get_summary(int(agent["id"]), conversation_id)
             stored_summary = summary_row["content"] if summary_row else None
             prior_history = self.db.list_recent_messages(
@@ -492,9 +635,6 @@ class ConversationManager:
                     if self._barge_capture_cancel is cancel_capture:
                         self._barge_capture_cancel = None
 
-            direct_intent = self.llm.tools.match_core_intent(
-                text, agent.get("tools_enabled") or []
-            )
             used_direct_tool = direct_intent is not None
             assistant_source = "tool" if used_direct_tool else "llm"
 
@@ -602,6 +742,7 @@ class ConversationManager:
                     "turn_id": turn_context.turn_id,
                     "capture_id": turn_context.capture_id,
                     "message": assistant_message,
+                    "knowledge": knowledge_metadata,
                 },
             )
 
@@ -657,6 +798,7 @@ class ConversationManager:
                 "message": assistant_message,
                 "exit_requested": exit_requested,
                 "interrupted_audio": interrupted_audio,
+                "knowledge": knowledge_metadata,
             }
 
     async def stop_current_tts(self) -> None:

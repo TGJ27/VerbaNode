@@ -44,7 +44,7 @@ def test_phase2_schema_and_status(tmp_path: Path) -> None:
     assert CURRENT_SCHEMA_VERSION == 13
     assert db.schema_version() == 13
     status = engine.status()
-    assert status["phase"] == "intelligent_retrieval"
+    assert status["phase"] == "chat_voice_cutover"
     assert status["ingestion_enabled"] is True
     assert status["retrieval_enabled"] is True
     assert status["capabilities"]["tables"] is True

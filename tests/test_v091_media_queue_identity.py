@@ -34,7 +34,7 @@ def _db(tmp_path: Path) -> Database:
 
 
 def test_v091_contract_and_dashboard_surface() -> None:
-    assert APP_VERSION == "0.10.3"
+    assert APP_VERSION == "0.11.0"
     assert CURRENT_SCHEMA_VERSION == 13
     features = feature_manifest()
     assert features["audio_library"] is True
@@ -47,7 +47,7 @@ def test_v091_contract_and_dashboard_surface() -> None:
     assert 'data-page="audio"' in html
     assert 'id="audioLibraryUpload"' in html
     assert 'id="queueLoopToggle"' in html
-    assert '/static/js/audio-library.js?v=0.10.3' in html
+    assert '/static/js/audio-library.js?v=0.11.0' in html
 
 
 def test_queue_pause_is_persistent_and_reorderable(tmp_path: Path) -> None:

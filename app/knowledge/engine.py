@@ -45,14 +45,14 @@ def _utc_now() -> str:
 class KnowledgeEngine:
     """Local-first Knowledge Engine service boundary.
 
-    v0.10.3 / Phase 4 adds intelligent standalone retrieval over the Phase-3
-    indexes: query routing, CPU reranking, confidence fallback, duplicate
-    suppression, and hierarchical context construction. Chat/Voice still use
-    the legacy prompt path until the later cutover phase.
+    v0.11.0 / Phase 5 connects the intelligent hybrid retrieval pipeline to
+    Chat, typed PTT, browser PTT, and continuous Voice through the shared
+    ConversationManager. Legacy Information records are retained only for the
+    Phase-6 migration and are no longer injected into prompts.
     """
 
-    FOUNDATION_VERSION = 4
-    IMPLEMENTATION_PHASE = "intelligent_retrieval"
+    FOUNDATION_VERSION = 5
+    IMPLEMENTATION_PHASE = "chat_voice_cutover"
 
     def __init__(
         self,
@@ -101,8 +101,8 @@ class KnowledgeEngine:
             "backend": "local",
             "ingestion_enabled": True,
             "retrieval_enabled": True,
-            "retrieval_chat_enabled": False,
-            "legacy_information_injection_active": True,
+            "retrieval_chat_enabled": True,
+            "legacy_information_injection_active": False,
             "counts": self.db.knowledge_counts(),
             "retrieval": retrieval,
             "supported_formats": supported_formats(),
@@ -134,7 +134,7 @@ class KnowledgeEngine:
                 "confidence_fallback": True,
                 "deduplication": True,
                 "hierarchical_context": True,
-                "chat_integration": False,
+                "chat_integration": True,
             },
         }
 

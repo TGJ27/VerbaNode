@@ -873,7 +873,7 @@ class HybridRetriever:
         return {
             "phase": "intelligent_retrieval",
             "retrieval_enabled": True,
-            "chat_integration": False,
+            "chat_integration": True,
             "embedding_model": self.model_name,
             "embedding_dimension": self.dimension,
             "embedding_runtime_available": (

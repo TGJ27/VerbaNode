@@ -96,7 +96,7 @@ def _ingest_text(
 
 def test_phase3_schema_manifest_and_status(tmp_path: Path) -> None:
     db, engine = _build(tmp_path)
-    assert APP_VERSION == "0.10.3"
+    assert APP_VERSION == "0.11.0"
     assert CURRENT_SCHEMA_VERSION == 13
     assert db.schema_version() == 13
 
@@ -114,10 +114,10 @@ def test_phase3_schema_manifest_and_status(tmp_path: Path) -> None:
     assert ("knowledge_index_metadata", "table") in objects
 
     status = engine.status()
-    assert status["phase"] == "intelligent_retrieval"
+    assert status["phase"] == "chat_voice_cutover"
     assert status["retrieval_enabled"] is True
-    assert status["retrieval_chat_enabled"] is False
-    assert status["legacy_information_injection_active"] is True
+    assert status["retrieval_chat_enabled"] is True
+    assert status["legacy_information_injection_active"] is False
     assert status["capabilities"]["bm25"] is True
     assert status["capabilities"]["vector_search"] is True
     assert status["capabilities"]["structured_table_search"] is True
@@ -126,9 +126,9 @@ def test_phase3_schema_manifest_and_status(tmp_path: Path) -> None:
     assert status["capabilities"]["vlm"] is False
 
     features = feature_manifest()
-    assert features["knowledge_engine_phase"] == "intelligent_retrieval"
+    assert features["knowledge_engine_phase"] == "chat_voice_cutover"
     assert features["knowledge_retrieval"] is True
-    assert features["knowledge_chat_integration"] is False
+    assert features["knowledge_chat_integration"] is True
 
 
 def test_hybrid_search_combines_exact_bm25_and_dense_semantics(tmp_path: Path) -> None:

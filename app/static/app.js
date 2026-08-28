@@ -328,7 +328,7 @@ function handleEvent(message) {
 function navigate(page) {
   $$('.page').forEach(node => node.classList.toggle('active', node.id === `page-${page}`));
   $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.classList.toggle('active', node.dataset.page === page));
-  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Information'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], speak: ['DIRECT TTS', 'Type to Talk'], audio: ['HOST MEDIA', 'Audio'], settings: ['SYSTEM', 'Settings'] };
+  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Legacy Information'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], speak: ['DIRECT TTS', 'Type to Talk'], audio: ['HOST MEDIA', 'Audio'], settings: ['SYSTEM', 'Settings'] };
   $('#pageEyebrow').textContent = titles[page]?.[0] || '';
   $('#pageTitle').textContent = titles[page]?.[1] || page;
   closeMobileNav();

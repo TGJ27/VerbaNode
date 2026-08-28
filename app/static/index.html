@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#eef4ff">
   <title>VerbaNode Standalone</title>
-  <link rel="icon" href="/static/VerbaNode.png?v=0.10.3" type="image/png">
-  <link rel="stylesheet" href="/static/styles.css?v=0.10.3">
+  <link rel="icon" href="/static/VerbaNode.png?v=0.11.0" type="image/png">
+  <link rel="stylesheet" href="/static/styles.css?v=0.11.0">
 </head>
 <body>
   <div id="toastRoot" class="toast-root" aria-live="polite"></div>
 
   <section id="loginView" class="login-view">
     <div class="login-card">
-      <div class="brand-mark large"><img src="/static/VerbaNode.png?v=0.10.3" alt="VerbaNode"></div>
+      <div class="brand-mark large"><img src="/static/VerbaNode.png?v=0.11.0" alt="VerbaNode"></div>
       <p class="eyebrow">LOCAL VOICE SYSTEM</p>
       <h1>VerbaNode</h1>
       <p class="muted">Standalone Windows host · browser control panel</p>
@@ -34,10 +34,10 @@
   <div id="appShell" class="app-shell hidden">
     <aside class="sidebar" id="sidebar">
       <div class="brand-row">
-        <div class="brand-mark"><img src="/static/VerbaNode.png?v=0.10.3" alt="VerbaNode"></div>
+        <div class="brand-mark"><img src="/static/VerbaNode.png?v=0.11.0" alt="VerbaNode"></div>
         <div>
           <strong>VerbaNode</strong>
-          <span>Standalone · <b id="appVersion">v0.10.3</b></span>
+          <span>Standalone · <b id="appVersion">v0.11.0</b></span>
         </div>
         <button id="mobileCloseNav" class="icon-btn mobile-only" aria-label="Close menu">×</button>
       </div>
@@ -45,7 +45,7 @@
       <nav class="nav-list" id="navList">
         <button class="nav-item active" data-page="chat"><span>◉</span>Conversation</button>
         <button class="nav-item" data-page="agents"><span>◇</span>Agents</button>
-        <button class="nav-item" data-page="information"><span>▤</span>Information</button>
+        <button class="nav-item" data-page="information"><span>▤</span>Legacy Info</button>
         <button class="nav-item" data-page="plugins"><span>⬡</span>Plugins</button>
         <button class="nav-item" data-page="scripts"><span>▶</span>Scripts & Queue</button>
         <button class="nav-item" data-page="speak"><span>◖</span>Type to Talk</button>
@@ -148,20 +148,20 @@
       </section>
 
       <section id="page-agents" class="page">
-        <div class="page-actions"><div><p class="muted">Each agent keeps its own identity, personality, models, voice, information, tools, chats, and memory. VerbaNode handles operational policies internally.</p></div><button id="addAgentBtn" class="btn primary">＋ Create agent</button></div>
+        <div class="page-actions"><div><p class="muted">Each agent keeps its own identity, personality, models, voice, Knowledge Library access, tools, chats, and memory. VerbaNode handles operational policies internally.</p></div><button id="addAgentBtn" class="btn primary">＋ Create agent</button></div>
         <div id="agentGrid" class="card-grid agents-grid"></div>
       </section>
 
       <section id="page-information" class="page">
         <div class="page-actions explorer-page-actions">
-          <div><p class="muted">Global text entries can be selectively enabled inside each agent.</p></div>
+          <div><p class="muted">Legacy Information is retained for Phase-6 migration only and is no longer sent to the LLM. Existing entries remain editable until conversion to Knowledge Libraries.</p></div>
           <div class="explorer-page-tools">
             <div class="view-switcher" role="group" aria-label="Information view">
               <button type="button" class="view-switch-button" data-view-target="information" data-view-mode="cards" title="Large cards" aria-label="Large cards">▦</button>
               <button type="button" class="view-switch-button" data-view-target="information" data-view-mode="list" title="List" aria-label="List">☰</button>
               <button type="button" class="view-switch-button" data-view-target="information" data-view-mode="details" title="Details" aria-label="Details">≣</button>
             </div>
-            <button id="addInfoBtn" class="btn primary">＋ Add information</button>
+            <button id="addInfoBtn" class="btn primary">＋ Add legacy entry</button>
           </div>
         </div>
         <div class="explorer-details-head information-details-head" aria-hidden="true">
@@ -549,7 +549,7 @@
       <div class="modal-backdrop" data-close-modal></div>
       <form class="modal-card large-modal" id="agentForm">
         <div class="modal-header"><div><p class="eyebrow">AGENT CONFIGURATION</p><h3 id="agentModalTitle">Create agent</h3></div><button type="button" class="icon-btn" data-close-modal>×</button></div>
-        <div class="tabs" id="agentTabs"><button type="button" class="active" data-tab="identity">Identity</button><button type="button" data-tab="models">Models</button><button type="button" data-tab="knowledge">Information</button><button type="button" data-tab="memory">Memory</button></div>
+        <div class="tabs" id="agentTabs"><button type="button" class="active" data-tab="identity">Identity</button><button type="button" data-tab="models">Models</button><button type="button" data-tab="knowledge">Legacy Info</button><button type="button" data-tab="memory">Memory</button></div>
         <div class="tab-panel active" data-panel="identity">
           <div class="form-grid two">
             <label>Name<input name="name" required maxlength="80"></label>
@@ -583,7 +583,7 @@
           </div>
           <fieldset><legend>Tools</legend><div id="toolCheckboxes" class="check-grid"></div></fieldset>
         </div>
-        <div class="tab-panel" data-panel="knowledge"><p class="muted">Select the global information this agent should know.</p><div id="agentInfoCheckboxes" class="check-list"></div></div>
+        <div class="tab-panel" data-panel="knowledge"><p class="muted">Legacy selections are retained for Phase-6 migration only. They are not injected into prompts in v0.11.0.</p><div id="agentInfoCheckboxes" class="check-list"></div></div>
         <div class="tab-panel" data-panel="memory">
           <div id="agentMemoryStats" class="status-box"></div>
           <div class="button-grid two"><button id="backupAgentBtn" type="button" class="btn secondary">Download agent backup</button><button id="clearAgentMemoryBtn" type="button" class="btn danger-outline">Clear agent memory</button></div>
@@ -597,18 +597,18 @@
     <div class="modal-shell"><div class="modal-backdrop" data-close-modal></div><form class="modal-card" id="simpleModalForm"><div class="modal-header"><h3 id="simpleModalTitle"></h3><button type="button" class="icon-btn" data-close-modal>×</button></div><div id="simpleModalFields" class="stack gap-12"></div><div class="modal-footer"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">Save</button></div></form></div>
   </template>
 
-  <script src="/static/js/runtime.js?v=0.10.3" defer></script>
-  <script src="/static/js/client.js?v=0.10.3" defer></script>
-  <script src="/static/js/browser-ptt.js?v=0.10.3" defer></script>
-  <script src="/static/js/diagnostics.js?v=0.10.3" defer></script>
-  <script src="/static/js/chat.js?v=0.10.3" defer></script>
-  <script src="/static/js/agents.js?v=0.10.3" defer></script>
-  <script src="/static/js/plugins.js?v=0.10.3" defer></script>
-  <script src="/static/js/devices.js?v=0.10.3" defer></script>
-  <script src="/static/js/settings.js?v=0.10.3" defer></script>
-  <script src="/static/js/data-recovery.js?v=0.10.3" defer></script>
-  <script src="/static/js/audio-library.js?v=0.10.3" defer></script>
-  <script src="/static/js/type-to-talk.js?v=0.10.3" defer></script>
-  <script src="/static/app.js?v=0.10.3" defer></script>
+  <script src="/static/js/runtime.js?v=0.11.0" defer></script>
+  <script src="/static/js/client.js?v=0.11.0" defer></script>
+  <script src="/static/js/browser-ptt.js?v=0.11.0" defer></script>
+  <script src="/static/js/diagnostics.js?v=0.11.0" defer></script>
+  <script src="/static/js/chat.js?v=0.11.0" defer></script>
+  <script src="/static/js/agents.js?v=0.11.0" defer></script>
+  <script src="/static/js/plugins.js?v=0.11.0" defer></script>
+  <script src="/static/js/devices.js?v=0.11.0" defer></script>
+  <script src="/static/js/settings.js?v=0.11.0" defer></script>
+  <script src="/static/js/data-recovery.js?v=0.11.0" defer></script>
+  <script src="/static/js/audio-library.js?v=0.11.0" defer></script>
+  <script src="/static/js/type-to-talk.js?v=0.11.0" defer></script>
+  <script src="/static/app.js?v=0.11.0" defer></script>
 </body>
 </html>

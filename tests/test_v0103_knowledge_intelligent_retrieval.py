@@ -73,28 +73,28 @@ def _ingest(engine: KnowledgeEngine, library_id: int, source: Path, mime: str | 
 
 def test_phase4_status_manifest_and_schema(tmp_path: Path) -> None:
     db, engine, _library = _build(tmp_path)
-    assert APP_VERSION == "0.10.3"
+    assert APP_VERSION == "0.11.0"
     assert CURRENT_SCHEMA_VERSION == 13
     assert db.schema_version() == 13
 
     status = engine.status()
-    assert status["phase"] == "intelligent_retrieval"
-    assert status["retrieval_chat_enabled"] is False
-    assert status["legacy_information_injection_active"] is True
+    assert status["phase"] == "chat_voice_cutover"
+    assert status["retrieval_chat_enabled"] is True
+    assert status["legacy_information_injection_active"] is False
     assert status["capabilities"]["query_routing"] is True
     assert status["capabilities"]["reranking"] is True
     assert status["capabilities"]["confidence_fallback"] is True
     assert status["capabilities"]["deduplication"] is True
     assert status["capabilities"]["hierarchical_context"] is True
-    assert status["capabilities"]["chat_integration"] is False
+    assert status["capabilities"]["chat_integration"] is True
 
     features = feature_manifest()
-    assert features["knowledge_engine_phase"] == "intelligent_retrieval"
+    assert features["knowledge_engine_phase"] == "chat_voice_cutover"
     assert features["knowledge_retrieval_api_version"] == 2
     assert features["knowledge_query_routing"] is True
     assert features["knowledge_reranking"] is True
     assert features["knowledge_context_builder"] is True
-    assert features["knowledge_chat_integration"] is False
+    assert features["knowledge_chat_integration"] is True
 
 
 def test_query_router_distinguishes_exact_semantic_and_table_questions() -> None:
