@@ -57,7 +57,7 @@ def feature_manifest() -> dict[str, Any]:
         "script_defaults": True,
         "broad_audio_formats": True,
         "knowledge_engine": True,
-        "knowledge_engine_phase": "chat_voice_cutover",
+        "knowledge_engine_phase": "legacy_information_migrated",
         "knowledge_libraries": True,
         "knowledge_agent_permissions": True,
         "knowledge_ingestion": True,
@@ -80,7 +80,13 @@ def feature_manifest() -> dict[str, Any]:
         "knowledge_chat_integration": True,
         "knowledge_voice_integration": True,
         "knowledge_legacy_information_injection": False,
+        "knowledge_legacy_information_retired": True,
+        "knowledge_legacy_compat_read": True,
         "knowledge_prompt_integration_api_version": 1,
+        "knowledge_management": True,
+        "knowledge_management_api_version": 1,
+        "knowledge_background_indexing": True,
+        "knowledge_text_documents": True,
     }
 
 

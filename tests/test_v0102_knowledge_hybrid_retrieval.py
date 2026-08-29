@@ -96,9 +96,9 @@ def _ingest_text(
 
 def test_phase3_schema_manifest_and_status(tmp_path: Path) -> None:
     db, engine = _build(tmp_path)
-    assert APP_VERSION == "0.11.0"
-    assert CURRENT_SCHEMA_VERSION == 13
-    assert db.schema_version() == 13
+    assert APP_VERSION == "0.12.0"
+    assert CURRENT_SCHEMA_VERSION >= 14
+    assert db.schema_version() == CURRENT_SCHEMA_VERSION
 
     with db.connect() as conn:
         objects = {
@@ -114,7 +114,7 @@ def test_phase3_schema_manifest_and_status(tmp_path: Path) -> None:
     assert ("knowledge_index_metadata", "table") in objects
 
     status = engine.status()
-    assert status["phase"] == "chat_voice_cutover"
+    assert status["phase"] == "legacy_information_migrated"
     assert status["retrieval_enabled"] is True
     assert status["retrieval_chat_enabled"] is True
     assert status["legacy_information_injection_active"] is False
@@ -126,7 +126,7 @@ def test_phase3_schema_manifest_and_status(tmp_path: Path) -> None:
     assert status["capabilities"]["vlm"] is False
 
     features = feature_manifest()
-    assert features["knowledge_engine_phase"] == "chat_voice_cutover"
+    assert features["knowledge_engine_phase"] == "legacy_information_migrated"
     assert features["knowledge_retrieval"] is True
     assert features["knowledge_chat_integration"] is True
 

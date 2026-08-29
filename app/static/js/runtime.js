@@ -1,6 +1,6 @@
 'use strict';
 
-const FRONTEND_VERSION = '0.11.0';
+const FRONTEND_VERSION = '0.12.0';
 const CLIENT_API_VERSION = 1;
 const WEBSOCKET_PROTOCOL_VERSION = 1;
 const DIAGNOSTICS_MIN_BACKEND_VERSION = '0.5.2';
@@ -16,7 +16,9 @@ const appState = {
   connectionGeneration: 0,
   data: null,
   agents: [],
-  information: [],
+  knowledgeStatus: null,
+  knowledgeLibraries: [],
+  knowledgeDocuments: [],
   plugins: { plugins: [], summary: {} },
   scripts: [],
   queue: [],
@@ -94,7 +96,6 @@ function applyExplorerView(target, mode, persist = true) {
 }
 
 function initializeExplorerViews() {
-  applyExplorerView('information', getExplorerView('information'), false);
   applyExplorerView('plugins', getExplorerView('plugins'), false);
 }
 

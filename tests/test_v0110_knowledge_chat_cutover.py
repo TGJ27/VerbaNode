@@ -131,40 +131,26 @@ def test_phase5_status_and_client_contract_cut_over_to_rag(tmp_path: Path) -> No
     db.initialize()
     engine = KnowledgeEngine(db, settings.knowledge_dir)
 
-    assert APP_VERSION == "0.11.0"
+    assert APP_VERSION == "0.12.0"
     status = engine.status()
-    assert status["phase"] == "chat_voice_cutover"
+    assert status["phase"] == "legacy_information_migrated"
     assert status["retrieval_chat_enabled"] is True
     assert status["legacy_information_injection_active"] is False
     assert status["capabilities"]["chat_integration"] is True
 
     features = feature_manifest()
-    assert features["knowledge_engine_phase"] == "chat_voice_cutover"
+    assert features["knowledge_engine_phase"] == "legacy_information_migrated"
     assert features["knowledge_chat_integration"] is True
     assert features["knowledge_voice_integration"] is True
     assert features["knowledge_legacy_information_injection"] is False
 
 
 @pytest.mark.asyncio
-async def test_chat_injects_only_safe_retrieved_evidence_and_never_legacy_information(
+async def test_chat_injects_only_safe_retrieved_evidence(
     tmp_path: Path,
 ) -> None:
     knowledge = _KnowledgeStub(safe=True)
-    db, manager, llm = _manager(tmp_path, knowledge)
-    agent = db.list_agents()[0]
-
-    legacy = db.create_information(
-        {
-            "title": "Legacy always-on data",
-            "content": "LEGACY_SECRET_SHOULD_NOT_ENTER_PROMPT",
-            "enabled": True,
-        }
-    )
-    with db.connect() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO agent_information(agent_id,info_id) VALUES(?,?)",
-            (int(agent["id"]), int(legacy["id"])),
-        )
+    _db, manager, llm = _manager(tmp_path, knowledge)
 
     result = await manager.process_user_text(
         text="Why does the XR4 shoulder drive reset under load?",
@@ -177,7 +163,6 @@ async def test_chat_injects_only_safe_retrieved_evidence_and_never_legacy_inform
     system_prompt = llm.messages[0]["content"]
     assert "The XR4 shoulder drive resets below 20 volts" in system_prompt
     assert "[K1]" in system_prompt
-    assert "LEGACY_SECRET_SHOULD_NOT_ENTER_PROMPT" not in system_prompt
     assert result["knowledge"]["used"] is True
     assert result["knowledge"]["safe_to_inject"] is True
     assert result["knowledge"]["sources"][0]["source_name"] == "xr4-service.pdf"

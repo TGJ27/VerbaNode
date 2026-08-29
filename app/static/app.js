@@ -4,7 +4,9 @@ async function loadBootstrap() {
   const data = await api('/api/bootstrap');
   appState.data = data;
   appState.agents = data.agents || [];
-  appState.information = data.information || [];
+  appState.knowledgeStatus = data.knowledge?.status || null;
+  appState.knowledgeLibraries = data.knowledge?.libraries || [];
+  appState.knowledgeDocuments = data.knowledge?.documents || [];
   appState.plugins = data.plugins || { plugins: [], summary: {} };
   appState.scripts = data.scripts || [];
   appState.queue = data.queue || [];
@@ -39,7 +41,7 @@ function renderAll() {
   renderMessages();
   renderConversations();
   renderAgents();
-  renderInformation();
+  renderKnowledge();
   renderPlugins();
   renderScripts();
   renderQueue();
@@ -122,21 +124,47 @@ function renderDiagnosticsUnavailable(detail = '') {
   setDiagnosticControlsDisabled(true);
 }
 
-function renderInformation() {
-  const list = $('#informationList');
-  if (!appState.information.length) {
-    list.innerHTML = `<div class="card queue-empty">No information entries yet.</div>`;
-    return;
+function renderKnowledge() {
+  const summary = $('#knowledgeSummary');
+  const list = $('#knowledgeLibraryList');
+  if (!summary || !list) return;
+  const status = appState.knowledgeStatus || {};
+  const migration = status.legacy_information_migration || {};
+  const counts = status.counts || {};
+  summary.innerHTML = `
+    <article class="card plugin-summary-card"><span>Libraries</span><strong>${Number(counts.libraries || appState.knowledgeLibraries.length || 0)}</strong><small>Agent-scoped collections</small></article>
+    <article class="card plugin-summary-card"><span>Documents</span><strong>${Number(counts.documents || appState.knowledgeDocuments.length || 0)}</strong><small>Hybrid RAG sources</small></article>
+    <article class="card plugin-summary-card"><span>Migrated</span><strong>${Number(migration.migrated_documents || 0)}</strong><small>Legacy Information documents</small></article>
+    <article class="card plugin-summary-card"><span>Index</span><strong>${escapeHtml(String(migration.index_status || 'pending').toUpperCase())}</strong><small>BM25 always available; dense may be partial</small></article>`;
+  const visible = appState.knowledgeLibraries.slice(0, 6);
+  list.innerHTML = visible.length ? visible.map(library => {
+    const docs = appState.knowledgeDocuments.filter(document => Number(document.library_id) === Number(library.id)).length;
+    return `<div class="quick-script"><span><strong>${escapeHtml(library.name)}</strong><small>${docs} document${docs === 1 ? '' : 's'} · ${library.enabled ? 'enabled' : 'disabled'}</small></span><span class="chip">${Number(library.agent_count || 0)} agents</span></div>`;
+  }).join('') : '<p class="tiny muted">No Knowledge Libraries yet.</p>';
+  const hint = $('#knowledgeLibraryLimitHint');
+  if (hint) hint.textContent = appState.knowledgeLibraries.length > visible.length
+    ? `Showing ${visible.length} of ${appState.knowledgeLibraries.length} libraries. Full library/document management arrives in Phase 7.`
+    : 'Phase 7 adds full document upload, search diagnostics, and library management to this page.';
+  const migrationText = $('#knowledgeMigrationText');
+  if (migrationText) {
+    migrationText.textContent = migration.retired
+      ? `Legacy Information retired successfully. ${Number(migration.migrated_documents || 0)} entries were converted into ${Number(migration.migrated_libraries || 0)} access-preserving libraries.`
+      : 'Legacy migration status is unavailable.';
   }
-  list.innerHTML = appState.information.map(item => `<article class="card info-item">
-    <div class="info-header">
-      <div class="enabled-pill ${item.enabled ? '' : 'off'}">● ${item.enabled ? 'Enabled' : 'Disabled'}</div>
-      <h3>${escapeHtml(item.title)}</h3>
-    </div>
-    <div class="info-preview">${escapeHtml(item.content)}</div>
-    <div class="item-actions"><button class="btn ghost compact" data-edit-info="${item.id}">Edit</button><button class="btn danger-outline compact" data-delete-info="${item.id}">Delete</button></div>
-  </article>`).join('');
-  applyExplorerView('information', getExplorerView('information'), false);
+  const badge = $('#knowledgeMigrationBadge');
+  if (badge) badge.textContent = migration.retired ? 'Migrated' : 'Checking';
+}
+
+async function refreshKnowledgeOverview() {
+  const [status, libraries, documents] = await Promise.all([
+    api('/api/knowledge/status'),
+    api('/api/knowledge/libraries'),
+    api('/api/knowledge/documents'),
+  ]);
+  appState.knowledgeStatus = status;
+  appState.knowledgeLibraries = libraries || [];
+  appState.knowledgeDocuments = documents || [];
+  renderKnowledge();
 }
 
 function renderScripts() {
@@ -294,7 +322,7 @@ function handleEvent(message) {
     case 'type_to_talk_settings': appState.typeToTalkSettings = data.settings || appState.typeToTalkSettings; renderTypeToTalkSettings(); break;
     case 'script_defaults_changed': appState.scriptDefaults = data || null; break;
     case 'agents_changed': appState.agents = data || []; renderAgents(); break;
-    case 'information_changed': appState.information = data || []; renderInformation(); break;
+    case 'knowledge_changed': refreshKnowledgeOverview().catch(error => toast(error.message, 'error')); break;
     case 'plugins_changed': appState.plugins = data || { plugins: [], summary: {} }; if (appState.data) appState.data.plugins = appState.plugins; renderPlugins(); break;
     case 'scripts_changed': appState.scripts = data || []; renderScripts(); break;
     case 'agent_changed':
@@ -328,7 +356,7 @@ function handleEvent(message) {
 function navigate(page) {
   $$('.page').forEach(node => node.classList.toggle('active', node.id === `page-${page}`));
   $$('.nav-item, .mobile-bottom-nav button').forEach(node => node.classList.toggle('active', node.dataset.page === page));
-  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], information: ['KNOWLEDGE', 'Legacy Information'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], speak: ['DIRECT TTS', 'Type to Talk'], audio: ['HOST MEDIA', 'Audio'], settings: ['SYSTEM', 'Settings'] };
+  const titles = { chat: ['VOICE WORKSPACE', 'Conversation'], agents: ['CONFIGURATION', 'Agents'], knowledge: ['KNOWLEDGE', 'Hybrid RAG'], plugins: ['CAPABILITIES', 'Plugins'], scripts: ['DIRECT SPEECH', 'Scripts & Queue'], speak: ['DIRECT TTS', 'Type to Talk'], audio: ['HOST MEDIA', 'Audio'], settings: ['SYSTEM', 'Settings'] };
   $('#pageEyebrow').textContent = titles[page]?.[0] || '';
   $('#pageTitle').textContent = titles[page]?.[1] || page;
   closeMobileNav();
@@ -375,123 +403,109 @@ async function loadScriptDefaults() {
   appState.scriptDefaults = await api('/api/scripts/defaults');
 }
 
-function openSimpleModal(kind, item = null) {
+function openScriptModal(item = null) {
   const fragment = $('#simpleModalTemplate').content.cloneNode(true);
   $('#modalRoot').replaceChildren(fragment);
   const form = $('#simpleModalForm');
-  const title = kind === 'info' ? `${item ? 'Edit' : 'Add'} information` : `${item ? 'Edit' : 'Create'} script`;
-  $('#simpleModalTitle').textContent = title;
-  if (kind === 'info') {
-    $('#simpleModalFields').innerHTML = `<label>Title<input name="title" required value="${escapeHtml(item?.title || '')}"></label><label>Full text<textarea name="content" rows="10" required>${escapeHtml(item?.content || '')}</textarea></label><label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>`;
-  } else {
-    const remembered = item || appState.scriptDefaults || {};
-    const language = remembered.language || 'en';
-    const profile = languageProfile(language);
-    $('#simpleModalFields').innerHTML = `
-      <label>Button title<input name="title" required value="${escapeHtml(item?.title || '')}"></label>
-      <label>Spoken text<textarea name="text" rows="8" required>${escapeHtml(item?.text || '')}</textarea></label>
-      <div class="form-grid two">
-        <label>Language<select name="language"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select></label>
-        <label>TTS mode<select name="tts_mode"><option value="edge">Edge only</option><option value="kokoro">Kokoro local only</option><option value="edge_fallback">Edge → Kokoro fallback</option><option value="kokoro_fallback">Kokoro → Edge fallback</option></select></label>
-        <label>Edge voice<select name="edge_voice" id="scriptEdgeVoiceSelect"></select></label>
-        <label>Kokoro voice<select name="kokoro_voice_id" id="scriptKokoroVoiceSelect"></select></label>
-        <label>Speech rate<input name="tts_rate" type="number" min="0.5" max="2" step="0.05" value="${Number(remembered.tts_rate ?? 1)}"></label>
-        <label>Volume<input name="tts_volume" type="number" min="0" max="1" step="0.05" value="${Number(remembered.tts_volume ?? 1)}"></label>
-      </div>
-      <div id="scriptTtsCompatibilityHint" class="status-box"></div>
-      <button type="button" id="previewScriptVoiceBtn" class="btn secondary">▶ Preview script voice</button>
-      <p class="tiny muted">New scripts start with the speech configuration from the last script you saved. If there is no previous script configuration, VerbaNode uses the normal defaults.</p>
-      <label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>
-      ${item ? '<button type="button" id="deleteSimpleItem" class="btn danger-outline">Delete</button>' : ''}`;
-    form.elements.namedItem('language').value = language;
-    form.elements.namedItem('tts_mode').value = remembered.tts_mode || 'edge';
-    const populateScriptVoices = (forceDefault = false) => {
-      const selectedLanguage = form.elements.namedItem('language').value || 'en';
-      const selectedProfile = languageProfile(selectedLanguage);
-      const preferredVoice = forceDefault
-        ? selectedProfile.defaultVoice
-        : (remembered.edge_voice || selectedProfile.defaultVoice);
-      renderStandaloneEdgeVoiceSelect($('#scriptEdgeVoiceSelect'), selectedLanguage, preferredVoice);
-      applyLanguageTtsAvailability(form.elements.namedItem('tts_mode'), selectedLanguage);
-      const kokoroSelect = $('#scriptKokoroVoiceSelect');
-      if (kokoroSelect) kokoroSelect.disabled = selectedLanguage === 'id';
-      const compatibility = $('#scriptTtsCompatibilityHint');
-      if (compatibility) compatibility.textContent = selectedLanguage === 'id'
-        ? 'Bahasa Indonesia scripts use Edge TTS only. Kokoro is disabled for this language profile.'
-        : 'English scripts can use Edge, Kokoro, or either fallback mode.';
-    };
-    populateScriptVoices(false);
-    form.elements.namedItem('language').onchange = () => populateScriptVoices(true);
-    const scriptKokoro = $('#scriptKokoroVoiceSelect');
-    const scriptVoices = appState.kokoroVoices.length ? appState.kokoroVoices : [{ id: 0, name: 'af_maple', category: 'American female' }];
-    scriptKokoro.innerHTML = scriptVoices.map(voice => `<option value="${voice.id}">${escapeHtml(voice.name)} — ${escapeHtml(voice.category)}</option>`).join('');
-    scriptKokoro.value = String(remembered.kokoro_voice_id ?? 0);
-    $('#previewScriptVoiceBtn').onclick = async () => {
-      const button = $('#previewScriptVoiceBtn');
-      button.disabled = true; button.textContent = 'Playing…';
-      try {
-        await api('/api/tts/script-preview', {
-          method: 'POST',
-          body: JSON.stringify({
-            text: form.elements.namedItem('text').value.trim() || languageProfile(form.elements.namedItem('language').value).preview,
-            language: form.elements.namedItem('language').value,
-            tts_mode: form.elements.namedItem('tts_mode').value,
-            edge_voice: form.elements.namedItem('edge_voice').value,
-            kokoro_voice_id: Number(form.elements.namedItem('kokoro_voice_id').value || 0),
-            tts_rate: Number(form.elements.namedItem('tts_rate').value || 1),
-            tts_volume: Number(form.elements.namedItem('tts_volume').value || 1),
-          }),
-        });
-      } catch (error) { toast(error.message, 'error'); }
-      finally { button.disabled = false; button.textContent = '▶ Preview script voice'; }
-    };
-  }
+  $('#simpleModalTitle').textContent = `${item ? 'Edit' : 'Create'} script`;
+  const remembered = item || appState.scriptDefaults || {};
+  const language = remembered.language || 'en';
+  const profile = languageProfile(language);
+  $('#simpleModalFields').innerHTML = `
+    <label>Button title<input name="title" required value="${escapeHtml(item?.title || '')}"></label>
+    <label>Spoken text<textarea name="text" rows="8" required>${escapeHtml(item?.text || '')}</textarea></label>
+    <div class="form-grid two">
+      <label>Language<select name="language"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select></label>
+      <label>TTS mode<select name="tts_mode"><option value="edge">Edge only</option><option value="kokoro">Kokoro local only</option><option value="edge_fallback">Edge → Kokoro fallback</option><option value="kokoro_fallback">Kokoro → Edge fallback</option></select></label>
+      <label>Edge voice<select name="edge_voice" id="scriptEdgeVoiceSelect"></select></label>
+      <label>Kokoro voice<select name="kokoro_voice_id" id="scriptKokoroVoiceSelect"></select></label>
+      <label>Speech rate<input name="tts_rate" type="number" min="0.5" max="2" step="0.05" value="${Number(remembered.tts_rate ?? 1)}"></label>
+      <label>Volume<input name="tts_volume" type="number" min="0" max="1" step="0.05" value="${Number(remembered.tts_volume ?? 1)}"></label>
+    </div>
+    <div id="scriptTtsCompatibilityHint" class="status-box"></div>
+    <button type="button" id="previewScriptVoiceBtn" class="btn secondary">▶ Preview script voice</button>
+    <p class="tiny muted">New scripts start with the speech configuration from the last script you saved. If there is no previous script configuration, VerbaNode uses the normal defaults.</p>
+    <label class="toggle-row"><span><strong>Enabled</strong></span><input name="enabled" type="checkbox" ${item?.enabled !== 0 ? 'checked' : ''}><i></i></label>
+    ${item ? '<button type="button" id="deleteSimpleItem" class="btn danger-outline">Delete</button>' : ''}`;
+  form.elements.namedItem('language').value = language;
+  form.elements.namedItem('tts_mode').value = remembered.tts_mode || 'edge';
+  const populateScriptVoices = (forceDefault = false) => {
+    const selectedLanguage = form.elements.namedItem('language').value || 'en';
+    const selectedProfile = languageProfile(selectedLanguage);
+    const preferredVoice = forceDefault
+      ? selectedProfile.defaultVoice
+      : (remembered.edge_voice || selectedProfile.defaultVoice);
+    renderStandaloneEdgeVoiceSelect($('#scriptEdgeVoiceSelect'), selectedLanguage, preferredVoice);
+    applyLanguageTtsAvailability(form.elements.namedItem('tts_mode'), selectedLanguage);
+    const kokoroSelect = $('#scriptKokoroVoiceSelect');
+    if (kokoroSelect) kokoroSelect.disabled = selectedLanguage === 'id';
+    const compatibility = $('#scriptTtsCompatibilityHint');
+    if (compatibility) compatibility.textContent = selectedLanguage === 'id'
+      ? 'Bahasa Indonesia scripts use Edge TTS only. Kokoro is disabled for this language profile.'
+      : 'English scripts can use Edge, Kokoro, or either fallback mode.';
+  };
+  populateScriptVoices(false);
+  form.elements.namedItem('language').onchange = () => populateScriptVoices(true);
+  const scriptKokoro = $('#scriptKokoroVoiceSelect');
+  const scriptVoices = appState.kokoroVoices.length ? appState.kokoroVoices : [{ id: 0, name: 'af_maple', category: 'American female' }];
+  scriptKokoro.innerHTML = scriptVoices.map(voice => `<option value="${voice.id}">${escapeHtml(voice.name)} — ${escapeHtml(voice.category)}</option>`).join('');
+  scriptKokoro.value = String(remembered.kokoro_voice_id ?? 0);
+  $('#previewScriptVoiceBtn').onclick = async () => {
+    const button = $('#previewScriptVoiceBtn');
+    button.disabled = true; button.textContent = 'Playing…';
+    try {
+      await api('/api/tts/script-preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          text: form.elements.namedItem('text').value.trim() || languageProfile(form.elements.namedItem('language').value).preview,
+          language: form.elements.namedItem('language').value,
+          tts_mode: form.elements.namedItem('tts_mode').value,
+          edge_voice: form.elements.namedItem('edge_voice').value,
+          kokoro_voice_id: Number(form.elements.namedItem('kokoro_voice_id').value || 0),
+          tts_rate: Number(form.elements.namedItem('tts_rate').value || 1),
+          tts_volume: Number(form.elements.namedItem('tts_volume').value || 1),
+        }),
+      });
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; button.textContent = '▶ Preview script voice'; }
+  };
   wireModalBasics();
   if (item && $('#deleteSimpleItem')) $('#deleteSimpleItem').onclick = async () => {
     if (!confirm(`Delete ${item.title}?`)) return;
     try {
-      await api(`/api/${kind === 'info' ? 'information' : 'scripts'}/${item.id}`, { method: 'DELETE' });
+      await api(`/api/scripts/${item.id}`, { method: 'DELETE' });
       closeModal();
-      if (kind === 'info') { appState.information = await api('/api/information'); renderInformation(); }
-      else { appState.scripts = await api('/api/scripts'); renderScripts(); }
+      appState.scripts = await api('/api/scripts'); renderScripts();
     } catch (error) { toast(error.message, 'error'); }
   };
   form.onsubmit = async event => {
     event.preventDefault();
     const fd = new FormData(form);
-    const payload = kind === 'info'
-      ? { title: fd.get('title'), content: fd.get('content'), enabled: Boolean(form.elements.namedItem('enabled').checked) }
-      : {
-          title: fd.get('title'), text: fd.get('text'), enabled: Boolean(form.elements.namedItem('enabled').checked),
-          language: fd.get('language'), tts_mode: fd.get('tts_mode'), edge_voice: fd.get('edge_voice'),
-          kokoro_voice_id: Number(fd.get('kokoro_voice_id') || 0), tts_rate: Number(fd.get('tts_rate') || 1),
-          tts_volume: Number(fd.get('tts_volume') || 1),
-        };
-    if (kind === 'script') {
-      if (payload.language === 'id' && payload.tts_mode !== 'edge') {
-        toast('Bahasa Indonesia scripts must use Edge TTS.', 'error');
-        return;
-      }
-      if (payload.language === 'id' && !String(payload.edge_voice || '').toLowerCase().startsWith('id-')) {
-        toast('Choose an Indonesian Edge voice for this script.', 'error');
-        return;
-      }
-      if (payload.language === 'en' && String(payload.edge_voice || '').toLowerCase().startsWith('id-')) {
-        toast('Choose an English Edge voice for this script.', 'error');
-        return;
-      }
+    const payload = {
+      title: fd.get('title'), text: fd.get('text'), enabled: Boolean(form.elements.namedItem('enabled').checked),
+      language: fd.get('language'), tts_mode: fd.get('tts_mode'), edge_voice: fd.get('edge_voice'),
+      kokoro_voice_id: Number(fd.get('kokoro_voice_id') || 0), tts_rate: Number(fd.get('tts_rate') || 1),
+      tts_volume: Number(fd.get('tts_volume') || 1),
+    };
+    if (payload.language === 'id' && payload.tts_mode !== 'edge') {
+      toast('Bahasa Indonesia scripts must use Edge TTS.', 'error');
+      return;
     }
-    const base = kind === 'info' ? '/api/information' : '/api/scripts';
+    if (payload.language === 'id' && !String(payload.edge_voice || '').toLowerCase().startsWith('id-')) {
+      toast('Choose an Indonesian Edge voice for this script.', 'error');
+      return;
+    }
+    if (payload.language === 'en' && String(payload.edge_voice || '').toLowerCase().startsWith('id-')) {
+      toast('Choose an English Edge voice for this script.', 'error');
+      return;
+    }
     try {
-      await api(item ? `${base}/${item.id}` : base, { method: item ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+      await api(item ? `/api/scripts/${item.id}` : '/api/scripts', { method: item ? 'PUT' : 'POST', body: JSON.stringify(payload) });
       closeModal();
-      if (kind === 'info') { appState.information = await api('/api/information'); renderInformation(); }
-      else {
-        appState.scripts = await api('/api/scripts');
-        await loadScriptDefaults();
-        renderScripts();
-      }
-      toast(`${kind === 'info' ? 'Information' : 'Script'} saved.`, 'success');
+      appState.scripts = await api('/api/scripts');
+      await loadScriptDefaults();
+      renderScripts();
+      toast('Script saved.', 'success');
     } catch (error) { toast(error.message, 'error'); }
   };
 }
@@ -599,7 +613,7 @@ function bindEvents() {
   };
 
   $('#addAgentBtn').onclick = () => openAgentModal(); $('#quickAddAgent').onclick = () => openAgentModal();
-  $('#addInfoBtn').onclick = () => openSimpleModal('info'); $('#addScriptBtn').onclick = () => openSimpleModal('script');
+  const refreshKnowledgeBtn = $('#refreshKnowledgeBtn'); if (refreshKnowledgeBtn) refreshKnowledgeBtn.onclick = () => refreshKnowledgeOverview().catch(error => toast(error.message, 'error')); $('#addScriptBtn').onclick = () => openScriptModal();
   $('#refreshPluginsBtn').onclick = async () => { try { await refreshPlugins(true); } catch (error) { toast(error.message, 'error'); } };
   $('#reloadExternalPluginsBtn').onclick = async () => {
     const button = $('#reloadExternalPluginsBtn');
@@ -623,7 +637,7 @@ function bindEvents() {
   };
 
   document.addEventListener('click', async event => {
-    const target = event.target.closest('[data-edit-agent],[data-activate-agent],[data-delete-agent],[data-edit-info],[data-delete-info],[data-edit-script],[data-run-script],[data-queue-script],[data-remove-queue],[data-toggle-plugin],[data-reset-plugin],[data-reload-plugin],[data-recover-plugin]');
+    const target = event.target.closest('[data-edit-agent],[data-activate-agent],[data-delete-agent],[data-edit-script],[data-run-script],[data-queue-script],[data-remove-queue],[data-toggle-plugin],[data-reset-plugin],[data-reload-plugin],[data-recover-plugin]');
     if (!target) return;
     if (target.dataset.editAgent) openAgentModal(Number(target.dataset.editAgent));
     else if (target.dataset.activateAgent) {
@@ -634,12 +648,7 @@ function bindEvents() {
       if (!confirm(`Delete ${agent?.name || 'this agent'} and all of its memory?`)) return;
       try { await api(`/api/agents/${target.dataset.deleteAgent}`, { method: 'DELETE' }); appState.agents = await api('/api/agents'); renderAgents(); }
       catch (error) { toast(error.message, 'error'); }
-    } else if (target.dataset.editInfo) openSimpleModal('info', appState.information.find(item => item.id === Number(target.dataset.editInfo)));
-    else if (target.dataset.deleteInfo) {
-      const item = appState.information.find(value => value.id === Number(target.dataset.deleteInfo)); if (!confirm(`Delete ${item?.title || 'this information'}?`)) return;
-      try { await api(`/api/information/${target.dataset.deleteInfo}`, { method: 'DELETE' }); appState.information = await api('/api/information'); renderInformation(); }
-      catch (error) { toast(error.message, 'error'); }
-    } else if (target.dataset.editScript) openSimpleModal('script', appState.scripts.find(item => item.id === Number(target.dataset.editScript)));
+    } else if (target.dataset.editScript) openScriptModal(appState.scripts.find(item => item.id === Number(target.dataset.editScript)));
     else if (target.dataset.togglePlugin) {
       const pluginId = target.dataset.togglePlugin;
       const currentlyEnabled = target.dataset.enabled === 'true';

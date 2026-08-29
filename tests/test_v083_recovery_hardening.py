@@ -34,24 +34,24 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v083_metadata_schema_identity_and_history(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.11.0"
+    assert APP_VERSION == "0.12.0"
     assert BUILD_LABEL == "local-mobile"
-    assert CURRENT_SCHEMA_VERSION == 13
+    assert CURRENT_SCHEMA_VERSION >= 14
     assert BACKUP_FORMAT_VERSION == 3
 
     settings = _settings(tmp_path)
     db = Database(settings)
     db.initialize()
 
-    assert db.get_setting("schema_version") == "13"
+    assert db.get_setting("schema_version") == str(CURRENT_SCHEMA_VERSION)
     with sqlite3.connect(settings.db_path) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
         assert conn.execute("PRAGMA application_id").fetchone()[0] == VERBANODE_APPLICATION_ID
         history = conn.execute(
             "SELECT version,name,fingerprint FROM schema_migrations ORDER BY version"
         ).fetchall()
 
-    assert [row[0] for row in history] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+    assert [row[0] for row in history] == list(range(1, CURRENT_SCHEMA_VERSION + 1))
     assert [row[1] for row in history] == [migration.name for migration in MIGRATIONS]
     assert all(len(row[2]) == 64 for row in history)
 
@@ -79,11 +79,11 @@ def test_v4_normalizes_legacy_schema_and_creates_pre_migration_snapshot(tmp_path
     with sqlite3.connect(settings.db_path) as conn:
         message_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
         script_columns = {row[1] for row in conn.execute("PRAGMA table_info(scripts)")}
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == CURRENT_SCHEMA_VERSION
     assert "stt_confidence_source" in message_columns
     assert "tts_volume" in script_columns
 
-    snapshots = list(settings.backup_dir.glob("pre-migration-v3-to-v13-*.db"))
+    snapshots = list(settings.backup_dir.glob(f"pre-migration-v3-to-v{CURRENT_SCHEMA_VERSION}-*.db"))
     assert len(snapshots) == 1
     with sqlite3.connect(snapshots[0]) as conn:
         assert conn.execute(
@@ -128,7 +128,7 @@ def test_backup_v3_manifest_has_size_and_checksum_and_validates(tmp_path: Path) 
     assert database_meta["sha256"] == sha256_path(snapshot)
 
     validated = validate_backup_archive(archive_path, tmp_path / "extract")
-    assert validated.schema_version == 13
+    assert validated.schema_version == CURRENT_SCHEMA_VERSION
     assert validated.sha256 == database_meta["sha256"]
     assert validated.size_bytes == database_meta["size_bytes"]
 

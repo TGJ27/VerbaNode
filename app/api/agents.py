@@ -28,7 +28,14 @@ async def create_agent(payload: AgentCreate, token: Token) -> dict[str, Any]:
 
 @router.put("/api/agents/{agent_id}")
 async def update_agent(agent_id: int, payload: AgentUpdate, token: Token) -> dict[str, Any]:
-    agent = state.db.update_agent(agent_id, payload.model_dump())
+    data = payload.model_dump()
+    # Android v0.3.6 and other pre-Phase-6 clients do not know the new
+    # knowledge_library_ids field. Preserve existing RAG permissions when the
+    # client omitted it instead of interpreting Pydantic's default [] as an
+    # explicit request to clear every library assignment.
+    if "knowledge_library_ids" not in payload.model_fields_set:
+        data["knowledge_library_ids"] = None
+    agent = state.db.update_agent(agent_id, data)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     await state.events.broadcast("agents_changed", state.db.list_agents())
@@ -75,13 +82,15 @@ async def backup_agent(agent_id: int, token: Token) -> JSONResponse:
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     conversations = state.db.list_conversations(agent_id)
+    library_ids = set(agent.get("knowledge_library_ids") or [])
     data = {
-        "version": 1,
+        "version": 2,
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "agent": agent,
-        "information": [
-            item for item in state.db.list_information() if item["id"] in agent["info_ids"]
+        "knowledge_libraries": [
+            item for item in state.knowledge.list_libraries() if int(item["id"]) in library_ids
         ],
+        "information": [],  # retired compatibility key
         "conversations": [
             {
                 **conversation,

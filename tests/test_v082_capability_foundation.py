@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from app.migrations import CURRENT_SCHEMA_VERSION
 from app.capabilities import (
     CapabilityDescriptor,
     CapabilityPermissionError,
@@ -139,13 +140,13 @@ def _settings(tmp_path: Path, **overrides) -> Settings:
 
 
 def test_v082_capability_expiry_survives_current_schema(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.11.0"
+    assert APP_VERSION == "0.12.0"
     assert BUILD_LABEL == "local-mobile"
 
     settings = _settings(tmp_path)
     db = Database(settings)
     db.initialize()
-    assert db.get_setting("schema_version") == "13"
+    assert db.get_setting("schema_version") == str(CURRENT_SCHEMA_VERSION)
     with sqlite3.connect(settings.db_path) as conn:
         columns = {
             row[1] for row in conn.execute("PRAGMA table_info(action_ledger)").fetchall()

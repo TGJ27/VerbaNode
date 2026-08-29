@@ -1,44 +1,39 @@
-# VerbaNode v0.11.0 — Hybrid RAG Chat/Voice Cutover
+# VerbaNode v0.12.0 — Hybrid RAG Knowledge Management & Hardening
 
-v0.11.0 completes **Hybrid RAG Phase 5**. The Knowledge Engine is no longer only a standalone search/debug subsystem: normal LLM turns from Web Chat, typed input, browser PTT, and continuous Voice now retrieve bounded evidence from the active agent's assigned Knowledge Libraries before the prompt is built.
+v0.12.0 completes **Hybrid RAG Phase 7**. The single Knowledge Engine introduced across Phases 1–6 now has full day-to-day management surfaces, and dense-index work no longer blocks Core startup.
 
-## Prompt behavior changed
+## Core startup fix
 
-The old Information system is no longer concatenated into every prompt. Legacy Information rows and agent links remain in the database only so Phase 6 can migrate them safely; they are not used as factual LLM context in v0.11.0.
+- Phase-6 E5/HNSW finalization is no longer awaited inside FastAPI startup.
+- Core/launcher health becomes available after the normal Core/Audio/AI startup path instead of waiting for Knowledge embeddings/index rebuilds.
+- BM25/FTS knowledge is immediately available while dense indexing continues as a background task.
+- Knowledge status reports total/completed/current-library progress and broadcasts completion/failure.
 
-For an ordinary turn, Core now:
+## Knowledge management
 
-1. checks whether the request is a deterministic live-tool command; those commands skip RAG;
-2. resolves the active agent's enabled Knowledge Libraries;
-3. runs the Phase-4 hybrid retrieval pipeline (BM25 + multilingual dense vectors + structured tables + weighted RRF + CPU reranking);
-4. applies confidence fallback/deduplication and builds parent/neighbor context;
-5. injects evidence only when `safe_to_inject` is true;
-6. continues with no knowledge context if retrieval is weak or unavailable; and
-7. returns compact source/confidence metadata with the completed turn.
+- Full Web library and document management with fixed-view pagination (no new nested/page scrolling).
+- Create/edit manual text knowledge, including migrated legacy text entries.
+- Upload mixed document files to a selected library for the existing Phase-2 ingestion pipeline.
+- Inspect normalized parent/chunk content and source metadata.
+- Download an original stored source when one exists.
+- Delete/reindex individual documents or rebuild a selected/all Knowledge index.
+- Run retrieval tests and inspect confidence/top sources before relying on the result in Chat/Voice.
+- Agent editors continue to assign explicit Knowledge Libraries.
 
-The knowledge context budget is derived from the active agent's model context size and capped so system/agent policy, selective conversation memory, tools, the current user message, and model output retain room. The full knowledge library is never appended to the prompt.
+## Indexing behavior
 
-## Shared Chat and Voice path
+- Manual text is normalized and made BM25-searchable immediately.
+- Dense E5/HNSW indexing is queued in the background so saving text does not synchronously load/download the embedding model.
+- Dense failures remain isolated; lexical/table retrieval continues to work.
 
-All normal conversational entry points already converge on `ConversationManager.process_user_text()`. Phase 5 integrates RAG at that shared boundary, so Web Chat, typed input, browser PTT, host PTT/voice, and continuous conversation receive the same retrieval behavior without duplicating retrieval logic in clients.
+## Mobile/API
 
-## Failure behavior
-
-Knowledge retrieval is intentionally non-fatal. Missing dense-model/runtime support can still fall back to lexical/table retrieval inside the Knowledge Engine, and an unexpected retrieval/index failure causes the turn to continue without RAG rather than returning an error to the user. Low-confidence evidence is likewise omitted instead of being forced into the prompt.
-
-## CI regression fixed
-
-A historical test still asserted `version == CURRENT_SCHEMA_VERSION == 10`, even though the Knowledge phases advanced the canonical schema to v13. That test now validates against the migration registry/current schema value rather than an obsolete literal, preventing future numbered migrations from breaking the same assertion again.
+- `/api/client-info` now advertises Knowledge management, text-document editing, and background-indexing capabilities for Android v0.4.0.
+- Added authenticated text-document create/update and original-source endpoints on the existing `/api/knowledge/*` surface.
+- No VLM is introduced.
 
 ## Compatibility
 
-- Database schema: **v13** (unchanged; no migration)
-- Knowledge retrieval API: v2 (unchanged)
-- Knowledge prompt integration capability: v1
-- VLM: not used
-- Android v0.3.6 remains compatible; Android does not perform retrieval locally
-- Phase 6 will migrate legacy Information records into Knowledge Libraries and retire the old management model
-
-## Upgrade
-
-Fully stop VerbaNode Core, replace the release files, and start Core again. Existing Phase-3/4 Knowledge indexes remain usable immediately. Because schema v13 is unchanged, no database migration runs for this release.
+- Database schema remains **v14**; no new migration is required from v0.11.1.
+- Hybrid RAG Chat/Voice behavior from v0.11.0 and legacy migration/retirement from v0.11.1 remain intact.
+- Android v0.4.0 is the matching full Knowledge-management client; older Android builds can still use non-Knowledge functions but do not satisfy the new v0.4.0 capability check.

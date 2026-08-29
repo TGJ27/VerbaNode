@@ -28,9 +28,9 @@ def _build(tmp_path: Path) -> tuple[Database, KnowledgeEngine]:
 def test_v0100_schema_and_local_layout_foundation(tmp_path: Path) -> None:
     db, engine = _build(tmp_path)
 
-    assert APP_VERSION == "0.11.0"
-    assert CURRENT_SCHEMA_VERSION == 13
-    assert db.schema_version() == 13
+    assert APP_VERSION == "0.12.0"
+    assert CURRENT_SCHEMA_VERSION >= 14
+    assert db.schema_version() == CURRENT_SCHEMA_VERSION
     for directory in (engine.root, engine.sources_dir, engine.assets_dir, engine.indexes_dir, engine.cache_dir):
         assert directory.is_dir()
 
@@ -54,14 +54,14 @@ def test_v0100_schema_and_local_layout_foundation(tmp_path: Path) -> None:
     status = engine.status()
     features = feature_manifest()
     assert features["knowledge_engine"] is True
-    assert features["knowledge_engine_phase"] == "chat_voice_cutover"
+    assert features["knowledge_engine_phase"] == "legacy_information_migrated"
     assert features["knowledge_retrieval"] is True
     assert status["backend"] == "local"
-    assert status["phase"] == "chat_voice_cutover"
+    assert status["phase"] == "legacy_information_migrated"
     assert status["ingestion_enabled"] is True
     assert status["retrieval_enabled"] is True
     assert status["legacy_information_injection_active"] is False
-    assert status["counts"]["libraries"] == 0
+    assert status["counts"]["libraries"] >= 1
 
 
 def test_v0100_library_crud_and_case_insensitive_uniqueness(tmp_path: Path) -> None:
@@ -148,10 +148,10 @@ def test_v0100_document_job_hierarchy_metadata_is_ready_for_phase2(tmp_path: Pat
     assert chunk["metadata"] == {"section": "Motor Controller"}
 
     status = engine.status()
-    assert status["counts"]["documents"] == 1
+    assert status["counts"]["documents"] >= 2  # includes packaged company knowledge
     assert status["counts"]["jobs"] == 1
-    assert status["counts"]["parent_blocks"] == 1
-    assert status["counts"]["chunks"] == 1
+    assert status["counts"]["parent_blocks"] >= 2
+    assert status["counts"]["chunks"] >= 2
 
     with pytest.raises(KnowledgeEngineConflict, match="contains documents"):
         engine.delete_library(library["id"])
@@ -177,15 +177,12 @@ def test_v0100_agent_library_permissions_are_explicit_and_validated(tmp_path: Pa
     assert engine.agent_library_ids(agent["id"]) == [second["id"]]
 
 
-def test_v0100_public_router_is_registered_without_replacing_legacy_information() -> None:
+def test_v0100_public_router_remains_after_legacy_information_retirement() -> None:
     root = Path(__file__).resolve().parents[1]
     main = (root / "app" / "main.py").read_text(encoding="utf-8")
     api = (root / "app" / "api" / "knowledge.py").read_text(encoding="utf-8")
-    prompts = (root / "app" / "services" / "prompts.py").read_text(encoding="utf-8")
 
     assert "app.include_router(knowledge_router)" in main
     assert '@router.get("/status")' in api
     assert '@router.post("/libraries")' in api
     assert '@router.put("/agents/{agent_id}/libraries")' in api
-    # Phase 1 is additive: prompt cutover/migration happens in later phases.
-    assert "information" in prompts.lower()

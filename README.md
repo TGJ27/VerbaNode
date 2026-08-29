@@ -16,11 +16,11 @@
 
 VerbaNode is a Windows-first local voice-assistant platform designed for interactive robots, kiosks, desktop assistants, demonstrations, and other systems that need a configurable conversational interface.
 
-The project combines speech recognition, local LLM inference, text-to-speech, agent profiles, selective short-term memory, script playback, information/knowledge entries, and a modular plugin system behind one responsive web dashboard.
+The project combines speech recognition, local LLM inference, text-to-speech, agent profiles, selective short-term memory, script playback, Hybrid RAG Knowledge Libraries, and a modular plugin system behind one responsive web dashboard.
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.11.0 completes Hybrid RAG Phase 5: Chat, typed input, browser PTT, and continuous Voice now use the shared Knowledge Engine retrieval/context pipeline. Only medium/high-confidence evidence from the active agent's assigned Knowledge Libraries is injected; legacy Information records are no longer appended to every LLM prompt and are retained only for the Phase-6 migration. Retrieval failures degrade to normal chat without knowledge rather than blocking a turn. No VLM is used. Android v0.3.6 remains compatible.
+> **Project status:** active development. v0.12.0 completes Hybrid RAG Phase 7: Web and Android now manage the single Knowledge Library system end-to-end, and dense E5/HNSW finalization runs in the background instead of holding Core in `Starting`. BM25 is usable immediately, migrated legacy entries appear as normal Knowledge documents, and no VLM is used. The matching mobile management client is Android v0.4.0.
 
 ---
 
@@ -53,7 +53,7 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Conversation history is stored
   - Relevant context can be supplied when needed instead of resending the entire conversation every turn
 
-- **Integrated Hybrid Knowledge retrieval (v0.11.0 / Hybrid RAG Phase 5)**
+- **Integrated Hybrid Knowledge retrieval (v0.12.0 / Hybrid RAG Phase 7)**
   - Local-first Knowledge libraries with explicit per-agent access and pre-retrieval filtering
   - Universal mixed-document ingestion for PDF, Office files, spreadsheets, text/web formats, images, and scans
   - Structure-preserving parent/child normalization for headings, pages, tables, slides, sheets, OCR, and metadata
@@ -69,7 +69,9 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Retrieved-source metadata is returned with completed turns without streaming the entire knowledge base
   - Dense retrieval degrades safely: BM25/table search stays available if the embedding runtime/model is unavailable
   - No VLM or image-semantic reasoning
-  - Legacy Information records remain stored only for Phase-6 conversion and are no longer injected into prompts
+  - Schema v14 automatically converts legacy Information into access-preserving Knowledge Libraries/documents and removes the retired Information tables
+  - Fresh installs seed packaged factual content directly into Knowledge rather than maintaining a second information store
+  - Older clients receive an empty compatibility Information view; factual mutations now belong exclusively to Knowledge Libraries
 
 - **Plugin architecture**
   - Built-in plugins
@@ -94,6 +96,20 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.12.0 Knowledge management and production hardening**
+  - Dense E5/HNSW finalization runs after Core becomes ready; it no longer blocks launcher health during startup.
+  - Web manages libraries/documents, migrated legacy text, uploads, text editing, delete/reindex, chunk/source inspection, retrieval tests, and index rebuilds.
+  - Knowledge management uses fixed-view pagination on the dashboard rather than nested scroll regions.
+  - Manual text becomes BM25-searchable immediately and schedules dense indexing in the background.
+  - Android v0.4.0 uses the same Core APIs for full mobile Knowledge management and agent-library assignment.
+  - Schema remains v14; no new migration and no VLM.
+
+- **v0.11.1 Legacy Knowledge migration and retirement**
+  - Migrates every legacy Information record into normal Hybrid RAG Knowledge documents under schema v14.
+  - Preserves exact agent access and enabled state and retires the old Information tables/UI.
+  - Makes migrated content BM25-searchable immediately and keeps dense indexing failure-isolated.
+  - Protects older Android agent updates from clearing migrated Knowledge permissions when the field is omitted.
 
 - **v0.11.0 Knowledge Chat/Voice cutover**
   - Connects the Phase-4 hybrid retrieval/context builder to all normal LLM turns from Chat, typed input, browser PTT, and continuous Voice.

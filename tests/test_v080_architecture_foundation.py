@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from app.migrations import CURRENT_SCHEMA_VERSION
 from app.api.protocol import PROTOCOL_VERSION, event_envelope, parse_command
 from app.config import Settings
 from app.db import Database
@@ -57,12 +58,12 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v080_metadata_and_schema_migration(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.11.0"
+    assert APP_VERSION == "0.12.0"
     assert BUILD_LABEL == "local-mobile"
 
     db = Database(_settings(tmp_path))
     db.initialize()
-    assert db.get_setting("schema_version") == "13"
+    assert db.get_setting("schema_version") == str(CURRENT_SCHEMA_VERSION)
     with sqlite3.connect(tmp_path / "verbanode.db") as conn:
         tables = {
             row[0]

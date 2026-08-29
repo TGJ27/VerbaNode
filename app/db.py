@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -116,20 +117,6 @@ class Database:
             updated_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS information (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS agent_information (
-            agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-            info_id INTEGER NOT NULL REFERENCES information(id) ON DELETE CASCADE,
-            PRIMARY KEY(agent_id, info_id)
-        );
 
         CREATE TABLE IF NOT EXISTS scripts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -542,25 +529,85 @@ class Database:
                             ),
                         )
 
-                # Seed the company profile once and assign it to every existing
-                # agent so both English and Indonesian Ropi can use it. If the
-                # operator already has an item with this title, preserve its text.
-                info_row = conn.execute(
-                    "SELECT id FROM information WHERE lower(trim(title))=lower(trim(?)) LIMIT 1",
+                # Phase 6 retires the old Information tables. Fresh installs seed
+                # the company profile directly into a Knowledge Library instead.
+                existing_company = conn.execute(
+                    "SELECT id,library_id FROM knowledge_documents "
+                    "WHERE lower(trim(title))=lower(trim(?)) ORDER BY id LIMIT 1",
                     (DEFAULT_COMPANY_INFO_TITLE,),
                 ).fetchone()
-                if info_row:
-                    info_id = int(info_row[0])
+                if existing_company:
+                    company_library_id = int(existing_company["library_id"])
                 else:
-                    cur = conn.execute(
-                        "INSERT INTO information(title,content,enabled,created_at,updated_at) VALUES(?,?,?,?,?)",
-                        (DEFAULT_COMPANY_INFO_TITLE, DEFAULT_COMPANY_INFO_CONTENT, 1, now, now),
+                    library_row = conn.execute(
+                        "SELECT id FROM knowledge_libraries WHERE lower(name)=lower(?) LIMIT 1",
+                        ("Company Knowledge",),
+                    ).fetchone()
+                    if library_row:
+                        company_library_id = int(library_row[0])
+                    else:
+                        library_cur = conn.execute(
+                            "INSERT INTO knowledge_libraries(name,description,enabled,created_at,updated_at) "
+                            "VALUES(?,?,?,?,?)",
+                            (
+                                "Company Knowledge",
+                                "Packaged company profile and organization facts.",
+                                1, now, now,
+                            ),
+                        )
+                        company_library_id = int(library_cur.lastrowid)
+                    raw = DEFAULT_COMPANY_INFO_CONTENT.encode("utf-8")
+                    doc_cur = conn.execute(
+                        """
+                        INSERT INTO knowledge_documents(
+                            library_id,title,source_name,source_type,mime_type,storage_key,
+                            size_bytes,sha256,status,error,metadata_json,indexed_at,created_at,updated_at
+                        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        """,
+                        (
+                            company_library_id, DEFAULT_COMPANY_INFO_TITLE,
+                            "sari-teknologi-company-profile.txt", "packaged_default",
+                            "text/plain", None, len(raw),
+                            hashlib.sha256(raw).hexdigest(), "parsed", None,
+                            json.dumps({
+                                "packaged_default": True,
+                                "retrieval_indexed": False,
+                                "vlm_used": False,
+                            }, sort_keys=True),
+                            None, now, now,
+                        ),
                     )
-                    info_id = int(cur.lastrowid)
+                    company_document_id = int(doc_cur.lastrowid)
+                    parent_cur = conn.execute(
+                        """
+                        INSERT INTO knowledge_parent_blocks(
+                            document_id,parent_block_id,block_type,ordinal,heading_path,page_start,page_end,
+                            text,metadata_json,created_at
+                        ) VALUES(?,NULL,'section',0,?,NULL,NULL,?,'{}',?)
+                        """,
+                        (company_document_id, DEFAULT_COMPANY_INFO_TITLE, DEFAULT_COMPANY_INFO_CONTENT, now),
+                    )
+                    parent_id = int(parent_cur.lastrowid)
+                    token_count = max(1, int(len(DEFAULT_COMPANY_INFO_CONTENT.split()) * 1.35 + 0.999))
+                    conn.execute(
+                        """
+                        INSERT INTO knowledge_chunks(
+                            document_id,parent_block_id,ordinal,content_type,text,token_count,page_start,page_end,
+                            metadata_json,lexical_status,vector_status,embedding_model,lexical_indexed_at,
+                            vector_indexed_at,created_at,updated_at
+                        ) VALUES(?,?,0,'text',?,?,NULL,NULL,'{}','ready','pending',NULL,?,NULL,?,?)
+                        """,
+                        (
+                            company_document_id, parent_id,
+                            f"{DEFAULT_COMPANY_INFO_TITLE}\n\n{DEFAULT_COMPANY_INFO_CONTENT}",
+                            token_count, now, now, now,
+                        ),
+                    )
                 agent_rows = conn.execute("SELECT id FROM agents ORDER BY id").fetchall()
                 conn.executemany(
-                    "INSERT OR IGNORE INTO agent_information(agent_id,info_id) VALUES(?,?)",
-                    [(int(row[0]), info_id) for row in agent_rows],
+                    "INSERT OR IGNORE INTO agent_knowledge_libraries"
+                    "(agent_id,library_id,enabled,created_at) VALUES(?,?,1,?)",
+                    [(int(row[0]), company_library_id, now) for row in agent_rows],
                 )
 
                 conn.execute(
@@ -633,7 +680,9 @@ class Database:
     def _decode_agent(self, data: dict[str, Any]) -> dict[str, Any]:
         data["language"] = str(data.get("language") or "en")
         data["tools_enabled"] = json.loads(data.get("tools_enabled") or "[]")
-        data["info_ids"] = self.agent_info_ids(int(data["id"]))
+        # Deprecated mobile compatibility only: the legacy Information tables were
+        # retired in schema v14. Knowledge access is library-based.
+        data["info_ids"] = []
         data["knowledge_library_ids"] = self.knowledge_library_ids_for_agent(int(data["id"]))
         data["kokoro_voice_name"] = voice_name(data.get("kokoro_voice_id"))
         return data
@@ -662,7 +711,9 @@ class Database:
                 (*values, json.dumps(payload.get("tools_enabled", [])), now, now),
             )
             agent_id = int(cur.lastrowid)
-            self._set_agent_info_conn(conn, agent_id, payload.get("info_ids", []))
+            self._set_agent_knowledge_libraries_conn(
+                conn, agent_id, payload.get("knowledge_library_ids", [])
+            )
             conn.execute(
                 "INSERT INTO conversations(agent_id,title,created_at,updated_at) VALUES(?,?,?,?)",
                 (agent_id, "New conversation", now, now),
@@ -685,7 +736,9 @@ class Database:
             )
             if cur.rowcount == 0:
                 return None
-            self._set_agent_info_conn(conn, agent_id, payload.get("info_ids", []))
+            library_ids = payload.get("knowledge_library_ids")
+            if library_ids is not None:
+                self._set_agent_knowledge_libraries_conn(conn, agent_id, library_ids)
         return self.get_agent(agent_id)
 
     def delete_agent(self, agent_id: int) -> bool:
@@ -709,69 +762,31 @@ class Database:
                 )
             return bool(cur.rowcount)
 
-    def agent_info_ids(self, agent_id: int) -> list[int]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                "SELECT info_id FROM agent_information WHERE agent_id=? ORDER BY info_id",
-                (agent_id,),
-            ).fetchall()
-        return [int(row[0]) for row in rows]
-
-    def _set_agent_info_conn(self, conn: sqlite3.Connection, agent_id: int, info_ids: list[int]) -> None:
-        conn.execute("DELETE FROM agent_information WHERE agent_id=?", (agent_id,))
-        conn.executemany(
-            "INSERT OR IGNORE INTO agent_information(agent_id,info_id) VALUES(?,?)",
-            [(agent_id, int(info_id)) for info_id in info_ids],
-        )
-
-    def enabled_information_for_agent(self, agent_id: int) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT i.* FROM information i
-                JOIN agent_information ai ON ai.info_id=i.id
-                WHERE ai.agent_id=? AND i.enabled=1
-                ORDER BY i.id
-                """,
-                (agent_id,),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    # Information
-    def list_information(self) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM information ORDER BY id DESC").fetchall()
-        return [dict(row) for row in rows]
-
-    def get_information(self, info_id: int) -> dict[str, Any] | None:
-        with self.connect() as conn:
-            row = conn.execute("SELECT * FROM information WHERE id=?", (info_id,)).fetchone()
-        return row_dict(row)
-
-    def create_information(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _set_agent_knowledge_libraries_conn(
+        self, conn: sqlite3.Connection, agent_id: int, library_ids: list[int]
+    ) -> None:
+        unique_ids = sorted({int(value) for value in library_ids if int(value) > 0})
+        if unique_ids:
+            placeholders = ",".join("?" for _ in unique_ids)
+            existing = {
+                int(row[0])
+                for row in conn.execute(
+                    f"SELECT id FROM knowledge_libraries WHERE id IN ({placeholders})",
+                    tuple(unique_ids),
+                ).fetchall()
+            }
+            missing = [value for value in unique_ids if value not in existing]
+            if missing:
+                raise ValueError(
+                    "Knowledge library not found: " + ", ".join(str(value) for value in missing)
+                )
+        conn.execute("DELETE FROM agent_knowledge_libraries WHERE agent_id=?", (agent_id,))
         now = utc_now()
-        with self._write_lock, self.connect() as conn:
-            cur = conn.execute(
-                "INSERT INTO information(title,content,enabled,created_at,updated_at) VALUES(?,?,?,?,?)",
-                (payload["title"], payload["content"], int(payload["enabled"]), now, now),
-            )
-            info_id = int(cur.lastrowid)
-        return self.get_information(info_id) or {}
-
-    def update_information(self, info_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
-        with self._write_lock, self.connect() as conn:
-            cur = conn.execute(
-                "UPDATE information SET title=?,content=?,enabled=?,updated_at=? WHERE id=?",
-                (payload["title"], payload["content"], int(payload["enabled"]), utc_now(), info_id),
-            )
-            if not cur.rowcount:
-                return None
-        return self.get_information(info_id)
-
-    def delete_information(self, info_id: int) -> bool:
-        with self._write_lock, self.connect() as conn:
-            cur = conn.execute("DELETE FROM information WHERE id=?", (info_id,))
-        return bool(cur.rowcount)
+        conn.executemany(
+            "INSERT INTO agent_knowledge_libraries(agent_id,library_id,enabled,created_at) "
+            "VALUES(?,?,1,?)",
+            [(agent_id, library_id, now) for library_id in unique_ids],
+        )
 
     # Knowledge Engine foundation
     @staticmethod
@@ -905,6 +920,18 @@ class Database:
             )
             document_id = int(cur.lastrowid)
         return self.get_knowledge_document(document_id) or {}
+
+    def update_knowledge_document_identity(
+        self, document_id: int, *, title: str, source_name: str | None = None
+    ) -> dict[str, Any] | None:
+        with self._write_lock, self.connect() as conn:
+            cur = conn.execute(
+                "UPDATE knowledge_documents SET title=?,source_name=COALESCE(?,source_name),updated_at=? WHERE id=?",
+                (str(title).strip(), source_name, utc_now(), document_id),
+            )
+            if not cur.rowcount:
+                return None
+        return self.get_knowledge_document(document_id)
 
     def update_knowledge_document_status(
         self,

@@ -7,7 +7,7 @@ function renderAgents() {
     return `<article class="card agent-card ${active ? 'active' : ''}" style="--agent-color:${escapeHtml(agent.color)}">
       <div class="agent-card-head"><div class="agent-avatar" style="background:${escapeHtml(agent.color)}">${escapeHtml(agent.avatar || 'VA')}</div><div><h3>${escapeHtml(agent.name)}</h3><p>${escapeHtml(agent.role)}</p></div></div>
       <div class="agent-card-body">${escapeHtml(agent.greeting)}</div>
-      <div class="agent-card-meta"><span class="chip">${agent.language === 'id' ? 'Bahasa Indonesia' : 'English'}</span><span class="chip">${escapeHtml(agent.llm_model)}</span><span class="chip">${escapeHtml(agent.tts_mode)}</span><span class="chip">${escapeHtml(agent.kokoro_voice_name || 'Kokoro voice')}</span><span class="chip">${agent.info_ids?.length || 0} info</span></div>
+      <div class="agent-card-meta"><span class="chip">${agent.language === 'id' ? 'Bahasa Indonesia' : 'English'}</span><span class="chip">${escapeHtml(agent.llm_model)}</span><span class="chip">${escapeHtml(agent.tts_mode)}</span><span class="chip">${escapeHtml(agent.kokoro_voice_name || 'Kokoro voice')}</span><span class="chip">${agent.knowledge_library_ids?.length || 0} libraries</span></div>
       <div class="agent-card-actions">
         ${active ? '<button class="btn success compact" disabled>Active</button>' : `<button class="btn secondary compact" data-activate-agent="${agent.id}">Use agent</button>`}
         <button class="btn ghost compact" data-edit-agent="${agent.id}">Edit</button>
@@ -26,7 +26,9 @@ async function refreshAgentWorkspace() {
     appState.conversation = data.conversation;
     appState.conversations = data.conversations;
     appState.messages = data.messages;
-    appState.information = data.information;
+      appState.knowledgeStatus = data.knowledge?.status || appState.knowledgeStatus;
+    appState.knowledgeLibraries = data.knowledge?.libraries || appState.knowledgeLibraries;
+    appState.knowledgeDocuments = data.knowledge?.documents || appState.knowledgeDocuments;
     appState.plugins = data.plugins || appState.plugins;
     appState.scripts = data.scripts;
     appState.queue = data.queue;
@@ -126,7 +128,7 @@ function agentDefaults() {
     greeting: 'Hello. How can I help you?', llm_model: appState.models.find(model => model.name === 'qwen3.5:0.8b')?.name || appState.models[0]?.name || 'qwen3.5:0.8b',
     temperature: 0.2, top_p: 0.8, max_tokens: 224, context_size: 4096, language: 'en', tts_mode: 'edge_fallback',
     edge_voice: 'en-US-AriaNeural', kokoro_voice_id: 0, tts_rate: 1.0, tts_volume: 1.0,
-    stt_model: 'iic/SenseVoiceSmall', tools_enabled: ['get_current_time','get_location','get_weather','handle_exit_intent'], info_ids: [],
+    stt_model: 'iic/SenseVoiceSmall', tools_enabled: ['get_current_time','get_location','get_weather','handle_exit_intent'], info_ids: [], knowledge_library_ids: [],
   };
 }
 
@@ -139,7 +141,7 @@ function openAgentModal(agentId = null) {
   const form = $('#agentForm');
   for (const [key, value] of Object.entries(agent)) {
     const field = form.elements.namedItem(key);
-    if (field && !['tools_enabled','info_ids'].includes(key)) field.value = value ?? '';
+    if (field && !['tools_enabled','info_ids','knowledge_library_ids'].includes(key)) field.value = value ?? '';
   }
   const modelSelect = form.elements.namedItem('llm_model');
   const modelNames = [...new Set([agent.llm_model, ...appState.models.map(model => model.name || model.model)].filter(Boolean))];
@@ -218,7 +220,32 @@ function openAgentModal(agentId = null) {
   const usablePlugins = reportedPlugins.filter(plugin => plugin.status !== 'load_error');
   const tools = usablePlugins.length ? usablePlugins : fallbackTools;
   $('#toolCheckboxes').innerHTML = tools.map(plugin => `<label class="check-item ${plugin.enabled ? '' : 'tool-globally-disabled'}"><input type="checkbox" name="tool" value="${escapeHtml(plugin.id)}" ${(agent.tools_enabled || []).includes(plugin.id) ? 'checked' : ''} ${plugin.enabled ? '' : 'disabled'}><span><strong>${escapeHtml(plugin.name)}</strong><small>${escapeHtml(plugin.id)}${plugin.enabled ? '' : ' · globally disabled'}</small></span></label>`).join('');
-  $('#agentInfoCheckboxes').innerHTML = appState.information.map(item => `<label class="check-item"><input type="checkbox" name="info" value="${item.id}" ${(agent.info_ids || []).includes(item.id) ? 'checked' : ''}><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.content.slice(0,130))}</small></span></label>`).join('') || '<div class="queue-empty">Create global information entries first.</div>';
+  const knowledgeChoices = appState.knowledgeLibraries || [];
+  let knowledgePage = 0;
+  const knowledgePerPage = 8;
+  const selectedKnowledgeLibraries = new Set((agent.knowledge_library_ids || []).map(Number));
+  const renderKnowledgeChoices = () => {
+    const box = $('#agentKnowledgeCheckboxes');
+    const pager = $('#agentKnowledgePager');
+    if (!box || !pager) return;
+    const start = knowledgePage * knowledgePerPage;
+    const visible = knowledgeChoices.slice(start, start + knowledgePerPage);
+    box.innerHTML = visible.map(item => `<label class="check-item"><input type="checkbox" name="knowledge_library" value="${item.id}" ${selectedKnowledgeLibraries.has(Number(item.id)) ? 'checked' : ''}><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.description || `${item.document_count || 0} documents`)}${item.enabled ? '' : ' · disabled'}</small></span></label>`).join('') || '<div class="queue-empty">No Knowledge Libraries yet.</div>';
+    const pages = Math.max(1, Math.ceil(knowledgeChoices.length / knowledgePerPage));
+    pager.innerHTML = knowledgeChoices.length > knowledgePerPage
+      ? `<button type="button" class="btn ghost compact" id="knowledgePrevPage" ${knowledgePage <= 0 ? 'disabled' : ''}>← Previous</button><button type="button" class="btn ghost compact" id="knowledgeNextPage" ${knowledgePage >= pages - 1 ? 'disabled' : ''}>Next → (${knowledgePage + 1}/${pages})</button>`
+      : '';
+    $$('input[name="knowledge_library"]', box).forEach(input => {
+      input.onchange = () => {
+        const value = Number(input.value);
+        if (input.checked) selectedKnowledgeLibraries.add(value);
+        else selectedKnowledgeLibraries.delete(value);
+      };
+    });
+    const prev = $('#knowledgePrevPage'); if (prev) prev.onclick = () => { knowledgePage -= 1; renderKnowledgeChoices(); };
+    const next = $('#knowledgeNextPage'); if (next) next.onclick = () => { knowledgePage += 1; renderKnowledgeChoices(); };
+  };
+  renderKnowledgeChoices();
   const conversations = agentId ? appState.conversations.filter(() => agent.id === appState.activeAgent?.id) : [];
   $('#agentMemoryStats').innerHTML = agentId ? `<strong>${conversations.length || 'Saved'} conversation workspace</strong><br>Complete history is stored, but VerbaNode only sends a short recent selection and summary when the request explicitly needs prior context.` : 'Save the agent before managing memory.';
   $('#backupAgentBtn').disabled = !agentId;
@@ -257,7 +284,8 @@ function openAgentModal(agentId = null) {
       language: values.language, tts_mode: values.tts_mode, edge_voice: values.edge_voice, kokoro_voice_id: Number(values.kokoro_voice_id),
       tts_rate: Number(values.tts_rate), tts_volume: Number(values.tts_volume), stt_model: values.stt_model,
       tools_enabled: $$('input[name="tool"]:checked', form).map(input => input.value),
-      info_ids: $$('input[name="info"]:checked', form).map(input => Number(input.value)),
+      info_ids: [],
+      knowledge_library_ids: [...selectedKnowledgeLibraries].sort((a, b) => a - b),
     };
     try {
       if (agentId) await api(`/api/agents/${agentId}`, { method: 'PUT', body: JSON.stringify(payload) });

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import math
+import re
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -675,6 +678,240 @@ def _knowledge_hybrid_retrieval_v13(conn: sqlite3.Connection) -> None:
 
 
 
+def _legacy_information_chunk_text(title: str, content: str, max_chars: int = 1800) -> list[str]:
+    """Split one legacy Information record into retrieval-sized text chunks.
+
+    Phase 6 must run inside the SQLite migration transaction, so it cannot
+    depend on optional document-parser/model packages. This deterministic text
+    splitter preserves paragraph boundaries where possible and keeps every
+    chunk independently searchable by prefixing the legacy title.
+    """
+    title = str(title or "Information").strip() or "Information"
+    content = re.sub(r"\r\n?", "\n", str(content or "")).strip()
+    if not content:
+        return [title]
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n+", content) if part.strip()]
+    pieces: list[str] = []
+    current = ""
+
+    def flush() -> None:
+        nonlocal current
+        if current.strip():
+            pieces.append(current.strip())
+        current = ""
+
+    for paragraph in paragraphs or [content]:
+        candidates = [paragraph]
+        if len(paragraph) > max_chars:
+            candidates = [
+                part.strip()
+                for part in re.split(r"(?<=[.!?])\s+", paragraph)
+                if part.strip()
+            ] or [paragraph]
+        for candidate in candidates:
+            while len(candidate) > max_chars:
+                cut = candidate.rfind(" ", 0, max_chars)
+                if cut < max_chars // 2:
+                    cut = max_chars
+                head, candidate = candidate[:cut].strip(), candidate[cut:].strip()
+                if current:
+                    flush()
+                if head:
+                    pieces.append(head)
+            if not candidate:
+                continue
+            combined = f"{current}\n\n{candidate}".strip() if current else candidate
+            if len(combined) > max_chars and current:
+                flush()
+                current = candidate
+            else:
+                current = combined
+    flush()
+    if not pieces:
+        pieces = [content]
+    return [f"{title}\n\n{piece}".strip() for piece in pieces]
+
+
+def _unique_knowledge_library_name(conn: sqlite3.Connection, base: str) -> str:
+    base = re.sub(r"\s+", " ", str(base or "Migrated Information")).strip()[:100]
+    candidate = base
+    suffix = 2
+    while conn.execute(
+        "SELECT 1 FROM knowledge_libraries WHERE lower(name)=lower(?) LIMIT 1",
+        (candidate,),
+    ).fetchone():
+        marker = f" ({suffix})"
+        candidate = base[: max(1, 120 - len(marker))] + marker
+        suffix += 1
+    return candidate
+
+
+def _legacy_information_to_hybrid_rag_v14(conn: sqlite3.Connection) -> None:
+    """Migrate and retire the pre-RAG Information data model.
+
+    Access is preserved exactly at the granularity the new schema supports:
+    legacy rows sharing the same enabled flag and agent-assignment set become a
+    library together. This avoids granting an agent access to legacy content it
+    did not previously own while also avoiding one library per record.
+    """
+    tables = {
+        str(row[0])
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    now = _utc_now()
+    migrated_count = 0
+    library_count = 0
+
+    if "information" in tables:
+        info_rows = conn.execute(
+            "SELECT id,title,content,enabled,created_at,updated_at FROM information ORDER BY id"
+        ).fetchall()
+        agents = conn.execute("SELECT id,name,language FROM agents ORDER BY id").fetchall()
+        all_agent_ids = tuple(int(row[0]) for row in agents)
+        agent_names = {
+            int(row[0]): f"{str(row[1] or f'Agent {row[0]}')} [{str(row[2] or 'unknown').upper()}]"
+            for row in agents
+        }
+        assignments: dict[int, tuple[int, ...]] = {}
+        if "agent_information" in tables:
+            for info_id, agent_id in conn.execute(
+                "SELECT info_id,agent_id FROM agent_information ORDER BY info_id,agent_id"
+            ).fetchall():
+                assignments.setdefault(int(info_id), tuple())
+                assignments[int(info_id)] = tuple(
+                    sorted({*assignments[int(info_id)], int(agent_id)})
+                )
+
+        grouped: dict[tuple[int, tuple[int, ...]], list[sqlite3.Row | tuple]] = {}
+        for row in info_rows:
+            info_id = int(row[0])
+            enabled = 1 if bool(row[3]) else 0
+            agent_ids = assignments.get(info_id, tuple())
+            grouped.setdefault((enabled, agent_ids), []).append(row)
+
+        for (enabled, agent_ids), rows in grouped.items():
+            if not agent_ids:
+                scope = "Unassigned"
+            elif all_agent_ids and tuple(agent_ids) == all_agent_ids:
+                scope = "All Agents"
+            else:
+                names = [agent_names.get(value, f"Agent {value}") for value in agent_ids]
+                scope = ", ".join(names[:3])
+                if len(names) > 3:
+                    scope += f" +{len(names) - 3}"
+            disabled_suffix = " — Disabled" if not enabled else ""
+            name = _unique_knowledge_library_name(
+                conn, f"Migrated Information — {scope}{disabled_suffix}"
+            )
+            description = (
+                "Automatically converted from the retired VerbaNode Information system "
+                "during Hybrid RAG Phase 6. Agent access and enabled state were preserved."
+            )
+            cur = conn.execute(
+                "INSERT INTO knowledge_libraries(name,description,enabled,created_at,updated_at) "
+                "VALUES(?,?,?,?,?)",
+                (name, description, enabled, now, now),
+            )
+            library_id = int(cur.lastrowid)
+            library_count += 1
+
+            for agent_id in agent_ids:
+                conn.execute(
+                    "INSERT OR IGNORE INTO agent_knowledge_libraries"
+                    "(agent_id,library_id,enabled,created_at) VALUES(?,?,1,?)",
+                    (agent_id, library_id, now),
+                )
+
+            for row in rows:
+                info_id = int(row[0])
+                title = str(row[1] or f"Legacy Information {info_id}").strip()
+                content = str(row[2] or "").strip()
+                created_at = str(row[4] or now)
+                updated_at = str(row[5] or created_at)
+                raw = content.encode("utf-8")
+                metadata = {
+                    "migration": "legacy_information_v14",
+                    "legacy_information_id": info_id,
+                    "legacy_enabled": bool(enabled),
+                    "legacy_agent_ids": list(agent_ids),
+                    "migrated_at": now,
+                    "retrieval_indexed": False,
+                    "vlm_used": False,
+                }
+                doc_cur = conn.execute(
+                    """
+                    INSERT INTO knowledge_documents(
+                        library_id,title,source_name,source_type,mime_type,storage_key,
+                        size_bytes,sha256,status,error,metadata_json,indexed_at,created_at,updated_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        library_id, title, f"legacy-information-{info_id}.txt",
+                        "legacy_information", "text/plain", None, len(raw),
+                        hashlib.sha256(raw).hexdigest(), "parsed", None,
+                        json.dumps(metadata, ensure_ascii=False, sort_keys=True), None,
+                        created_at, updated_at,
+                    ),
+                )
+                document_id = int(doc_cur.lastrowid)
+                block_cur = conn.execute(
+                    """
+                    INSERT INTO knowledge_parent_blocks(
+                        document_id,parent_block_id,block_type,ordinal,heading_path,page_start,page_end,
+                        text,metadata_json,created_at
+                    ) VALUES(?,NULL,'legacy_information',0,?,NULL,NULL,?,?,?)
+                    """,
+                    (
+                        document_id, title, content,
+                        json.dumps({"legacy_information_id": info_id}, sort_keys=True), created_at,
+                    ),
+                )
+                parent_id = int(block_cur.lastrowid)
+                for ordinal, chunk_text in enumerate(_legacy_information_chunk_text(title, content)):
+                    token_count = max(1, int(math.ceil(len(chunk_text.split()) * 1.35)))
+                    conn.execute(
+                        """
+                        INSERT INTO knowledge_chunks(
+                            document_id,parent_block_id,ordinal,content_type,text,token_count,
+                            page_start,page_end,metadata_json,lexical_status,vector_status,
+                            embedding_model,lexical_indexed_at,vector_indexed_at,created_at,updated_at
+                        ) VALUES(?,?,?,'text',?,?,NULL,NULL,?,'ready','pending',NULL,?,NULL,?,?)
+                        """,
+                        (
+                            document_id, parent_id, ordinal, chunk_text, token_count,
+                            json.dumps({"legacy_information_id": info_id}, sort_keys=True),
+                            now, created_at, updated_at,
+                        ),
+                    )
+                migrated_count += 1
+
+        if "agent_information" in tables:
+            conn.execute("DROP TABLE agent_information")
+        conn.execute("DROP TABLE information")
+
+    conn.execute(
+        "INSERT INTO settings(key,value,updated_at) VALUES('legacy_information_retired','true',?) "
+        "ON CONFLICT(key) DO UPDATE SET value='true',updated_at=excluded.updated_at",
+        (now,),
+    )
+    conn.execute(
+        "INSERT INTO settings(key,value,updated_at) VALUES('legacy_information_migrated_count',?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+        (str(migrated_count), now),
+    )
+    conn.execute(
+        "INSERT INTO settings(key,value,updated_at) VALUES('legacy_information_migrated_libraries',?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+        (str(library_count), now),
+    )
+    conn.execute(
+        "INSERT INTO settings(key,value,updated_at) VALUES('legacy_information_migrated_at',?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",
+        (now, now),
+    )
+
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "numbered_migration_foundation", _foundation_v1),
     Migration(2, "persistent_action_ledger", _persistent_action_ledger_v2),
@@ -689,6 +926,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(11, "knowledge_engine_foundation", _knowledge_engine_foundation_v11),
     Migration(12, "knowledge_document_assets", _knowledge_document_assets_v12),
     Migration(13, "knowledge_hybrid_retrieval", _knowledge_hybrid_retrieval_v13),
+    Migration(14, "legacy_information_to_hybrid_rag", _legacy_information_to_hybrid_rag_v14),
 )
 CURRENT_SCHEMA_VERSION = MIGRATIONS[-1].version if MIGRATIONS else 0
 

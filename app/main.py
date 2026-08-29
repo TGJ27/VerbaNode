@@ -71,6 +71,16 @@ app.include_router(tts_router)
 app.include_router(type_to_talk_router)
 
 
+async def _finalize_knowledge_index_background() -> None:
+    try:
+        result = await asyncio.to_thread(state.knowledge.finalize_phase6_static_index)
+        LOGGER.info("Knowledge background migration index status: %s", result.get("status"))
+        await state.events.broadcast("knowledge_changed", {"kind": "background_index_complete", "result": result})
+    except Exception as exc:
+        LOGGER.error("Knowledge background migration indexing failed: %s", exc)
+        await state.events.broadcast("knowledge_changed", {"kind": "background_index_failed", "error": str(exc)})
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
     install_asyncio_exception_filter()
@@ -93,6 +103,9 @@ async def startup_event() -> None:
         # Text chat, Edge TTS, tools, memory, and the management UI remain
         # available even when local model isolation cannot start.
         LOGGER.error("AI Engine initialization failed: %s", exc)
+    # BM25/FTS is already usable when schema migration completes. Dense E5/HNSW
+    # work must never hold the launcher in Starting; run it after FastAPI startup.
+    app.state.knowledge_index_task = asyncio.create_task(_finalize_knowledge_index_background())
 
 
 @app.middleware("http")
@@ -107,6 +120,9 @@ async def disable_ui_caching(request: Request, call_next):
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
+    task = getattr(app.state, "knowledge_index_task", None)
+    if task is not None and not task.done():
+        task.cancel()
     await asyncio.to_thread(state.discovery.stop)
     state.diagnostics.shutdown()
     await state.conversation.stop_conversation(stop_tts=True)

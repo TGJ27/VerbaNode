@@ -10,6 +10,8 @@ from typing import Any
 
 from app.db import Database
 from app.knowledge.ingestion import (
+    ExtractedBlock,
+    ExtractionResult,
     KnowledgeIngestionError,
     normalize_result,
     ocr_available,
@@ -45,14 +47,14 @@ def _utc_now() -> str:
 class KnowledgeEngine:
     """Local-first Knowledge Engine service boundary.
 
-    v0.11.0 / Phase 5 connects the intelligent hybrid retrieval pipeline to
-    Chat, typed PTT, browser PTT, and continuous Voice through the shared
-    ConversationManager. Legacy Information records are retained only for the
-    Phase-6 migration and are no longer injected into prompts.
+    v0.11.1 / Phase 6 retired the legacy Information data model after schema
+    migration v14 converted its rows to regular Knowledge documents. v0.12.0 /
+    Phase 7 adds full management and non-blocking background dense indexing.
+    Chat, typed PTT, browser PTT, and continuous Voice share the Hybrid RAG path.
     """
 
-    FOUNDATION_VERSION = 5
-    IMPLEMENTATION_PHASE = "chat_voice_cutover"
+    FOUNDATION_VERSION = 7
+    IMPLEMENTATION_PHASE = "legacy_information_migrated"
 
     def __init__(
         self,
@@ -103,6 +105,8 @@ class KnowledgeEngine:
             "retrieval_enabled": True,
             "retrieval_chat_enabled": True,
             "legacy_information_injection_active": False,
+            "legacy_information_retired": True,
+            "legacy_information_migration": self.legacy_migration_status(),
             "counts": self.db.knowledge_counts(),
             "retrieval": retrieval,
             "supported_formats": supported_formats(),
@@ -135,7 +139,103 @@ class KnowledgeEngine:
                 "deduplication": True,
                 "hierarchical_context": True,
                 "chat_integration": True,
+                "legacy_information_migrated": True,
+                "legacy_information_retired": True,
+                "management_ui": True,
+                "text_document_editing": True,
+                "background_dense_indexing": True,
             },
+        }
+
+    def legacy_migration_status(self) -> dict[str, Any]:
+        def as_int(key: str) -> int:
+            try:
+                return int(self.db.get_setting(key, "0") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        return {
+            "retired": str(self.db.get_setting("legacy_information_retired", "false") or "false").lower() == "true",
+            "migrated_documents": as_int("legacy_information_migrated_count"),
+            "migrated_libraries": as_int("legacy_information_migrated_libraries"),
+            "migrated_at": self.db.get_setting("legacy_information_migrated_at"),
+            "index_status": self.db.get_setting("phase6_static_index_status", "pending"),
+            "index_error": self.db.get_setting("phase6_static_index_error"),
+            "index_total": as_int("phase6_static_index_total"),
+            "index_completed": as_int("phase6_static_index_completed"),
+            "index_current_library": as_int("phase6_static_index_current_library"),
+        }
+
+    def finalize_phase6_static_index(self, *, force: bool = False) -> dict[str, Any]:
+        """Index migration/default text after the DB transaction has completed.
+
+        Lexical FTS rows are already live through schema-v13 triggers, so an
+        embedding/model failure cannot make migrated knowledge unusable. This
+        startup pass adds dense vectors where available and records whether the
+        result is full or partial.
+        """
+        previous = str(self.db.get_setting("phase6_static_index_status", "pending") or "pending")
+        if not force and previous in {"ready", "partial", "empty"}:
+            return {"status": previous, "skipped": True}
+        documents = [
+            item
+            for item in self.db.list_knowledge_documents()
+            if str(item.get("source_type") or "") in {"legacy_information", "packaged_default"}
+        ]
+        if not documents:
+            self.db.set_setting("phase6_static_index_status", "empty")
+            self.db.set_setting("phase6_static_index_error", "")
+            return {"status": "empty", "libraries": [], "documents": 0}
+
+        library_ids = sorted({int(item["library_id"]) for item in documents})
+        self.db.set_setting("phase6_static_index_status", "indexing")
+        self.db.set_setting("phase6_static_index_error", "")
+        self.db.set_setting("phase6_static_index_total", str(len(library_ids)))
+        self.db.set_setting("phase6_static_index_completed", "0")
+        self.db.set_setting("phase6_static_index_current_library", "")
+        results: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for position, library_id in enumerate(library_ids, start=1):
+            self.db.set_setting("phase6_static_index_current_library", str(library_id))
+            try:
+                result = self.retrieval.rebuild_library(library_id)
+            except Exception as exc:
+                result = {
+                    "library_id": library_id,
+                    "ready": False,
+                    "vector_error": str(exc).strip() or exc.__class__.__name__,
+                }
+            results.append(result)
+            if result.get("vector_error"):
+                errors.append(f"library {library_id}: {result['vector_error']}")
+            self.db.set_setting("phase6_static_index_completed", str(position))
+
+        status = "ready" if not errors else "partial"
+        error = "; ".join(errors)[:4000]
+        self.db.set_setting("phase6_static_index_status", status)
+        self.db.set_setting("phase6_static_index_error", error)
+        self.db.set_setting("phase6_static_index_current_library", "")
+        now = _utc_now()
+        for document in documents:
+            doc_id = int(document["id"])
+            metadata = dict(document.get("metadata") or {})
+            metadata.update(
+                {
+                    "phase6_index_attempted": True,
+                    "retrieval_indexed": status == "ready",
+                    "retrieval_error": error or None,
+                }
+            )
+            self.db.update_knowledge_document_metadata(doc_id, metadata)
+            if status == "ready":
+                self.db.update_knowledge_document_status(
+                    doc_id, status="parsed", error=None, indexed_at=now
+                )
+        return {
+            "status": status,
+            "libraries": results,
+            "documents": len(documents),
+            "error": error or None,
         }
 
     def list_libraries(self) -> list[dict[str, Any]]:
@@ -251,6 +351,77 @@ class KnowledgeEngine:
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
             raise
+
+    def create_text_document(self, library_id: int, *, title: str, text: str) -> dict[str, Any]:
+        self.get_library(library_id)
+        title = str(title).strip()[:240]
+        text = str(text).strip()
+        if not title or not text:
+            raise KnowledgeEngineValidation("Knowledge title and text cannot be blank")
+        document = self.register_document(
+            {
+                "library_id": library_id,
+                "title": title,
+                "source_name": f"{safe_filename(title)}.txt",
+                "source_type": "manual_text",
+                "mime_type": "text/plain",
+                "storage_key": None,
+                "size_bytes": len(text.encode("utf-8")),
+                "status": "parsed",
+                "metadata": {"phase": 7, "editable_text": True, "vlm_used": False},
+            }
+        )
+        return self._replace_text_document(int(document["id"]), title=title, text=text)
+
+    def update_text_document(self, document_id: int, *, title: str, text: str) -> dict[str, Any]:
+        document = self.get_document(document_id)
+        if str(document.get("source_type") or "") not in {"manual_text", "legacy_information", "packaged_default"}:
+            raise KnowledgeEngineValidation("Uploaded files cannot be edited as plain text; replace or reingest the source file instead")
+        return self._replace_text_document(document_id, title=title, text=text)
+
+    def _replace_text_document(self, document_id: int, *, title: str, text: str) -> dict[str, Any]:
+        title = str(title).strip()[:240]
+        text = str(text).strip()
+        if not title or not text:
+            raise KnowledgeEngineValidation("Knowledge title and text cannot be blank")
+        document = self.get_document(document_id)
+        old_chunk_ids = self.db.knowledge_chunk_ids(document_id)
+        if old_chunk_ids:
+            self.retrieval.remove_chunks(int(document["library_id"]), old_chunk_ids)
+        result = ExtractionResult(
+            blocks=[ExtractedBlock("document", text, heading_path=title, content_type="text")],
+            metadata={"editable_text": True},
+        )
+        blocks = normalize_result(result)
+        counts = self.db.replace_knowledge_document_content(document_id, blocks, [])
+        self.db.update_knowledge_document_identity(
+            document_id, title=title, source_name=f"{safe_filename(title)}.txt"
+        )
+        chunk_ids = self.db.knowledge_chunk_ids(document_id)
+        if chunk_ids:
+            # FTS5 external-content triggers already indexed the text transactionally.
+            # Mark lexical search ready immediately and leave dense vectors for the
+            # background reindex task so model loading can never block the UI.
+            self.db.mark_knowledge_chunks_lexical(chunk_ids, status="ready", indexed_at=_utc_now())
+        metadata = dict(document.get("metadata") or {})
+        metadata.update({
+            "phase": 7,
+            "editable_text": True,
+            "parent_block_count": counts["parent_blocks"],
+            "chunk_count": counts["chunks"],
+            "retrieval_indexed": False,
+            "retrieval_error": None,
+            "embedding_model": self.retrieval.model_name,
+            "vlm_used": False,
+        })
+        self.db.update_knowledge_document_metadata(document_id, metadata)
+        return self.db.update_knowledge_document_status(
+            document_id, status="parsed", error=None, indexed_at=None
+        ) or self.get_document(document_id)
+
+    def document_source_path(self, document_id: int) -> Path:
+        document = self.get_document(document_id)
+        return self._resolve_storage_key(document.get("storage_key"))
 
     def _resolve_storage_key(self, storage_key: str | None) -> Path:
         if not storage_key:

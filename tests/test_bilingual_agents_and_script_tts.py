@@ -253,7 +253,7 @@ def test_deleting_inactive_agent_does_not_change_active_agent(tmp_path: Path) ->
     assert int(db.get_setting("active_agent_id", "0")) == indonesian["id"]
 
 
-def test_packaged_default_scripts_and_company_information(tmp_path: Path) -> None:
+def test_packaged_default_scripts_and_company_knowledge(tmp_path: Path) -> None:
     db = Database(Settings(db_path=tmp_path / "packaged-defaults.db", open_browser=False))
     db.initialize()
 
@@ -267,24 +267,28 @@ def test_packaged_default_scripts_and_company_information(tmp_path: Path) -> Non
     assert indonesian["tts_mode"] == "edge"
     assert indonesian["edge_voice"] == "id-ID-GadisNeural"
 
-    info = next(item for item in db.list_information() if item["title"] == "Sari Teknologi Company Profile")
-    assert info["enabled"] == 1
-    assert "more than 15 years of experience" in info["content"]
-    assert "Industry 4.0" in info["content"]
+    document = next(item for item in db.list_knowledge_documents() if item["title"] == "Sari Teknologi Company Profile")
+    chunks = db.list_knowledge_chunks(document["id"])
+    assert document["source_type"] == "packaged_default"
+    assert "more than 15 years of experience" in chunks[0]["text"]
+    assert "Industry 4.0" in chunks[0]["text"]
     for agent in db.list_agents():
-        assert info["id"] in agent["info_ids"]
+        assert document["library_id"] in agent["knowledge_library_ids"]
 
 
-def test_packaged_default_seed_is_idempotent_and_preserves_existing_information(tmp_path: Path) -> None:
+def test_packaged_default_seed_is_idempotent_and_preserves_existing_knowledge(tmp_path: Path) -> None:
     db = Database(Settings(db_path=tmp_path / "idempotent-defaults.db", open_browser=False))
     db.initialize()
-    info = next(item for item in db.list_information() if item["title"] == "Sari Teknologi Company Profile")
-    db.update_information(info["id"], {"title": info["title"], "content": "Operator customized text", "enabled": True})
+    document = next(item for item in db.list_knowledge_documents() if item["title"] == "Sari Teknologi Company Profile")
+    with db.connect() as conn:
+        conn.execute("UPDATE knowledge_chunks SET text='Operator customized text' WHERE document_id=?", (document["id"],))
+        conn.execute("UPDATE knowledge_parent_blocks SET text='Operator customized text' WHERE document_id=?", (document["id"],))
     before_scripts = len(db.list_scripts())
+    before_docs = len(db.list_knowledge_documents())
 
     db.initialize()
 
     assert len(db.list_scripts()) == before_scripts
-    updated = db.get_information(info["id"])
-    assert updated is not None
-    assert updated["content"] == "Operator customized text"
+    assert len(db.list_knowledge_documents()) == before_docs
+    updated_chunks = db.list_knowledge_chunks(document["id"])
+    assert updated_chunks[0]["text"] == "Operator customized text"

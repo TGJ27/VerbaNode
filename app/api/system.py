@@ -116,7 +116,12 @@ async def bootstrap(token: Token) -> dict[str, Any]:
         "conversation": conversation,
         "conversations": state.db.list_conversations(int(agent["id"])),
         "messages": state.db.list_messages(int(conversation["id"])),
-        "information": state.db.list_information(),
+        "information": [],  # retired compatibility field for older mobile clients
+        "knowledge": {
+            "status": state.knowledge.status(),
+            "libraries": state.knowledge.list_libraries(),
+            "documents": state.knowledge.list_documents(),
+        },
         "scripts": state.db.list_scripts(),
         "queue": state.db.list_queue(),
         "queue_state": state.script_queue.state,

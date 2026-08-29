@@ -27,17 +27,20 @@ def test_seed_and_agent_isolation(tmp_path: Path) -> None:
     assert indonesian["stt_model"] == "Whisper-base"
     assert indonesian["edge_voice"] == "id-ID-GadisNeural"
 
-    info = db.create_information({"title": "Company", "content": "We build robots.", "enabled": True})
+    company = db.create_knowledge_library({"name": "Company", "description": "", "enabled": True})
     payload = dict(english)
-    for key in ("id", "created_at", "updated_at"):
+    for key in ("id", "created_at", "updated_at", "kokoro_voice_name"):
         payload.pop(key, None)
     payload["name"] = "Receptionist"
-    payload["info_ids"] = [info["id"]]
+    payload["knowledge_library_ids"] = [company["id"]]
     created = db.create_agent(payload)
-    assert created["info_ids"] == [info["id"]]
-    assert any(item["id"] == info["id"] for item in db.enabled_information_for_agent(created["id"]))
-    default_english_info = db.enabled_information_for_agent(english["id"])
-    assert any(item["title"] == "Sari Teknologi Company Profile" for item in default_english_info)
+    assert created["info_ids"] == []
+    assert created["knowledge_library_ids"] == [company["id"]]
+    default_company = next(
+        item for item in db.list_knowledge_documents()
+        if item["title"] == "Sari Teknologi Company Profile"
+    )
+    assert default_company["library_id"] in english["knowledge_library_ids"]
 
 
 def test_script_queue_order(tmp_path: Path) -> None:

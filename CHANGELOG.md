@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.12.0 - Knowledge management and production hardening (Hybrid RAG Phase 7)
+
+- Moved Phase-6 dense E5/HNSW finalization out of the FastAPI startup critical path so Core can become healthy/ready immediately after normal service initialization; BM25 remains usable while dense indexing runs in the background.
+- Added persistent dense-index progress reporting (`index_total`, `index_completed`, and current library) and Knowledge change broadcasts when background finalization completes or fails.
+- Added full Web Knowledge management: library CRUD, migrated/manual document list, text create/edit, file upload, delete/reindex, source/chunk inspection, retrieval testing, index rebuild, and fixed-view pagination without adding dashboard scrollbars.
+- Added manual-text document APIs and original-source download support while keeping parsing/OCR/indexing authoritative in Core.
+- Made manual text immediately BM25-searchable and queued dense indexing in the background rather than synchronously loading the embedding model on save.
+- Added Phase-7 client capability flags for Knowledge management, text documents, and background indexing.
+- Added Android v0.4.0 compatibility contract and management APIs for the same Knowledge Libraries/documents used by Web.
+- Kept schema v14 and Hybrid RAG retrieval semantics unchanged; no VLM is introduced.
+- Added Phase-7 regression coverage for startup non-blocking behavior, manual-text lexical readiness, management APIs, fixed Web layout, and feature negotiation.
+
+## v0.11.1 - Legacy Information migration and retirement (Hybrid RAG Phase 6)
+
+- Added schema v14 to convert every legacy Information row into Hybrid RAG Knowledge documents and permanently retire the old `information` / `agent_information` tables.
+- Preserved legacy access by grouping migrated rows only by exact agent-assignment set plus enabled state; disabled and unassigned content retain those semantics.
+- Made migrated text immediately BM25-searchable inside the migration and added post-migration dense-index finalization through the existing multilingual E5/HNSW pipeline.
+- Changed fresh-install company knowledge seeding to create a real Knowledge Library/document/chunk instead of legacy Information rows.
+- Removed legacy Information CRUD from the database layer and removed the Legacy Information management UI from the Web dashboard.
+- Added a bounded Knowledge overview and paginated per-agent Knowledge Library assignment controls without introducing dashboard/sidebar scrolling.
+- Kept `/api/information` only as an old-client compatibility shim: reads return an empty list and writes return HTTP 410.
+- Added old-client agent-update protection so Android v0.3.6 payloads that omit `knowledge_library_ids` preserve existing migrated RAG permissions instead of clearing them.
+- Added migration regression tests covering exact agent access, disabled/unassigned entries, immediate BM25 retrieval, fresh-install retirement, and Web UI retirement.
+- Advanced Knowledge Engine phase reporting to `legacy_information_migrated`; Chat/Voice Hybrid RAG from Phase 5 remains active.
+
 ## v0.11.0 - Knowledge Chat/Voice cutover (Hybrid RAG Phase 5)
 
 - Connected the Phase-4 hybrid retrieval/context builder to the shared conversation path used by Web Chat, typed input, browser PTT, and continuous Voice.

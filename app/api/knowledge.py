@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 
 from app.api.deps import Token
 from app.knowledge import (
@@ -18,6 +19,8 @@ from app.schemas import (
     KnowledgeLibraryCreate,
     KnowledgeLibraryUpdate,
     KnowledgeSearchRequest,
+    KnowledgeTextDocumentCreate,
+    KnowledgeTextDocumentUpdate,
 )
 from app.state import state
 
@@ -56,6 +59,20 @@ async def _run_ingestion(document_id: int, job_id: int) -> None:
             "job_id": job_id,
         },
     )
+
+
+async def _run_document_reindex(document_id: int) -> None:
+    try:
+        result = await asyncio.to_thread(state.knowledge.retrieval.index_document, document_id)
+        await state.events.broadcast(
+            "knowledge_changed",
+            {"kind": "document_reindexed", "document_id": document_id, "result": result},
+        )
+    except Exception as exc:
+        await state.events.broadcast(
+            "knowledge_changed",
+            {"kind": "document_reindex_failed", "document_id": document_id, "error": str(exc)},
+        )
 
 
 async def _run_index_rebuild(library_id: int | None) -> None:
@@ -251,6 +268,46 @@ async def upload_document(
     return {"document": document, "job": job}
 
 
+@router.post("/libraries/{library_id}/text-documents")
+async def create_text_document(
+    library_id: int, payload: KnowledgeTextDocumentCreate, background_tasks: BackgroundTasks, token: Token
+) -> dict[str, Any]:
+    try:
+        item = await asyncio.to_thread(
+            state.knowledge.create_text_document, library_id, title=payload.title, text=payload.text
+        )
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        raise _translate_error(exc) from exc
+    background_tasks.add_task(_run_document_reindex, int(item["id"]))
+    await state.events.broadcast("knowledge_changed", {"kind": "text_document_created", "document": item})
+    return item
+
+
+@router.put("/documents/{document_id}/text")
+async def update_text_document(
+    document_id: int, payload: KnowledgeTextDocumentUpdate, background_tasks: BackgroundTasks, token: Token
+) -> dict[str, Any]:
+    try:
+        item = await asyncio.to_thread(
+            state.knowledge.update_text_document, document_id, title=payload.title, text=payload.text
+        )
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        raise _translate_error(exc) from exc
+    background_tasks.add_task(_run_document_reindex, int(item["id"]))
+    await state.events.broadcast("knowledge_changed", {"kind": "text_document_updated", "document": item})
+    return item
+
+
+@router.get("/documents/{document_id}/source")
+async def download_document_source(document_id: int, token: Token):
+    try:
+        document = state.knowledge.get_document(document_id)
+        path = state.knowledge.document_source_path(document_id)
+    except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
+        raise _translate_error(exc) from exc
+    return FileResponse(path, filename=str(document.get("source_name") or path.name), media_type=document.get("mime_type"))
+
+
 @router.get("/documents/{document_id}")
 async def get_document(document_id: int, token: Token) -> dict[str, Any]:
     try:
@@ -308,24 +365,7 @@ async def reindex_document_retrieval(
     except (KnowledgeEngineNotFound, KnowledgeEngineConflict, KnowledgeEngineValidation) as exc:
         raise _translate_error(exc) from exc
 
-    async def run_document_index() -> None:
-        try:
-            result = await asyncio.to_thread(state.knowledge.retrieval.index_document, document_id)
-            await state.events.broadcast(
-                "knowledge_changed",
-                {"kind": "document_reindexed", "document_id": document_id, "result": result},
-            )
-        except Exception as exc:
-            await state.events.broadcast(
-                "knowledge_changed",
-                {
-                    "kind": "document_reindex_failed",
-                    "document_id": document_id,
-                    "error": str(exc),
-                },
-            )
-
-    background_tasks.add_task(run_document_index)
+    background_tasks.add_task(_run_document_reindex, document_id)
     return {"accepted": True, "document_id": document_id, "library_id": document["library_id"]}
 
 

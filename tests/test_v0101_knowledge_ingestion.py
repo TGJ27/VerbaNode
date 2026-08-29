@@ -41,10 +41,10 @@ def _stage_and_ingest(engine: KnowledgeEngine, library_id: int, source: Path):
 
 def test_phase2_schema_and_status(tmp_path: Path) -> None:
     db, engine, _library = _build(tmp_path)
-    assert CURRENT_SCHEMA_VERSION == 13
-    assert db.schema_version() == 13
+    assert CURRENT_SCHEMA_VERSION >= 14
+    assert db.schema_version() == CURRENT_SCHEMA_VERSION
     status = engine.status()
-    assert status["phase"] == "chat_voice_cutover"
+    assert status["phase"] == "legacy_information_migrated"
     assert status["ingestion_enabled"] is True
     assert status["retrieval_enabled"] is True
     assert status["capabilities"]["tables"] is True

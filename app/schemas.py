@@ -50,7 +50,10 @@ class AgentCreate(BaseModel):
             "handle_exit_intent",
         ]
     )
+    # info_ids is accepted only for older mobile clients; Core ignores it after
+    # schema v14. All factual access is controlled by Knowledge Libraries.
     info_ids: list[int] = Field(default_factory=list)
+    knowledge_library_ids: list[int] = Field(default_factory=list, max_length=500)
 
     @model_validator(mode="after")
     def apply_language_profile(self) -> "AgentCreate":
@@ -130,6 +133,23 @@ class KnowledgeSearchRequest(BaseModel):
 
 class KnowledgeIndexRebuildRequest(BaseModel):
     library_id: int | None = Field(default=None, ge=1)
+
+
+class KnowledgeTextDocumentCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=240)
+    text: str = Field(min_length=1, max_length=500000)
+
+    @model_validator(mode="after")
+    def normalize_text_document(self) -> "KnowledgeTextDocumentCreate":
+        self.title = self.title.strip()
+        self.text = self.text.strip()
+        if not self.title or not self.text:
+            raise ValueError("Knowledge title and text cannot be blank")
+        return self
+
+
+class KnowledgeTextDocumentUpdate(KnowledgeTextDocumentCreate):
+    pass
 
 
 class ScriptCreate(BaseModel):

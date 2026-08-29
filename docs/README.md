@@ -22,6 +22,7 @@ Documentation is grouped by subject instead of release implementation order.
 - `features/BILINGUAL_AGENTS_AND_SCRIPT_TTS.md`
 - `features/SELECTIVE_MEMORY.md`
 - `features/PHASE3_DIAGNOSTICS.md`
+- `features/KNOWLEDGE_ENGINE_LEGACY_MIGRATION_V0111.md`
 
 ## Windows packaging
 
