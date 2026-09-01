@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.12.1 - Windows audio playback recovery
+
+- Added a last-resort in-process HostAudioPlayer fallback when isolated Audio Engine playback remains unavailable after the normal restart/device-recovery path.
+- Added session-only fallback to the Windows system-default output when a previously saved output endpoint still enumerates but cannot be opened; explicit output-device tests remain strict and never silently switch devices.
+- Added fallback state/reason fields to player health so Diagnostics can show when recovery is active.
+- TTS now records playback-layer errors in `last_error` after successful synthesis, improving diagnosis when every audio-producing feature shares a speaker failure.
+- Added regression coverage for stale saved-output fallback and strict explicit-device testing.
+- Database schema remains v14; no migration is required.
+
 ## v0.12.0 - Knowledge management and production hardening (Hybrid RAG Phase 7)
 
 - Moved Phase-6 dense E5/HNSW finalization out of the FastAPI startup critical path so Core can become healthy/ready immediately after normal service initialization; BM25 remains usable while dense indexing runs in the background.

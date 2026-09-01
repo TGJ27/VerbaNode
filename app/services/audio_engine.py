@@ -1161,6 +1161,14 @@ class AudioPlayerProxy:
         self.engine.configure_output(
             output_device, fingerprint=output_fingerprint, locked=False
         )
+        # Playback normally lives in the isolated Audio Engine. Keep a dormant
+        # in-process player as a last-resort output path for Windows systems where
+        # the child process or a stale saved PortAudio endpoint cannot open. This
+        # fallback is activated only after isolated-engine recovery is exhausted.
+        self._fallback_player = HostAudioPlayer(output_device)
+        self._using_local_fallback = False
+        self._session_default_fallback = False
+        self._last_fallback_reason: str | None = None
 
     @property
     def configured_output_device(self) -> int | None:
@@ -1172,17 +1180,21 @@ class AudioPlayerProxy:
 
     @property
     def output_locked(self) -> bool:
+        if self._using_local_fallback:
+            return self._fallback_player.output_locked
         try:
             return bool(self.engine.call("player.output_locked", timeout=2.0, ensure_started=False))
         except Exception:
-            return False
+            return self._fallback_player.output_locked
 
     @property
     def is_playing(self) -> bool:
+        if self._using_local_fallback:
+            return self._fallback_player.is_playing
         try:
             return bool(self.engine.call("player.is_playing", timeout=2.0, ensure_started=False))
         except Exception:
-            return False
+            return self._fallback_player.is_playing
 
     def health(self) -> dict:
         try:
@@ -1190,9 +1202,19 @@ class AudioPlayerProxy:
         except Exception as exc:
             result = {"output_locked": False, "playing": False, "error": str(exc)}
         result["engine_alive"] = self.engine.process_alive
+        result["local_fallback_active"] = self._using_local_fallback
+        result["system_default_fallback"] = self._session_default_fallback
+        result["fallback_reason"] = self._last_fallback_reason
+        if self._using_local_fallback:
+            result["local_fallback"] = self._fallback_player.health()
         return result
 
     def set_output_device(self, output_device: int | None) -> None:
+        # An explicit user selection ends any session-only automatic fallback.
+        self._session_default_fallback = False
+        self._using_local_fallback = False
+        self._last_fallback_reason = None
+        self._fallback_player.set_output_device(output_device)
         self.engine.configure_output(output_device)
         self.engine.call("player.set_output_device", output_device, timeout=8.0)
 
@@ -1213,10 +1235,60 @@ class AudioPlayerProxy:
             self.engine.call("player.stop", timeout=3.0, ensure_started=False)
         except Exception:
             pass
+        try:
+            self._fallback_player.stop()
+        except Exception:
+            pass
 
     def request_refresh(self) -> None:
+        self._using_local_fallback = False
+        self._session_default_fallback = False
+        self._last_fallback_reason = None
+        self._fallback_player.request_refresh()
         self.engine.configure_output(self.engine._desired_output_device, locked=False)
         self.engine.call("player.request_refresh", timeout=5.0)
+
+    def _play_local_fallback(
+        self,
+        path: Path,
+        volume: float,
+        selected: int | None,
+        *,
+        allow_system_default: bool,
+        cancel_check: Callable[[], bool] | None,
+        reason: str,
+    ) -> bool:
+        candidates = [selected]
+        if allow_system_default and selected is not None:
+            candidates.append(None)
+        last_error: Exception | None = None
+        for candidate in candidates:
+            try:
+                self._fallback_player.set_output_device(candidate)
+                played = self._fallback_player.play_file(
+                    Path(path), volume, candidate, cancel_check=cancel_check
+                )
+                if played:
+                    self._using_local_fallback = True
+                    self._session_default_fallback = candidate is None and selected is not None
+                    self._last_fallback_reason = reason
+                    LOGGER.warning(
+                        "Audio playback recovered through %s fallback after isolated Audio Engine failure: %s",
+                        "Windows system default" if candidate is None else f"local device {candidate}",
+                        reason,
+                    )
+                    return True
+                return False
+            except Exception as exc:
+                last_error = exc
+                LOGGER.warning(
+                    "Local audio fallback failed on %s: %s",
+                    "Windows system default" if candidate is None else f"device {candidate}",
+                    exc,
+                )
+        raise AudioEngineUnavailable(
+            f"Audio Engine playback failed ({reason}); local fallback also failed: {last_error}"
+        )
 
     def play_file(
         self,
@@ -1225,17 +1297,47 @@ class AudioPlayerProxy:
         output_device: int | None = None,
         cancel_check: Callable[[], bool] | None = None,
     ) -> bool:
+        explicit_device = output_device is not None
         selected = self.engine._desired_output_device if output_device is None else output_device
+
+        # Once a stale saved endpoint has been proven unusable and the Windows
+        # default successfully played, stay on that safe session fallback until
+        # the user explicitly selects/refreshes a device. Do not persist the
+        # automatic fallback; it is intentionally reversible.
+        if self._session_default_fallback and not explicit_device:
+            return self._play_local_fallback(
+                Path(path),
+                volume,
+                None,
+                allow_system_default=False,
+                cancel_check=cancel_check,
+                reason=self._last_fallback_reason or "previous speaker recovery",
+            )
+
         self.engine.configure_output(selected, locked=True)
+        last_error: AudioEngineUnavailable | None = None
 
         for attempt in range(2):
             current = self.engine._desired_output_device
-            pending = self.engine.submit(
-                "player.play_file",
-                Path(path),
-                volume,
-                current,
-            )
+            try:
+                pending = self.engine.submit(
+                    "player.play_file",
+                    Path(path),
+                    volume,
+                    current,
+                )
+            except AudioEngineUnavailable as exc:
+                last_error = exc
+                if attempt == 0:
+                    try:
+                        self.engine.recover_devices(
+                            f"speaker command could not start: {exc}", attempts=4
+                        )
+                        continue
+                    except Exception as recovery_exc:
+                        last_error = AudioEngineUnavailable(str(recovery_exc))
+                break
+
             deadline = time.monotonic() + 600.0
             cancel_sent = False
             try:
@@ -1258,6 +1360,8 @@ class AudioPlayerProxy:
                     with self.engine._pending_lock:
                         self.engine._pending.pop(pending.request_id, None)
                     if response.get("ok"):
+                        self._using_local_fallback = False
+                        self._last_fallback_reason = None
                         return bool(response.get("result"))
                     error = dict(response.get("error") or {})
                     raise AudioEngineUnavailable(
@@ -1268,12 +1372,26 @@ class AudioPlayerProxy:
                     self.engine._pending.pop(pending.request_id, None)
                 if cancel_sent or (cancel_check is not None and cancel_check()):
                     return False
-                if attempt:
-                    raise
-                self.engine.recover_devices(
-                    f"speaker playback failed: {first_error}", attempts=4
-                )
-        return False
+                last_error = first_error
+                if attempt == 0:
+                    try:
+                        self.engine.recover_devices(
+                            f"speaker playback failed: {first_error}", attempts=4
+                        )
+                        continue
+                    except Exception as recovery_exc:
+                        last_error = AudioEngineUnavailable(str(recovery_exc))
+                break
+
+        reason = str(last_error or "isolated Audio Engine playback failed")
+        return self._play_local_fallback(
+            Path(path),
+            volume,
+            selected,
+            allow_system_default=not explicit_device,
+            cancel_check=cancel_check,
+            reason=reason,
+        )
 
     def close(self) -> None:
         try:
@@ -1281,3 +1399,8 @@ class AudioPlayerProxy:
             self.engine.call("player.close", timeout=5.0)
         except Exception:
             pass
+        try:
+            self._fallback_player.close()
+        except Exception:
+            pass
+        self._using_local_fallback = False

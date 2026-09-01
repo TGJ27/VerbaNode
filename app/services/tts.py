@@ -483,6 +483,10 @@ class TtsService:
                 if played:
                     self._last_error = None
                 return played
+            except Exception as exc:
+                self._last_error = f"Audio playback failed: {exc}"
+                LOGGER.error("TTS audio playback failed after synthesis: %s", exc)
+                raise
             finally:
                 self._current_text = ""
                 self._current_provider = ""

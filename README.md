@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.12.0 completes Hybrid RAG Phase 7: Web and Android now manage the single Knowledge Library system end-to-end, and dense E5/HNSW finalization runs in the background instead of holding Core in `Starting`. BM25 is usable immediately, migrated legacy entries appear as normal Knowledge documents, and no VLM is used. The matching mobile management client is Android v0.4.0.
+> **Project status:** active development. v0.12.1 hardens the shared Windows audio-output path used by TTS, Scripts, Type-to-Talk, and Audio Library. If the isolated Audio Engine or a stale saved speaker endpoint cannot play after normal recovery, VerbaNode can fall back to an in-process player and, for ordinary shared playback, the Windows system-default output. Hybrid RAG Phase 7 remains complete; no VLM is used.
 
 ---
 
@@ -96,6 +96,13 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.12.1 Windows audio playback recovery**
+  - Adds a dormant in-process speaker fallback when isolated Audio Engine playback remains unavailable after recovery.
+  - Ordinary shared playback can fall back to the Windows system-default output when a saved endpoint still enumerates but cannot actually open.
+  - Explicit speaker tests never silently switch devices, keeping diagnostics truthful.
+  - TTS status now records playback-layer failures after synthesis instead of only provider-generation failures.
+  - No database migration and no Android API change.
 
 - **v0.12.0 Knowledge management and production hardening**
   - Dense E5/HNSW finalization runs after Core becomes ready; it no longer blocks launcher health during startup.

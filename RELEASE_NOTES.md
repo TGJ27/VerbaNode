@@ -1,39 +1,24 @@
-# VerbaNode v0.12.0 — Hybrid RAG Knowledge Management & Hardening
+# VerbaNode v0.12.1 — Windows Audio Playback Recovery
 
-v0.12.0 completes **Hybrid RAG Phase 7**. The single Knowledge Engine introduced across Phases 1–6 now has full day-to-day management surfaces, and dense-index work no longer blocks Core startup.
+v0.12.1 is a focused Core hotfix for a shared Windows speaker failure that can silence TTS, Scripts, Type-to-Talk, and Audio Library at the same time.
 
-## Core startup fix
+## Shared playback recovery
 
-- Phase-6 E5/HNSW finalization is no longer awaited inside FastAPI startup.
-- Core/launcher health becomes available after the normal Core/Audio/AI startup path instead of waiting for Knowledge embeddings/index rebuilds.
-- BM25/FTS knowledge is immediately available while dense indexing continues as a background task.
-- Knowledge status reports total/completed/current-library progress and broadcasts completion/failure.
+- Normal playback still prefers the isolated Audio Engine and its existing device refresh/restart recovery.
+- If that path remains unavailable, Core can use a dormant in-process `HostAudioPlayer` as a last-resort playback path.
+- If the saved Windows speaker ID still exists but cannot actually be opened, ordinary shared playback may retry through the Windows system-default output for the current session.
+- Once the system-default fallback succeeds, subsequent shared playback stays on that safe session fallback until the user explicitly selects or refreshes an output device.
+- The fallback is session-only and does not silently overwrite the user's saved speaker preference.
 
-## Knowledge management
+## Diagnostics integrity
 
-- Full Web library and document management with fixed-view pagination (no new nested/page scrolling).
-- Create/edit manual text knowledge, including migrated legacy text entries.
-- Upload mixed document files to a selected library for the existing Phase-2 ingestion pipeline.
-- Inspect normalized parent/chunk content and source metadata.
-- Download an original stored source when one exists.
-- Delete/reindex individual documents or rebuild a selected/all Knowledge index.
-- Run retrieval tests and inspect confidence/top sources before relying on the result in Chat/Voice.
-- Agent editors continue to assign explicit Knowledge Libraries.
-
-## Indexing behavior
-
-- Manual text is normalized and made BM25-searchable immediately.
-- Dense E5/HNSW indexing is queued in the background so saving text does not synchronously load/download the embedding model.
-- Dense failures remain isolated; lexical/table retrieval continues to work.
-
-## Mobile/API
-
-- `/api/client-info` now advertises Knowledge management, text-document editing, and background-indexing capabilities for Android v0.4.0.
-- Added authenticated text-document create/update and original-source endpoints on the existing `/api/knowledge/*` surface.
-- No VLM is introduced.
+- Explicit **Test Output** requests remain strict: a test for device N never succeeds by secretly playing through another device.
+- Player health reports whether local/system-default fallback is active and why it was entered.
+- TTS `last_error` now includes speaker/playback failures that occur after synthesis succeeds.
 
 ## Compatibility
 
-- Database schema remains **v14**; no new migration is required from v0.11.1.
-- Hybrid RAG Chat/Voice behavior from v0.11.0 and legacy migration/retirement from v0.11.1 remain intact.
-- Android v0.4.0 is the matching full Knowledge-management client; older Android builds can still use non-Knowledge functions but do not satisfy the new v0.4.0 capability check.
+- Database schema remains **v14**; no migration is required from v0.12.0.
+- Hybrid RAG Phase 7 behavior remains unchanged.
+- No Android API change is required.
+- No VLM is introduced.
