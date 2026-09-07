@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.12.1 hardens the shared Windows audio-output path used by TTS, Scripts, Type-to-Talk, and Audio Library. If the isolated Audio Engine or a stale saved speaker endpoint cannot play after normal recovery, VerbaNode can fall back to an in-process player and, for ordinary shared playback, the Windows system-default output. Hybrid RAG Phase 7 remains complete; no VLM is used.
+> **Project status:** active development. v0.12.2 adds a versioned mobile contract manifest so Android can validate REST routes, API/WebSocket versions, auth/pairing fields, session headers, and protocol close codes before using a Core instance. REST API v1, WebSocket protocol v1, database schema v14, Hybrid RAG Phase 7, and the v0.12.1 Windows audio-recovery behavior remain unchanged.
 
 ---
 
@@ -96,6 +96,13 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.12.2 Mobile contract hardening**
+  - Publishes a versioned `mobile_contract` manifest through `/api/client-info`.
+  - Declares the complete Android method/path set plus API/WS versions, session header, auth/pairing schemas, and WebSocket close codes.
+  - Regression-tests the advertised mobile operations against Core's actual FastAPI routes and request models.
+  - Enables Android v0.4.7+ to fail before authentication when a future Core change breaks the mobile contract.
+  - Keeps API v1, WS v1, schema v14, Hybrid RAG behavior, and existing clients compatible.
 
 - **v0.12.1 Windows audio playback recovery**
   - Adds a dormant in-process speaker fallback when isolated Audio Engine playback remains unavailable after recovery.

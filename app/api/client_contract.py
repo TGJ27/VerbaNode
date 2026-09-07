@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.api.protocol import API_VERSION, MIN_API_VERSION, PROTOCOL_VERSION
+from app.api.protocol import (
+    API_VERSION,
+    MIN_API_VERSION,
+    PROTOCOL_VERSION,
+    WS_CLOSE_HEARTBEAT_TIMEOUT,
+    WS_CLOSE_ORIGIN_REJECTED,
+    WS_CLOSE_PROTOCOL_UNSUPPORTED,
+    WS_CLOSE_UNAUTHORIZED,
+)
 from app.config import get_settings
 from app.migrations import CURRENT_SCHEMA_VERSION
 from app.services.backup import BACKUP_FORMAT_VERSION
@@ -12,6 +20,168 @@ from app.version import APP_VERSION, BUILD_LABEL
 CLIENT_INFO_VERSION = 1
 SESSION_HEADER = "X-Session-Token"
 CONTROLLER_POLICY = "single_active_controller"
+MOBILE_CONTRACT_VERSION = 1
+
+
+
+def mobile_contract_manifest() -> dict[str, Any]:
+    """Machine-readable contract consumed by the Android client.
+
+    Core CI verifies every declared method/path against FastAPI routes. Android
+    validates this manifest before sending credentials so route/schema drift
+    fails explicitly instead of surfacing later as unrelated network errors.
+    """
+    from app.schemas import DeviceLoginRequest, LoginRequest, PairingClaimRequest, PairingStartRequest
+
+    return {
+        "contract_version": MOBILE_CONTRACT_VERSION,
+        "api_version": API_VERSION,
+        "minimum_api_version": MIN_API_VERSION,
+        "websocket_protocol_version": PROTOCOL_VERSION,
+        "session_header": SESSION_HEADER,
+        "websocket_endpoint": "/ws",
+        "websocket_ticket_endpoint": "/api/auth/ws-ticket",
+        "endpoints": {
+        'client_info': {"method": 'GET', "path": '/api/client-info'},
+        'auth_login': {"method": 'POST', "path": '/api/auth/login'},
+        'auth_device_login': {"method": 'POST', "path": '/api/auth/device-login'},
+        'auth_logout': {"method": 'POST', "path": '/api/auth/logout'},
+        'auth_ws_ticket': {"method": 'POST', "path": '/api/auth/ws-ticket'},
+        'bootstrap': {"method": 'GET', "path": '/api/bootstrap'},
+        'status': {"method": 'GET', "path": '/api/status'},
+        'pipeline': {"method": 'GET', "path": '/api/pipeline'},
+        'capabilities': {"method": 'GET', "path": '/api/capabilities'},
+        'actions': {"method": 'GET', "path": '/api/actions'},
+        'agents_list': {"method": 'GET', "path": '/api/agents'},
+        'agents_create': {"method": 'POST', "path": '/api/agents'},
+        'agent_update': {"method": 'PUT', "path": '/api/agents/{agent_id}'},
+        'agent_delete': {"method": 'DELETE', "path": '/api/agents/{agent_id}'},
+        'agent_activate': {"method": 'POST', "path": '/api/agents/{agent_id}/activate'},
+        'agent_memory_clear': {"method": 'DELETE', "path": '/api/agents/{agent_id}/memory'},
+        'agent_backup': {"method": 'GET', "path": '/api/agents/{agent_id}/backup'},
+        'conversation_create': {"method": 'POST', "path": '/api/conversations'},
+        'conversation_get': {"method": 'GET', "path": '/api/conversations/{conversation_id}'},
+        'conversation_clear': {"method": 'DELETE', "path": '/api/conversations/{conversation_id}/messages'},
+        'agent_conversations': {"method": 'GET', "path": '/api/agents/{agent_id}/conversations'},
+        'chat_send': {"method": 'POST', "path": '/api/chat/send'},
+        'conversation_mode_start': {"method": 'POST', "path": '/api/conversation/start'},
+        'conversation_mode_stop': {"method": 'POST', "path": '/api/conversation/stop'},
+        'conversation_settings': {"method": 'PUT', "path": '/api/conversation/settings'},
+        'browser_ptt_start': {"method": 'POST', "path": '/api/browser-ptt/start'},
+        'browser_ptt_audio': {"method": 'POST', "path": '/api/browser-ptt/audio'},
+        'browser_ptt_cancel': {"method": 'POST', "path": '/api/browser-ptt/cancel'},
+        'tts_stop': {"method": 'POST', "path": '/api/tts/stop'},
+        'devices_list': {"method": 'GET', "path": '/api/devices'},
+        'pairing_start': {"method": 'POST', "path": '/api/devices/pairing/start'},
+        'pairing_claim': {"method": 'POST', "path": '/api/pairing/claim'},
+        'device_rename': {"method": 'PATCH', "path": '/api/devices/{device_id}'},
+        'device_revoke': {"method": 'POST', "path": '/api/devices/{device_id}/revoke'},
+        'device_delete': {"method": 'DELETE', "path": '/api/devices/{device_id}'},
+        'knowledge_status': {"method": 'GET', "path": '/api/knowledge/status'},
+        'knowledge_libraries_list': {"method": 'GET', "path": '/api/knowledge/libraries'},
+        'knowledge_library_create': {"method": 'POST', "path": '/api/knowledge/libraries'},
+        'knowledge_library_update': {"method": 'PUT', "path": '/api/knowledge/libraries/{library_id}'},
+        'knowledge_library_delete': {"method": 'DELETE', "path": '/api/knowledge/libraries/{library_id}'},
+        'knowledge_documents_list': {"method": 'GET', "path": '/api/knowledge/documents'},
+        'knowledge_document_content': {"method": 'GET', "path": '/api/knowledge/documents/{document_id}/content'},
+        'knowledge_text_create': {"method": 'POST', "path": '/api/knowledge/libraries/{library_id}/text-documents'},
+        'knowledge_text_update': {"method": 'PUT', "path": '/api/knowledge/documents/{document_id}/text'},
+        'knowledge_document_delete': {"method": 'DELETE', "path": '/api/knowledge/documents/{document_id}'},
+        'knowledge_document_reindex': {"method": 'POST', "path": '/api/knowledge/documents/{document_id}/reindex'},
+        'knowledge_index_rebuild': {"method": 'POST', "path": '/api/knowledge/index/rebuild'},
+        'knowledge_search': {"method": 'POST', "path": '/api/knowledge/search'},
+        'knowledge_document_upload': {"method": 'POST', "path": '/api/knowledge/libraries/{library_id}/documents'},
+        'script_defaults_get': {"method": 'GET', "path": '/api/scripts/defaults'},
+        'script_defaults_put': {"method": 'PUT', "path": '/api/scripts/defaults'},
+        'scripts_list': {"method": 'GET', "path": '/api/scripts'},
+        'script_create': {"method": 'POST', "path": '/api/scripts'},
+        'script_update': {"method": 'PUT', "path": '/api/scripts/{script_id}'},
+        'script_delete': {"method": 'DELETE', "path": '/api/scripts/{script_id}'},
+        'script_queue': {"method": 'POST', "path": '/api/scripts/{script_id}/queue'},
+        'script_run_now': {"method": 'POST', "path": '/api/scripts/{script_id}/run-now'},
+        'queue_get': {"method": 'GET', "path": '/api/queue'},
+        'queue_clear': {"method": 'DELETE', "path": '/api/queue'},
+        'queue_play': {"method": 'POST', "path": '/api/queue/play'},
+        'queue_pause': {"method": 'POST', "path": '/api/queue/pause'},
+        'queue_stop': {"method": 'POST', "path": '/api/queue/stop'},
+        'queue_item_delete': {"method": 'DELETE', "path": '/api/queue/{queue_id}'},
+        'queue_reorder': {"method": 'PUT', "path": '/api/queue/reorder'},
+        'queue_settings': {"method": 'PUT', "path": '/api/queue/settings'},
+        'queue_item_patch': {"method": 'PATCH', "path": '/api/queue/{queue_id}'},
+        'type_to_talk_get': {"method": 'GET', "path": '/api/type-to-talk'},
+        'type_to_talk_add': {"method": 'POST', "path": '/api/type-to-talk'},
+        'type_to_talk_clear': {"method": 'DELETE', "path": '/api/type-to-talk'},
+        'type_to_talk_settings': {"method": 'PATCH', "path": '/api/type-to-talk/settings'},
+        'type_to_talk_play': {"method": 'POST', "path": '/api/type-to-talk/play'},
+        'type_to_talk_stop': {"method": 'POST', "path": '/api/type-to-talk/stop'},
+        'type_to_talk_item_delete': {"method": 'DELETE', "path": '/api/type-to-talk/{item_id}'},
+        'type_to_talk_reorder': {"method": 'PUT', "path": '/api/type-to-talk/reorder'},
+        'plugins_get': {"method": 'GET', "path": '/api/plugins'},
+        'plugin_set': {"method": 'PUT', "path": '/api/plugins/{plugin_id}'},
+        'plugins_reload': {"method": 'POST', "path": '/api/plugins/reload'},
+        'plugin_reload': {"method": 'POST', "path": '/api/plugins/{plugin_id}/reload'},
+        'plugin_recover': {"method": 'POST', "path": '/api/plugins/{plugin_id}/recover'},
+        'plugins_reset_metrics': {"method": 'POST', "path": '/api/plugins/reset-metrics'},
+        'plugin_reset_metrics': {"method": 'POST', "path": '/api/plugins/{plugin_id}/reset-metrics'},
+        'models_list': {"method": 'GET', "path": '/api/models'},
+        'model_pull': {"method": 'POST', "path": '/api/models/pull/{model:path}'},
+        'ai_restart': {"method": 'POST', "path": '/api/ai/restart-engine'},
+        'ai_reload_asr': {"method": 'POST', "path": '/api/ai/reload-asr'},
+        'ai_reload_kokoro': {"method": 'POST', "path": '/api/ai/reload-kokoro'},
+        'audio_devices': {"method": 'GET', "path": '/api/audio/devices'},
+        'audio_refresh': {"method": 'POST', "path": '/api/audio/refresh'},
+        'audio_restart': {"method": 'POST', "path": '/api/audio/restart-engine'},
+        'audio_test_input': {"method": 'POST', "path": '/api/audio/test-input'},
+        'audio_test_output': {"method": 'POST', "path": '/api/audio/test-output'},
+        'audio_test_duplex_lock': {"method": 'POST', "path": '/api/audio/test-duplex-lock'},
+        'audio_library_get': {"method": 'GET', "path": '/api/audio-library'},
+        'audio_library_upload': {"method": 'POST', "path": '/api/audio-library/upload'},
+        'audio_library_play': {"method": 'POST', "path": '/api/audio-library/{name:path}/play'},
+        'audio_library_stop': {"method": 'POST', "path": '/api/audio-library/stop'},
+        'audio_library_rename': {"method": 'PATCH', "path": '/api/audio-library/{name:path}'},
+        'audio_library_delete': {"method": 'DELETE', "path": '/api/audio-library/{name:path}'},
+        'diagnostics_get': {"method": 'GET', "path": '/api/diagnostics'},
+        'diagnostics_self_test': {"method": 'POST', "path": '/api/diagnostics/self-test'},
+        'diagnostics_logs_clear': {"method": 'DELETE', "path": '/api/diagnostics/logs'},
+        'diagnostics_turns_clear': {"method": 'DELETE', "path": '/api/diagnostics/turns'},
+        'diagnostics_export': {"method": 'GET', "path": '/api/diagnostics/export'},
+        'backup_status': {"method": 'GET', "path": '/api/backup/status'},
+        'backup_download': {"method": 'GET', "path": '/api/backup'},
+        'backup_restore': {"method": 'POST', "path": '/api/restore'},
+        'configuration_options': {"method": 'GET', "path": '/api/configuration-options'},
+        'tts_edge_voices': {"method": 'GET', "path": '/api/tts/edge-voices'},
+        },
+        "request_fields": {
+            "auth_login": list(LoginRequest.model_fields),
+            "auth_device_login": list(DeviceLoginRequest.model_fields),
+            "pairing_start": list(PairingStartRequest.model_fields),
+            "pairing_claim": list(PairingClaimRequest.model_fields),
+        },
+        "response_fields": {
+            "auth_grant": [
+                "token", "server_version", "api_version", "websocket_protocol_version",
+                "heartbeat_interval_seconds", "heartbeat_timeout_seconds", "session",
+            ],
+            "ws_ticket": ["ticket"],
+            "pairing_start": [
+                "pairing_id", "short_code", "server_url", "certificate_fingerprint_sha256",
+                "certificate_spki_sha256", "expires_in_seconds", "claimed", "claimed_device_id",
+                "claimed_at", "pairing_uri", "qr_endpoint",
+            ],
+            "pairing_claim": [
+                "status", "device_id", "device_token", "device_name", "server_url",
+                "certificate_fingerprint_sha256", "certificate_spki_sha256",
+            ],
+            "bootstrap": ["agents", "messages", "mode"],
+            "devices": ["devices"],
+        },
+        "websocket_close_codes": {
+            "unauthorized": WS_CLOSE_UNAUTHORIZED,
+            "origin_rejected": WS_CLOSE_ORIGIN_REJECTED,
+            "protocol_unsupported": WS_CLOSE_PROTOCOL_UNSUPPORTED,
+            "heartbeat_timeout": WS_CLOSE_HEARTBEAT_TIMEOUT,
+        },
+    }
 
 
 def feature_manifest() -> dict[str, Any]:
@@ -154,13 +324,16 @@ def client_info_payload(*, instance_id: str | None = None, instance_name: str | 
             "pairing_claim": "/api/pairing/claim",
         },
         "features": feature_manifest(),
+        "mobile_contract": mobile_contract_manifest(),
     }
 
 
 __all__ = [
     "CLIENT_INFO_VERSION",
     "CONTROLLER_POLICY",
+    "MOBILE_CONTRACT_VERSION",
     "SESSION_HEADER",
     "client_info_payload",
+    "mobile_contract_manifest",
     "feature_manifest",
 ]

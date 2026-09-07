@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.12.2 - Mobile contract hardening
+
+- Added a versioned `mobile_contract` manifest to `/api/client-info` for Core ↔ Android compatibility negotiation.
+- Declared the full Android REST operation set, API/WebSocket versions, session header, WebSocket paths, critical request/response fields, and protocol close codes.
+- Added regression tests that compare all advertised mobile operations against the actual FastAPI route table and authoritative request models.
+- Keeps REST API v1, WebSocket protocol v1, database schema v14, Hybrid RAG Phase 7, and existing client compatibility unchanged.
+
 ## v0.12.1 - Windows audio playback recovery
 
 - Added a last-resort in-process HostAudioPlayer fallback when isolated Audio Engine playback remains unavailable after the normal restart/device-recovery path.

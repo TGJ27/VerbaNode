@@ -1,24 +1,27 @@
-# VerbaNode v0.12.1 — Windows Audio Playback Recovery
+# VerbaNode v0.12.2 — Mobile Contract Hardening
 
-v0.12.1 is a focused Core hotfix for a shared Windows speaker failure that can silence TTS, Scripts, Type-to-Talk, and Audio Library at the same time.
+v0.12.2 adds an explicit, machine-readable Core ↔ Android compatibility contract while preserving the existing REST API v1 and WebSocket protocol v1 behavior.
 
-## Shared playback recovery
+## Mobile contract manifest
 
-- Normal playback still prefers the isolated Audio Engine and its existing device refresh/restart recovery.
-- If that path remains unavailable, Core can use a dormant in-process `HostAudioPlayer` as a last-resort playback path.
-- If the saved Windows speaker ID still exists but cannot actually be opened, ordinary shared playback may retry through the Windows system-default output for the current session.
-- Once the system-default fallback succeeds, subsequent shared playback stays on that safe session fallback until the user explicitly selects or refreshes an output device.
-- The fallback is session-only and does not silently overwrite the user's saved speaker preference.
+- `/api/client-info` now publishes a versioned `mobile_contract` manifest for Android clients.
+- The manifest declares the supported API range, WebSocket protocol, session header, WebSocket paths, and the complete mobile REST operation set.
+- The current manifest contains 108 method/path operation specifications, including dynamic endpoint templates.
+- Critical auth, trusted-device, pairing, bootstrap, and WebSocket request/response field requirements are advertised explicitly.
+- WebSocket close codes for unauthorized sessions, rejected origins, unsupported protocols, and heartbeat timeouts are part of the advertised contract.
 
-## Diagnostics integrity
+## Contract regression protection
 
-- Explicit **Test Output** requests remain strict: a test for device N never succeeds by secretly playing through another device.
-- Player health reports whether local/system-default fallback is active and why it was entered.
-- TTS `last_error` now includes speaker/playback failures that occur after synthesis succeeds.
+- Core tests verify that every advertised mobile operation resolves to a real FastAPI route with the same HTTP method.
+- Critical request field sets are checked against the authoritative Pydantic models.
+- Client-info integration is tested so the published manifest cannot silently disappear.
+- Android can reject incompatible Core changes before sending credentials or opening a long-lived WebSocket session.
 
 ## Compatibility
 
-- Database schema remains **v14**; no migration is required from v0.12.0.
-- Hybrid RAG Phase 7 behavior remains unchanged.
-- No Android API change is required.
-- No VLM is introduced.
+- REST API remains version 1.
+- WebSocket protocol remains version 1.
+- Database schema remains v14; no migration is required from v0.12.1.
+- Existing clients that ignore the new `mobile_contract` field remain compatible.
+- VerbaNode Android v0.4.7+ uses this manifest as a required compatibility boundary.
+- Hybrid RAG Phase 7 and Windows audio-recovery behavior remain unchanged.

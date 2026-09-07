@@ -1,2 +1,2 @@
-APP_VERSION = "0.12.1"
+APP_VERSION = "0.12.2"
 BUILD_LABEL = "local-mobile"
