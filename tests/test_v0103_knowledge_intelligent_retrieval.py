@@ -73,7 +73,7 @@ def _ingest(engine: KnowledgeEngine, library_id: int, source: Path, mime: str | 
 
 def test_phase4_status_manifest_and_schema(tmp_path: Path) -> None:
     db, engine, _library = _build(tmp_path)
-    assert APP_VERSION == "0.12.2"
+    assert APP_VERSION == "0.12.3"
     assert CURRENT_SCHEMA_VERSION >= 14
     assert db.schema_version() == CURRENT_SCHEMA_VERSION
 

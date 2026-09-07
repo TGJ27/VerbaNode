@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.12.2 adds a versioned mobile contract manifest so Android can validate REST routes, API/WebSocket versions, auth/pairing fields, session headers, and protocol close codes before using a Core instance. REST API v1, WebSocket protocol v1, database schema v14, Hybrid RAG Phase 7, and the v0.12.1 Windows audio-recovery behavior remain unchanged.
+> **Project status:** active development. v0.12.3 extends the versioned mobile contract with Knowledge re-ingestion, ingestion-job monitoring, and dedicated agent-library assignment operations for Android v0.5.0. REST API v1, WebSocket protocol v1, database schema v14, Hybrid RAG Phase 7, and existing clients remain unchanged.
 
 ---
 
@@ -96,6 +96,11 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Optional component/model setup with existing-model detection
   - Start Menu / Desktop shortcuts
   - Uninstall support
+
+- **v0.12.3 Knowledge mobile contract expansion**
+  - Advertises Knowledge re-ingestion, ingestion-job monitoring, and dedicated per-agent library assignment routes to Android.
+  - Adds authoritative `library_ids` request-field negotiation for Knowledge permission updates.
+  - Keeps mobile contract format v1, API v1, WS v1, schema v14, and the existing Knowledge engine unchanged.
 
 - **v0.12.2 Mobile contract hardening**
   - Publishes a versioned `mobile_contract` manifest through `/api/client-info`.

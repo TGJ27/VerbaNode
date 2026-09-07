@@ -31,7 +31,13 @@ def mobile_contract_manifest() -> dict[str, Any]:
     validates this manifest before sending credentials so route/schema drift
     fails explicitly instead of surfacing later as unrelated network errors.
     """
-    from app.schemas import DeviceLoginRequest, LoginRequest, PairingClaimRequest, PairingStartRequest
+    from app.schemas import (
+        AgentKnowledgeLibrariesUpdate,
+        DeviceLoginRequest,
+        LoginRequest,
+        PairingClaimRequest,
+        PairingStartRequest,
+    )
 
     return {
         "contract_version": MOBILE_CONTRACT_VERSION,
@@ -88,6 +94,10 @@ def mobile_contract_manifest() -> dict[str, Any]:
         'knowledge_text_update': {"method": 'PUT', "path": '/api/knowledge/documents/{document_id}/text'},
         'knowledge_document_delete': {"method": 'DELETE', "path": '/api/knowledge/documents/{document_id}'},
         'knowledge_document_reindex': {"method": 'POST', "path": '/api/knowledge/documents/{document_id}/reindex'},
+        'knowledge_document_reingest': {"method": 'POST', "path": '/api/knowledge/documents/{document_id}/reingest'},
+        'knowledge_jobs': {"method": 'GET', "path": '/api/knowledge/jobs'},
+        'knowledge_agent_libraries_get': {"method": 'GET', "path": '/api/knowledge/agents/{agent_id}/libraries'},
+        'knowledge_agent_libraries_set': {"method": 'PUT', "path": '/api/knowledge/agents/{agent_id}/libraries'},
         'knowledge_index_rebuild': {"method": 'POST', "path": '/api/knowledge/index/rebuild'},
         'knowledge_search': {"method": 'POST', "path": '/api/knowledge/search'},
         'knowledge_document_upload': {"method": 'POST', "path": '/api/knowledge/libraries/{library_id}/documents'},
@@ -156,6 +166,7 @@ def mobile_contract_manifest() -> dict[str, Any]:
             "auth_device_login": list(DeviceLoginRequest.model_fields),
             "pairing_start": list(PairingStartRequest.model_fields),
             "pairing_claim": list(PairingClaimRequest.model_fields),
+            "knowledge_agent_libraries_set": list(AgentKnowledgeLibrariesUpdate.model_fields),
         },
         "response_fields": {
             "auth_grant": [

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.12.3 - Knowledge mobile contract expansion
+
+- Added the existing Knowledge re-ingest, ingestion-job, and per-agent library-assignment routes to the machine-readable mobile contract.
+- Declared `library_ids` for dedicated agent Knowledge permission updates from the authoritative Pydantic schema.
+- Added contract regression coverage for Android Knowledge Management Phase 2.
+- Keeps REST API v1, WebSocket protocol v1, database schema v14, and Hybrid RAG behavior unchanged.
+
 ## v0.12.2 - Mobile contract hardening
 
 - Added a versioned `mobile_contract` manifest to `/api/client-info` for Core ↔ Android compatibility negotiation.
