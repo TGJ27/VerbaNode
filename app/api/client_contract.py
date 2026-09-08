@@ -37,6 +37,7 @@ def mobile_contract_manifest() -> dict[str, Any]:
         LoginRequest,
         PairingClaimRequest,
         PairingStartRequest,
+        RoleGenerateRequest,
     )
 
     return {
@@ -60,6 +61,7 @@ def mobile_contract_manifest() -> dict[str, Any]:
         'actions': {"method": 'GET', "path": '/api/actions'},
         'agents_list': {"method": 'GET', "path": '/api/agents'},
         'agents_create': {"method": 'POST', "path": '/api/agents'},
+        'agent_generate_role': {"method": 'POST', "path": '/api/agents/generate-role'},
         'agent_update': {"method": 'PUT', "path": '/api/agents/{agent_id}'},
         'agent_delete': {"method": 'DELETE', "path": '/api/agents/{agent_id}'},
         'agent_activate': {"method": 'POST', "path": '/api/agents/{agent_id}/activate'},
@@ -166,6 +168,7 @@ def mobile_contract_manifest() -> dict[str, Any]:
             "auth_device_login": list(DeviceLoginRequest.model_fields),
             "pairing_start": list(PairingStartRequest.model_fields),
             "pairing_claim": list(PairingClaimRequest.model_fields),
+            "agent_generate_role": list(RoleGenerateRequest.model_fields),
             "knowledge_agent_libraries_set": list(AgentKnowledgeLibrariesUpdate.model_fields),
         },
         "response_fields": {
@@ -174,6 +177,7 @@ def mobile_contract_manifest() -> dict[str, Any]:
                 "heartbeat_interval_seconds", "heartbeat_timeout_seconds", "session",
             ],
             "ws_ticket": ["ticket"],
+            "agent_generate_role": ["role", "system_prompt", "greeting"],
             "pairing_start": [
                 "pairing_id", "short_code", "server_url", "certificate_fingerprint_sha256",
                 "certificate_spki_sha256", "expires_in_seconds", "claimed", "claimed_device_id",

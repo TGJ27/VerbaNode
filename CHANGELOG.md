@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.12.4 - Agent mobile contract and CI hardening
+
+- Advertise the existing agent role-generation endpoint and critical request/response fields in mobile contract v1 for Android v0.5.1.
+- Validate mobile-contract routes against FastAPI OpenAPI output rather than internal route objects, including normalized path converters.
+- Update Windows CI setup actions while preserving REST API v1, WebSocket protocol v1, and database schema v14.
+
+
 ## v0.12.3 - Knowledge mobile contract expansion
 
 - Added the existing Knowledge re-ingest, ingestion-job, and per-agent library-assignment routes to the machine-readable mobile contract.

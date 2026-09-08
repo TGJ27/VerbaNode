@@ -96,7 +96,7 @@ def _ingest_text(
 
 def test_phase3_schema_manifest_and_status(tmp_path: Path) -> None:
     db, engine = _build(tmp_path)
-    assert APP_VERSION == "0.12.3"
+    assert APP_VERSION == "0.12.4"
     assert CURRENT_SCHEMA_VERSION >= 14
     assert db.schema_version() == CURRENT_SCHEMA_VERSION
 

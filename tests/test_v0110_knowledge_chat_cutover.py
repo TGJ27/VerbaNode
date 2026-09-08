@@ -131,7 +131,7 @@ def test_phase5_status_and_client_contract_cut_over_to_rag(tmp_path: Path) -> No
     db.initialize()
     engine = KnowledgeEngine(db, settings.knowledge_dir)
 
-    assert APP_VERSION == "0.12.3"
+    assert APP_VERSION == "0.12.4"
     status = engine.status()
     assert status["phase"] == "legacy_information_migrated"
     assert status["retrieval_chat_enabled"] is True

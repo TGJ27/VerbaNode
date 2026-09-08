@@ -1,17 +1,15 @@
-# VerbaNode v0.12.3 — Knowledge Mobile Contract Expansion
+# VerbaNode v0.12.4 — Agent Mobile Contract + CI Hardening
 
-v0.12.3 extends the existing Core ↔ Android mobile contract for Knowledge Management Phase 2 without changing REST API v1, WebSocket protocol v1, database schema v14, or Hybrid RAG behavior.
+## Mobile contract
 
-## Knowledge mobile operations
+- Advertises the existing `POST /api/agents/generate-role` operation in the versioned mobile contract for Android v0.5.1.
+- Declares its `description` / `model` request fields and `role` / `system_prompt` / `greeting` response fields.
+- Mobile contract format remains v1; REST API v1, WebSocket protocol v1, and database schema v14 are unchanged.
 
-- Advertises document re-ingestion through `POST /api/knowledge/documents/{document_id}/reingest`.
-- Advertises ingestion-job monitoring through `GET /api/knowledge/jobs`.
-- Advertises dedicated per-agent Knowledge Library read/update routes.
-- Declares the `library_ids` request field contract from the authoritative `AgentKnowledgeLibrariesUpdate` schema.
+## CI reliability
 
-## Compatibility
+- Makes the mobile-contract regression test validate real FastAPI operations through the generated OpenAPI schema instead of relying on framework-internal route objects.
+- Normalizes FastAPI path-converter syntax before comparing manifest paths to OpenAPI paths.
+- Updates the Windows CI checkout and Python setup actions to current Node-24-native majors.
 
-- Mobile contract format remains version 1; this is an additive operation-set expansion.
-- Existing Core clients remain compatible.
-- VerbaNode Android v0.5.0+ requires these advertised Knowledge Phase 2 operations.
-- No database migration is required.
+No database migration or Knowledge engine change is required.
