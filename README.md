@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.12.5 adds resilient same-LAN discovery for Android v0.5.2 by combining mDNS with credential-free active UDP discovery while preserving HTTPS identity verification. REST API v1, WebSocket protocol v1, database schema v14, Hybrid RAG Phase 7, and existing clients remain unchanged.
+> **Project status:** active development. v0.12.6 publishes a pinned Android mobile-contract fingerprint, expands sanitized diagnostics metadata/log redaction, and supports Android v0.5.3 release diagnostics while preserving REST API v1, WebSocket protocol v1, database schema v14, and Hybrid RAG behavior.
 
 ---
 
@@ -97,6 +97,11 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Start Menu / Desktop shortcuts
   - Uninstall support
 
+- **v0.12.6 Release + mobile diagnostics hardening**
+  - Publish a deterministic mobile-contract fingerprint in `/api/client-info` and Diagnostics.
+  - Advertise authenticated diagnostic-log reads to Android while preserving Core-side redaction.
+  - Redact Bearer credentials, pairing secrets and device tokens in addition to session tokens/PINs.
+  - Add a dedicated contract-fingerprint CI gate for Android/Core drift.
 - **v0.12.5 Connection + discovery hardening**
   - Keep `_verbanode._tcp.local.` mDNS and add versioned active UDP discovery on the private LAN.
   - Publish discovery transport metadata through `/api/client-info`; discovery payloads contain no credentials.

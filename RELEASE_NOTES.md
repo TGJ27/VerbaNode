@@ -1,15 +1,15 @@
-# VerbaNode v0.12.5 — Connection + Discovery Hardening
+# VerbaNode v0.12.6 — Release + Mobile Diagnostics Hardening
 
-## LAN discovery
+## Mobile compatibility
 
-- Keeps DNS-SD/mDNS advertisement on `_verbanode._tcp.local.`.
-- Adds active UDP discovery protocol v1 on the configured VerbaNode port (UDP 8002 by default).
-- Discovery responses expose only product/version/instance/API/WS/HTTPS-port/SPKI metadata. No PIN, session, device token, or pairing secret is transmitted.
-- Android v0.5.2 verifies every discovery hint against HTTPS `/api/client-info` and the presented certificate before it can be used for authenticated connection.
+- `/api/client-info` publishes a deterministic SHA-256 fingerprint of the complete mobile contract.
+- Core CI pins and verifies the fingerprint, so endpoint/schema drift cannot silently change the Android contract.
+- The existing authenticated diagnostics snapshot now includes Core/API/WebSocket/mobile-contract compatibility metadata.
+- `/api/diagnostics/logs` is explicitly advertised in the mobile contract for Android v0.5.3.
 
-## Windows networking
+## Diagnostics privacy
 
-- Development firewall helper now opens the configured VerbaNode port for both HTTPS TCP and active-discovery UDP on Private networks, while retaining mDNS UDP 5353.
-- The packaged installer remains executable-scoped and protocol-agnostic, so the VerbaNode executable can receive both TCP and UDP traffic on Private networks.
+- Core's in-memory diagnostics sanitizer now redacts Authorization Bearer values, pairing secrets and device tokens in addition to session tokens, PINs and content patterns.
+- The exported diagnostics ZIP remains Core-generated and excludes secrets, database content, conversations, certificates/private keys and model files.
 
 REST API v1, WebSocket protocol v1, mobile contract v1, and database schema v14 are unchanged.

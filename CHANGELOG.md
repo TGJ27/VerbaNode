@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.12.6 - Release and mobile diagnostics hardening
+
+- Added a deterministic SHA-256 fingerprint for the complete mobile contract and publish it through `/api/client-info`.
+- Added contract fingerprint/version metadata to authenticated diagnostics snapshots and advertised diagnostic log reads to Android.
+- Extended diagnostics redaction to Authorization Bearer values, pairing secrets, and device tokens.
+- Added an explicit CI fingerprint gate so contract drift requires an intentional synchronized Android/Core update.
+- REST API v1, WebSocket protocol v1, mobile contract v1, and database schema v14 remain unchanged.
+
 ## v0.12.5 - Connection and LAN discovery hardening
 
 - Added versioned active UDP discovery alongside the existing `_verbanode._tcp.local.` mDNS advertisement.

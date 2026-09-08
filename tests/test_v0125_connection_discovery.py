@@ -46,7 +46,7 @@ def test_active_discovery_response_contains_only_public_identity_fields() -> Non
     payload = build_active_discovery_response(
         instance_id="instance-123",
         instance_name="Studio PC",
-        version="0.12.5",
+        version="0.12.6",
         https_port=8002,
         api_version=1,
         ws_version=1,
@@ -57,7 +57,7 @@ def test_active_discovery_response_contains_only_public_identity_fields() -> Non
         "discovery_protocol": 1,
         "instance_id": "instance-123",
         "instance_name": "Studio PC",
-        "version": "0.12.5",
+        "version": "0.12.6",
         "https_port": 8002,
         "api_version": 1,
         "websocket_protocol_version": 1,
@@ -72,7 +72,7 @@ def test_udp_responder_answers_valid_request_and_stops(tmp_path: Path, monkeypat
     advertiser = LanDiscoveryAdvertiser(
         _settings(tmp_path),
         instance_id="instance-udp",
-        version="0.12.5",
+        version="0.12.6",
         api_version=1,
         ws_version=1,
     )

@@ -25,6 +25,9 @@ except Exception:  # pragma: no cover - diagnostics degrades gracefully
 _TOKEN_PATTERNS = (
     re.compile(r"([?&]token=)[^&\s]+", re.IGNORECASE),
     re.compile(r"(x-session-token\s*[:=]\s*)\S+", re.IGNORECASE),
+    re.compile(r"(authorization\s*[:=]\s*bearer\s+)\S+", re.IGNORECASE),
+    re.compile(r"(pairing\s+secret\s*[:=]\s*)\S+", re.IGNORECASE),
+    re.compile(r"(device[_ -]?token\s*[:=]\s*)\S+", re.IGNORECASE),
     re.compile(r"(\bpin\s*[:=]\s*)\S+", re.IGNORECASE),
 )
 _CONTENT_PATTERNS = (

@@ -20,5 +20,7 @@ jobs:
         run: python -m ruff check app scripts tests
       - name: Release invariants and syntax
         run: python scripts/release/verify_release.py
+      - name: Mobile contract fingerprint gate
+        run: python -m pytest -q tests/test_v0122_mobile_contract.py tests/test_v0126_release_diagnostics.py
       - name: Test
         run: python -m pytest -q

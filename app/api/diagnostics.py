@@ -9,10 +9,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from app.api.client_contract import MOBILE_CONTRACT_FINGERPRINT
 from app.api.deps import Token
 from app.api.plugins import plugin_payload
+from app.api.protocol import API_VERSION, PROTOCOL_VERSION
 from app.schemas import DiagnosticsSoakRequest
 from app.state import state
+from app.version import APP_VERSION, BUILD_LABEL
 
 LOGGER = logging.getLogger(__name__)
 router = APIRouter()
@@ -46,6 +49,14 @@ def diagnostics_snapshot() -> dict[str, Any]:
     )
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "compatibility": {
+            "server_version": APP_VERSION,
+            "build": BUILD_LABEL,
+            "api_version": API_VERSION,
+            "websocket_protocol_version": PROTOCOL_VERSION,
+            "mobile_contract_version": 1,
+            "mobile_contract_fingerprint": MOBILE_CONTRACT_FINGERPRINT,
+        },
         "environment": state.diagnostics.environment(),
         "resources": resources,
         "mode": state.conversation.mode,

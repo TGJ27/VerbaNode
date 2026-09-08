@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from app.api.protocol import (
@@ -153,6 +154,7 @@ def mobile_contract_manifest() -> dict[str, Any]:
         'audio_library_rename': {"method": 'PATCH', "path": '/api/audio-library/{name:path}'},
         'audio_library_delete': {"method": 'DELETE', "path": '/api/audio-library/{name:path}'},
         'diagnostics_get': {"method": 'GET', "path": '/api/diagnostics'},
+        'diagnostics_logs_get': {"method": 'GET', "path": '/api/diagnostics/logs'},
         'diagnostics_self_test': {"method": 'POST', "path": '/api/diagnostics/self-test'},
         'diagnostics_logs_clear': {"method": 'DELETE', "path": '/api/diagnostics/logs'},
         'diagnostics_turns_clear': {"method": 'DELETE', "path": '/api/diagnostics/turns'},
@@ -197,6 +199,36 @@ def mobile_contract_manifest() -> dict[str, Any]:
             "heartbeat_timeout": WS_CLOSE_HEARTBEAT_TIMEOUT,
         },
     }
+
+
+def _mobile_contract_canonical_text(manifest: dict[str, Any]) -> str:
+    lines = [
+        f"contract_version={int(manifest['contract_version'])}",
+        f"api_version={int(manifest['api_version'])}",
+        f"minimum_api_version={int(manifest['minimum_api_version'])}",
+        f"websocket_protocol_version={int(manifest['websocket_protocol_version'])}",
+        f"session_header={manifest['session_header']}",
+        f"websocket_endpoint={manifest['websocket_endpoint']}",
+        f"websocket_ticket_endpoint={manifest['websocket_ticket_endpoint']}",
+    ]
+    for name, spec in sorted(manifest.get("endpoints", {}).items()):
+        lines.append(f"endpoint.{name}={str(spec['method']).upper()} {spec['path']}")
+    for section in ("request_fields", "response_fields"):
+        for name, fields in sorted(manifest.get(section, {}).items()):
+            normalized = ",".join(sorted(str(field) for field in fields))
+            lines.append(f"{section}.{name}={normalized}")
+    for name, code in sorted(manifest.get("websocket_close_codes", {}).items()):
+        lines.append(f"close.{name}={int(code)}")
+    return "\n".join(lines) + "\n"
+
+
+def mobile_contract_fingerprint(manifest: dict[str, Any] | None = None) -> str:
+    payload = manifest if manifest is not None else mobile_contract_manifest()
+    canonical = _mobile_contract_canonical_text(payload).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+MOBILE_CONTRACT_FINGERPRINT = "d791c89f2bec5896127bfb4d2a274da82c5ed23c0c8b5009f088a428e74df49a"
 
 
 def feature_manifest() -> dict[str, Any]:
@@ -344,6 +376,7 @@ def client_info_payload(*, instance_id: str | None = None, instance_name: str | 
             "pairing_claim": "/api/pairing/claim",
         },
         "features": feature_manifest(),
+        "mobile_contract_fingerprint": MOBILE_CONTRACT_FINGERPRINT,
         "mobile_contract": mobile_contract_manifest(),
     }
 
@@ -352,8 +385,10 @@ __all__ = [
     "CLIENT_INFO_VERSION",
     "CONTROLLER_POLICY",
     "MOBILE_CONTRACT_VERSION",
+    "MOBILE_CONTRACT_FINGERPRINT",
     "SESSION_HEADER",
     "client_info_payload",
     "mobile_contract_manifest",
+    "mobile_contract_fingerprint",
     "feature_manifest",
 ]
