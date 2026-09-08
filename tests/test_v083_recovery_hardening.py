@@ -34,7 +34,7 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_v083_metadata_schema_identity_and_history(tmp_path: Path) -> None:
-    assert APP_VERSION == "0.12.4"
+    assert APP_VERSION == "0.12.5"
     assert BUILD_LABEL == "local-mobile"
     assert CURRENT_SCHEMA_VERSION >= 14
     assert BACKUP_FORMAT_VERSION == 3

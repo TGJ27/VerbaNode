@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_v084_metadata_and_public_client_contract() -> None:
-    assert APP_VERSION == "0.12.4"
+    assert APP_VERSION == "0.12.5"
     assert BUILD_LABEL == "local-mobile"
     assert API_VERSION == 1
     assert MIN_API_VERSION == 1
@@ -26,7 +26,7 @@ def test_v084_metadata_and_public_client_contract() -> None:
     payload = client_info_payload()
     assert payload["contract_version"] == 1
     assert payload["product"] == "VerbaNode"
-    assert payload["server"] == {"version": "0.12.4", "build": "local-mobile"}
+    assert payload["server"] == {"version": "0.12.5", "build": "local-mobile"}
     assert payload["api"]["version"] == 1
     assert payload["authentication"]["mode"] == "pin_or_trusted_device"
     assert payload["authentication"]["session_header"] == "X-Session-Token"
@@ -100,7 +100,7 @@ def test_api_responses_expose_client_compatibility_headers() -> None:
     client = TestClient(app)
     response = client.get("/api/example")
     assert response.status_code == 200
-    assert response.headers["X-VerbaNode-Version"] == "0.12.4"
+    assert response.headers["X-VerbaNode-Version"] == "0.12.5"
     assert response.headers["X-VerbaNode-API-Version"] == "1"
     assert response.headers["X-VerbaNode-WebSocket-Protocol"] == "1"
     assert response.headers["Cache-Control"] == "no-store"
@@ -132,16 +132,16 @@ def test_dashboard_is_split_into_ordered_client_modules() -> None:
     app_js = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
 
     tags = [
-        '/static/js/runtime.js?v=0.12.4',
-        '/static/js/client.js?v=0.12.4',
-        '/static/js/browser-ptt.js?v=0.12.4',
-        '/static/js/diagnostics.js?v=0.12.4',
-        '/static/app.js?v=0.12.4',
+        '/static/js/runtime.js?v=0.12.5',
+        '/static/js/client.js?v=0.12.5',
+        '/static/js/browser-ptt.js?v=0.12.5',
+        '/static/js/diagnostics.js?v=0.12.5',
+        '/static/app.js?v=0.12.5',
     ]
     positions = [index.index(tag) for tag in tags]
     assert positions == sorted(positions)
 
-    assert "const FRONTEND_VERSION = '0.12.4'" in runtime
+    assert "const FRONTEND_VERSION = '0.12.5'" in runtime
     assert "const CLIENT_API_VERSION = 1" in runtime
     assert "const WEBSOCKET_PROTOCOL_VERSION = 1" in runtime
     assert "async function api(" in client

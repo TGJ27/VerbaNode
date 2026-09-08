@@ -54,7 +54,7 @@ def test_phase7_management_contract_and_fixed_knowledge_workspace() -> None:
     js = (root / "app/static/js/knowledge.js").read_text(encoding="utf-8")
     features = feature_manifest()
 
-    assert APP_VERSION == "0.12.4"
+    assert APP_VERSION == "0.12.5"
     assert features["knowledge_management"] is True
     assert features["knowledge_background_indexing"] is True
     assert features["knowledge_text_documents"] is True
@@ -70,7 +70,7 @@ def test_phase7_management_contract_and_fixed_knowledge_workspace() -> None:
     assert 'id="knowledgeLibraryList"' in html
     assert 'id="knowledgeDocumentList"' in html
     assert 'id="knowledgeSearchInput"' in html
-    assert '/static/js/knowledge.js?v=0.12.4' in html
+    assert '/static/js/knowledge.js?v=0.12.5' in html
     assert '#page-knowledge.active { height:100%; overflow:hidden;' in css
     assert "knowledgePageSlice" in js
     assert "uploadKnowledgeFiles" in js

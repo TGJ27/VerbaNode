@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     port: int = 8002
     pin: str = "1234"
     lan_discovery_enabled: bool = True
+    lan_discovery_udp_port: int = Field(default=8002, ge=1, le=65535)
     mobile_pairing_ttl_seconds: int = Field(default=180, ge=60, le=900)
     db_path: Path = DATA_DIR / "verbanode.db"
     backup_path: Path = BACKUP_DIR

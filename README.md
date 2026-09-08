@@ -20,7 +20,7 @@ The project combines speech recognition, local LLM inference, text-to-speech, ag
 
 VerbaNode can run directly from source for development or as a packaged Windows application. The Windows application uses a small native launcher to start and monitor the backend and expose the HTTPS dashboard on the local computer and available LAN interfaces.
 
-> **Project status:** active development. v0.12.4 adds AI agent-role generation to the versioned mobile contract for Android v0.5.1 and hardens the contract regression test against FastAPI dependency differences. REST API v1, WebSocket protocol v1, database schema v14, Hybrid RAG Phase 7, and existing clients remain unchanged.
+> **Project status:** active development. v0.12.5 adds resilient same-LAN discovery for Android v0.5.2 by combining mDNS with credential-free active UDP discovery while preserving HTTPS identity verification. REST API v1, WebSocket protocol v1, database schema v14, Hybrid RAG Phase 7, and existing clients remain unchanged.
 
 ---
 
@@ -97,6 +97,10 @@ VerbaNode can run directly from source for development or as a packaged Windows 
   - Start Menu / Desktop shortcuts
   - Uninstall support
 
+- **v0.12.5 Connection + discovery hardening**
+  - Keep `_verbanode._tcp.local.` mDNS and add versioned active UDP discovery on the private LAN.
+  - Publish discovery transport metadata through `/api/client-info`; discovery payloads contain no credentials.
+  - Extend the Windows development firewall helper to allow the active UDP responder on the configured VerbaNode port.
 - **v0.12.4 Agent mobile contract + CI hardening**
   - Advertise AI role generation for Android v0.5.1 and verify the mobile manifest through OpenAPI across CI environments.
 - **v0.12.3 Knowledge mobile contract expansion**

@@ -43,8 +43,12 @@ async function loadTrustedDevices() {
   const status = $('#deviceDiscoveryStatus');
   if (status) {
     if (!discovery) status.textContent = 'Discovery status unavailable.';
-    else if (discovery.enabled) status.innerHTML = `<strong>mDNS active</strong><br>${escapeHtml(discovery.service_name || discovery.service_type)} · port ${Number(discovery.port || 0)}`;
-    else status.innerHTML = '<strong>mDNS not active</strong><br>Manual address connection still works.';
+    else if (discovery.enabled) {
+      const transports = [];
+      if (discovery.mdns_enabled) transports.push('mDNS');
+      if (discovery.active_udp_enabled) transports.push(`active UDP ${Number(discovery.active_udp_port || 0)}`);
+      status.innerHTML = `<strong>LAN discovery active</strong><br>${escapeHtml(transports.join(' + ') || 'available')} · HTTPS ${Number(discovery.port || 0)}`;
+    } else status.innerHTML = '<strong>LAN discovery not active</strong><br>Manual address connection still works.';
   }
 }
 

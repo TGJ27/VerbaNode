@@ -31,5 +31,5 @@ def test_diagnostics_cards_use_consistent_alignment() -> None:
     assert ".diagnostics-control-grid,.diagnostics-detail-grid" in css
     assert "align-items:stretch" in css
     assert ".diagnostic-compatibility-card" in css
-    assert APP_VERSION == "0.12.4"
+    assert APP_VERSION == "0.12.5"
     assert BUILD_LABEL == "local-mobile"

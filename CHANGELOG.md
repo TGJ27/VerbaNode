@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.12.5 - Connection and LAN discovery hardening
+
+- Added versioned active UDP discovery alongside the existing `_verbanode._tcp.local.` mDNS advertisement.
+- Active discovery exposes only public identity/compatibility metadata and never credentials.
+- `/api/client-info` now advertises active-discovery capability, port, and protocol version for Android v0.5.2.
+- Windows development firewall setup now permits the configured VerbaNode UDP discovery port on Private networks.
+- REST API v1, WebSocket protocol v1, database schema v14, and mobile contract v1 remain unchanged.
+
 ## v0.12.4 - Agent mobile contract and CI hardening
 
 - Advertise the existing agent role-generation endpoint and critical request/response fields in mobile contract v1 for Android v0.5.1.

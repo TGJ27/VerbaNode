@@ -231,6 +231,8 @@ def feature_manifest() -> dict[str, Any]:
         "device_revocation": True,
         "lan_discovery": True,
         "mdns_service_type": "_verbanode._tcp.local.",
+        "active_lan_discovery": True,
+        "active_lan_discovery_protocol_version": 1,
         "audio_library": True,
         "audio_library_formats": ["mp3", "mpeg", "mpg", "mpga", "mp2", "mpa", "wav", "flac", "ogg", "oga", "opus", "m4a", "aac", "wma", "aiff", "aif", "webm", "mka", "amr"],
         "configuration_options": True,
@@ -314,6 +316,9 @@ def client_info_payload(*, instance_id: str | None = None, instance_name: str | 
         "discovery": {
             "service_type": "_verbanode._tcp.local.",
             "enabled": bool(settings.lan_discovery_enabled),
+            "active_udp_enabled": bool(settings.lan_discovery_enabled),
+            "active_udp_port": int(settings.lan_discovery_udp_port),
+            "active_udp_protocol_version": 1,
         },
         "websocket": {
             "endpoint": "/ws",
